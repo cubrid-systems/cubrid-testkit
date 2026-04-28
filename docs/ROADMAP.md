@@ -176,7 +176,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 스텁 파일에 대응합니다.
 
 ### _overview (4)
-- [ ] analysis/_overview/cli-tree.md
+- [x] analysis/_overview/cli-tree.md
 - [ ] analysis/_overview/conf-matrix.md
 - [ ] analysis/_overview/case-formats.md
 - [ ] analysis/_overview/deps-of-common.md

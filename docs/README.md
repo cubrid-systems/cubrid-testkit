@@ -1,4 +1,4 @@
-# cubrid-testkit
+# CUBRID Test Kit
 
 CUBRID 의 기능 검증을 위한 테스트 툴킷.
 

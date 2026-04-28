@@ -1,4 +1,4 @@
-# ROADMAP — cubrid-testkit
+# ROADMAP — CUBRID Test Kit
 
 - **날짜**: 2026-04-28
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)

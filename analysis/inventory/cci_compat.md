@@ -1,0 +1,7 @@
+# cci_compat -- Inventory
+
+Source: cubrid-testtools/doc/cci_compatibility_guide.md (코드 디렉터리 없음, 문서만 존재)
+
+TBD -- Phase 0
+
+CLI 진입점 / conf 키 목록 / 출력 포맷 / 외부 의존 / 추정 위험.

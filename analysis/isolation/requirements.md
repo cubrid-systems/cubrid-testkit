@@ -1,0 +1,7 @@
+# isolation -- Requirements
+
+Source: cubrid-testtools/CTP/isolation/
+
+TBD -- Phase 0
+
+이 모듈이 해결하는 문제와 외부에서의 호출 형태.

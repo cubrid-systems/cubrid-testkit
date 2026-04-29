@@ -204,7 +204,7 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 
 ### isolation (5)
 - [ ] analysis/isolation/requirements.md
-- [ ] analysis/isolation/design.md
+- [x] analysis/isolation/design.md
 - [ ] analysis/isolation/implementation-notes.md
 - [ ] analysis/isolation/io-contract.md
 - [ ] analysis/isolation/test-corpus.md

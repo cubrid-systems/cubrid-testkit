@@ -203,11 +203,11 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 - [ ] analysis/shell/test-corpus.md
 
 ### isolation (5)
-- [ ] analysis/isolation/requirements.md
+- [x] analysis/isolation/requirements.md
 - [x] analysis/isolation/design.md
-- [ ] analysis/isolation/implementation-notes.md
-- [ ] analysis/isolation/io-contract.md
-- [ ] analysis/isolation/test-corpus.md
+- [x] analysis/isolation/implementation-notes.md
+- [x] analysis/isolation/io-contract.md
+- [x] analysis/isolation/test-corpus.md
 
 ### common (5)
 - [ ] analysis/common/requirements.md

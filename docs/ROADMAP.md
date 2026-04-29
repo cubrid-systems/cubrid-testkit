@@ -197,7 +197,7 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 
 ### shell (5)
 - [ ] analysis/shell/requirements.md
-- [ ] analysis/shell/design.md
+- [x] analysis/shell/design.md
 - [ ] analysis/shell/implementation-notes.md
 - [ ] analysis/shell/io-contract.md
 - [ ] analysis/shell/test-corpus.md

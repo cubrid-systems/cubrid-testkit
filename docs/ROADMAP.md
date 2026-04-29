@@ -196,11 +196,11 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 - [ ] analysis/sql/test-corpus.md
 
 ### shell (5)
-- [ ] analysis/shell/requirements.md
+- [x] analysis/shell/requirements.md
 - [x] analysis/shell/design.md
-- [ ] analysis/shell/implementation-notes.md
-- [ ] analysis/shell/io-contract.md
-- [ ] analysis/shell/test-corpus.md
+- [x] analysis/shell/implementation-notes.md
+- [x] analysis/shell/io-contract.md
+- [x] analysis/shell/test-corpus.md
 
 ### isolation (5)
 - [x] analysis/isolation/requirements.md

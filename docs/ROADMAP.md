@@ -178,7 +178,7 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 ### _overview (4)
 - [x] analysis/_overview/cli-tree.md
 - [x] analysis/_overview/conf-matrix.md
-- [ ] analysis/_overview/case-formats.md
+- [x] analysis/_overview/case-formats.md
 - [x] analysis/_overview/deps-of-common.md
 
 ### medium (5)

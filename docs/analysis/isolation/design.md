@@ -168,7 +168,7 @@ runAll() — currEnvId 단일 워커
 ### 5-1. 원격 환경에 *반드시* 존재해야 하는 것
 | 자원 | 용도 | 비고 |
 |------|------|------|
-| `runone.sh` | 케이스 1건 실행 (`sh runone.sh [-n] -r <retry> <tc> <timeout> <db>`) | 원격 측 스크립트 — CTP repo에 없음. **testcases 레포 또는 deploy 단계가 배치한다** (확정 필요) |
+| `runone.sh` | 케이스 1건 실행 (`sh runone.sh [-n] -r <retry> <tc> <timeout> <db>`) | **위치 확정 (M0 #5):** `cubrid-testtools/CTP/isolation/ctltool/runone.sh`. ctltool 디렉터리에 native C 파서(parse.c, common.c, cubrid_drv.c 등) + Makefile + runone.sh 가 함께 있고, deploy 단계가 ctltool 전체를 원격 env로 복사한다. **즉 isolation 케이스 실행은 Java가 아니라 ctltool의 native binary가 수행** — strangler-fig 1차 대체 비용 평가 시 이 native 자산까지 포함해야 함 |
 | `$ctlpath` | runone.sh 가 cd 하는 작업 디렉터리 | 원격 셸 환경변수 |
 | `$CUBRID`, `$CTP_HOME`, `$init_path` | core dump 탐색 시 사용 (Test.processCoreFile) | 단, processCoreFile은 현재 호출되지 않음 (주석) |
 | `<tc>.answer`, `<tc>.log` | diff 비교 대상 | 케이스 디렉터리에 함께 위치 |

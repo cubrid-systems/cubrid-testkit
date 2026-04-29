@@ -210,11 +210,11 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 - [x] analysis/isolation/test-corpus.md
 
 ### common (5)
-- [ ] analysis/common/requirements.md
-- [ ] analysis/common/design.md
-- [ ] analysis/common/implementation-notes.md
-- [ ] analysis/common/io-contract.md
-- [ ] analysis/common/test-corpus.md
+- [x] analysis/common/requirements.md
+- [x] analysis/common/design.md
+- [x] analysis/common/implementation-notes.md
+- [x] analysis/common/io-contract.md
+- [x] analysis/common/test-corpus.md
 
 ### inventory (5)
 - [ ] analysis/inventory/jdbc.md

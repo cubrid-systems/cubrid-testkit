@@ -3,7 +3,7 @@
 **Source repos:**
 - `/home/hgryoo/dev/cubrid-testcases` (public — sql, medium, isolation, tool)
 - `/home/hgryoo/dev/cubrid-testcases-private-ex` (private extension — shell, shell_heavy, shell_perf, scripts)
-- `cubrid-testcases-private` (3번째 레포, 본 분석에서는 로컬 미접근 — sql/_private 변형 추가 케이스 보유 추정)
+- `/home/hgryoo/dev/cubrid-testcases-private` (private — HA, interface, longcase, manually, random_query_generator, shell_ext)
 
 또한 CTP 레포 안의 다음 디렉터리가 *케이스 실행 시 원격 환경에 배치되어야* 하는 자산:
 - `cubrid-testtools/CTP/isolation/ctltool/` — isolation .ctl 케이스의 native 실행기 + runone.sh
@@ -289,6 +289,96 @@ CTP/shell/init_path/
 
 ---
 
+## 5b. ha_repl / cdc_repl — shell-format 의 HA 변형 (private 레포)
+
+**Source:** `cubrid-testcases-private/HA/`
+
+```
+HA/
+└── shell/
+    ├── _23_ha_enhancement
+    ├── _25_features_844
+    ├── _26_features_845
+    ├── _28_features_930
+    ├── _29_banana_qa
+    ├── _38_fig
+    ├── _39_fig_cake
+    └── config
+```
+
+**규모:** 482 `.sh` + 328 `.answer` + 218 `.sql` + 117 `.java` + 18 `.exp` + 9 `.result`
+
+**핵심 발견 — ha_repl/cdc_repl 케이스는 별도 형식이 아니다.** HA 디렉터리 아래에 *shell-format 그대로* 의 케이스가 들어있다(`HA/shell/...`). 즉 ha_repl/cdc_repl 모듈은 *shell 모듈의 실행 모델 + HA 토폴로지 셋업 헬퍼* 조합으로 동작.
+
+이는 다음 결합 관계를 명확히 설명한다:
+- **why** ha_repl/cdc_repl 모듈 (Java) 이 `shell.common.SSHConnect/LocalInvoker/...` 를 import 하는가 → *케이스 자체가 shell-format이라 shell 의 실행 인프라를 그대로 쓴다*
+- **why** conf-matrix.md 에서 ha_repl/cdc_repl 이 *cluster B* (shell/process family) 인가 → 위와 동일
+
+→ **strangler-fig 1차 대체 단위 확정 입력**:
+- shell.common.* 추출이 1차 작업이면, ha_repl/cdc_repl 자동 동반 대체 가능
+- 즉 *4개 모듈(shell + isolation + ha_repl + cdc_repl) 한 묶음* 이 자연스러운 첫 번째 작동 단위
+
+---
+
+## 5c. interface — JDBC/CCI/PHP/Perl 호환성 (private 레포)
+
+**Source:** `cubrid-testcases-private/interface/`
+
+**규모:** 483 `.c` + 394 `.java` + 365 `.sh` + 331 `.answer` + 45 `.cpp` + 42 `.sql`
+
+**구조:**
+```
+interface/
+├── CCI/
+│   ├── performance_scenario
+│   ├── open_issue_cases_blocked
+│   └── shell
+├── Perl/
+└── PHP/
+```
+
+**확장자 특이점:**
+- `.0` (129), `.3` (63), `.1` (59) — **빌드 라인 번호로 추정되는 정답 변형** (예: `case.answer.0`, `case.answer.1`, `case.answer.3` — 빌드 0/1/3 별 정답)
+- `.output` (26) — stdout/stderr 캡처 결과로 추정
+- 언어별 디렉터리 — 각 클라이언트 라이브러리(JDBC/CCI/PHP/Perl) 호환성 케이스
+
+**해석:**
+- 인벤토리 모듈 `jdbc`, `cci_compat`, `sql_by_cci` 가 이 레포의 케이스를 사용
+- C/C++/Java/PHP/Perl 다언어 케이스 → *케이스 자체가 빌드 산출물*. 새 시스템에서 이 케이스들의 *빌드/링크 시점* 정책 ADR 필요
+- `.0`/`.1`/`.3` 명명 시스템은 sql 모듈의 `.<ver>_S64_patch` 와 다른 mechanism — ADR 후보
+
+---
+
+## 5d. random_query_generator (RQG) — `.yy` 문법 + 셸 래퍼
+
+**Source:** `cubrid-testcases-private/random_query_generator/`
+
+**규모:** 104 `.sh` + 77 `.yy` + 45 `.zz` + 6 `.txt` + 5 `.java`
+
+**핵심 형식 — MySQL/MariaDB RQG 표준 호환**:
+- **`.yy`** — RQG 문법 파일 (yacc-like rule grammar). 랜덤 SQL 생성 규칙을 정의
+- **`.zz`** — RQG 데이터 파일 (테스트 데이터 시드 정의)
+- **`.sh`** — 케이스 진입 셸 스크립트 (RQG runner 호출)
+
+→ RQG는 **외부 OSS RQG 프레임워크(MariaDB)와 호환되는 케이스 포맷**. CTP 측은 셸 래퍼로 호출하고 결과를 일반 shell-format 처럼 다룬다 (cli-tree.md: RQG 분기는 SHELL과 같은 메서드 + `TEST_CATEGORY=rqg` 시스템 프로퍼티).
+
+→ 새 시스템에서 RQG 형식 자체는 외부 표준이므로 *그대로 동결*. 호출 래퍼만 새 시스템 동등물로 제공.
+
+---
+
+## 5e. shell_ext / longcase / manually (private 레포)
+
+| suite | 핵심 자산 | 정체 |
+|-------|-----------|------|
+| `shell_ext` | 342 .sh + 286 .conf + 164 .java + 156 .sql + 127 .txt | shell 형식의 *configuration-heavy* 변형. **.conf 가 286개로 매우 많음** — 케이스마다 별도 설정. cli-tree.md 의 SHELL_EXT 가 enum에 없음 → CTP shell의 카테고리 기능을 통한 것으로 추정 (`shell_ext_guide.md` 가 doc/에 존재) |
+| `longcase` | 185 .java + 131 .sh + 88 .jar + 55 .sql | shell-format + **사전 빌드된 88개 .jar** (장시간 부하 케이스, jar 컴파일을 케이스 작성자 측에서 수행). shell_heavy 와 유사 패턴 |
+| `manually` | 27 .txt + 20 .sh | **수동 실행 가이드** (.txt 가 절차 문서, .sh 는 보조 스크립트). 자동화 대상이 아닌 *문서화된 인간 케이스* |
+
+→ shell_ext / longcase 는 shell 모듈의 *suite 변형* (medium ↔ sql 관계와 동일).
+→ manually 는 *비-자동화 자산* — 새 시스템에서는 별도 디렉터리(`docs/manual/`)로 분리 권고.
+
+---
+
 ## 6. shell_heavy / shell_perf — shell 변형
 
 shell_heavy:
@@ -310,7 +400,12 @@ shell_perf:
 | sql / medium | `.sql` (CUBRID SQL + `--+` pragma) | `cases/` + `answers/` 자매 디렉터리 | `.answer` (= 구분자, 블록당 SQL 결과) | stdout 마커 + `<resultDir>/main.info` |
 | isolation | `.ctl` (MC/C1..Cn DSL) | `ctltool/` (native C parser + runone.sh) deploy 됨 | `.answer` (+ `.answer1`/`.answer2` for multi-stage) | runone.sh stdout: `flag: OK`/`flag: NOK`/`found core file` |
 | shell | `.sh` (bash) + 보조 (.sql/.java/.c/.exp/.txt/.gz/.cpp/.conf) | `init_path/init.sh` + 헬퍼 source 컨트랙트 | `.answer` + `.answer_win` (OS 변형) | `<case>.result` 파일 + Test.collectGeneralResult |
+| ha_repl / cdc_repl | `.sh` (shell-format) — *별도 형식 없음* | shell 의 init_path/* + HA 토폴로지 헬퍼 | `.answer` | `<case>.result` (shell 동일) |
+| jdbc / cci_compat / sql_by_cci | `.c` / `.java` / `.cpp` / `.sh` (interface/) | 빌드 산출물을 case가 보유 | `.answer` + `.0`/`.1`/`.3` (빌드 라인 변형) | shell 모델 또는 ccqt native worker stdout |
+| RQG | `.yy` (문법) + `.zz` (데이터) + `.sh` (래퍼) | 외부 OSS RQG 프레임워크 호환 | `.answer` (래퍼가 비교) | shell 모델 + `TEST_CATEGORY=rqg` |
+| shell_ext / longcase / shell_heavy / shell_perf | `.sh` + suite-별 보조 | shell 변형 | `.answer` | shell 모델 |
 | webconsole | (테스트 없음, utility) | sql/webconsole + Jetty | — | 웹 UI |
+| manually | `.txt` (절차 문서) + `.sh` (보조) | — (자동화 대상 아님) | — | 인간 검증 |
 
 ### 다중 .answer 변형 시스템 (sql/medium 한정)
 - `.answer_<DB>_<C>[_<collation>]` — DB charset / Client charset / Collation 매트릭스
@@ -367,5 +462,5 @@ isolation/design.md 의 §5-1 에 적은:
 **Phase 0 다음 단계 권고:**
 1. M0 발견 사항을 토대로 **ADR-001 (구현 언어), ADR-002 (빌드 도구), ADR-004 (1차 대체 모듈 선정)** 의 입력 문서 작성
 2. 4개 deep 모듈의 나머지 stub 4개씩 (requirements / implementation-notes / io-contract / test-corpus) 채우기 — 또는 design.md 안에서 통합
-3. inventory 5개 stub 채우기 (jdbc / sql_by_cci / ha_repl / cdc_repl / cci_compat)
-4. cubrid-testcases-private 레포 접근 확보 (현재 미접근, sql 레포의 _private 변형이 누락되었을 가능성)
+3. inventory 5개 stub 채우기 (jdbc / sql_by_cci / ha_repl / cdc_repl / cci_compat) — 본 case-formats.md 의 §5b/§5c 가 이미 입력 자료
+4. ✅ **cubrid-testcases-private 레포 접근 확보됨** (HA / interface / longcase / manually / random_query_generator / shell_ext)

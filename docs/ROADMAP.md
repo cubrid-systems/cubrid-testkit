@@ -182,11 +182,11 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 - [x] analysis/_overview/deps-of-common.md
 
 ### medium (5)
-- [ ] analysis/medium/requirements.md
+- [x] analysis/medium/requirements.md
 - [x] analysis/medium/design.md
-- [ ] analysis/medium/implementation-notes.md
-- [ ] analysis/medium/io-contract.md
-- [ ] analysis/medium/test-corpus.md
+- [x] analysis/medium/implementation-notes.md
+- [x] analysis/medium/io-contract.md
+- [x] analysis/medium/test-corpus.md
 
 ### sql (5)
 - [x] analysis/sql/requirements.md

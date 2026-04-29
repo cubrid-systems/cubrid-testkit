@@ -190,7 +190,7 @@ Phase 0 진행 상황을 추적합니다. 각 항목은 `analysis/` 트리의 �
 
 ### sql (5)
 - [ ] analysis/sql/requirements.md
-- [ ] analysis/sql/design.md
+- [x] analysis/sql/design.md
 - [ ] analysis/sql/implementation-notes.md
 - [ ] analysis/sql/io-contract.md
 - [ ] analysis/sql/test-corpus.md

@@ -66,3 +66,5 @@ logs/
 # OS
 Thumbs.db
 ehthumbs.db
+
+.omc

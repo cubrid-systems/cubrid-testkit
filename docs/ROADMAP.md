@@ -1,7 +1,8 @@
 # ROADMAP — CUBRID Test Kit
 
-- **날짜**: 2026-04-28
+- **날짜**: 2026-05-06 (2026-04-28 초안에서 §6a 확장 영역 추가)
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)
+  + 확장 영역(외부 테스트 포맷 흡수, §6a)
 - **제약 요약**: 기존 testcases 레포 수정 불가 / 외부 인터페이스 동결 / 빌드 도구 미확정(ADR-002)
 - **Analysis baseline**: cubrid-testtools @ 86992c1b334d55800f2700d60f9809c2ceca268d
 
@@ -58,7 +59,13 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
         │
         ▼
 [Phase 5] 잔여 모듈 정리 + 기존 CTP 격리/폐기 결정
+
+[§6a 확장 영역] (Phase 4·5와 병행 가능, 또는 그 이후)
+   └─ E1: sqllogictest CUBRID 적용  ── (다른 외부 포맷 후속 가능)
 ```
+
+확장 영역(§6a)은 strangler-fig 외부에 있는 *additive 작업*. 외부 표면 동결
+(NG2)·testcases 레포 동결(NG1) 밖이라 신규 결정 자유도가 큼.
 
 ---
 
@@ -148,6 +155,68 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 
 ---
 
+## 6a. 확장 영역 (Beyond Strangler-fig)
+
+Phase 0~5는 *기존 CTP의 strangler-fig 대체*에 한정된다. 본 절은 strangler-fig
+완료 후(또는 Phase 4·5와 병행 가능한 *additive 작업*으로) 새 시스템 위에 얹는
+*확장 모듈* 목록. 본 절의 항목은 NG1(testcases 레포 동결)·NG2(외부 표면 동결)
+*밖*에 있어 신규 결정 자유도가 크지만, 그만큼 *왜 testkit 안에서 하는가*에 대한
+근거가 매번 필요.
+
+### E1 — sqllogictest 적용 (CUBRID를 SUT로)
+
+**목표**: SQLite 발 sqllogictest 포맷의 테스트 케이스를 CUBRID에서 실행하도록
+testkit이 sqllogictest 러너를 새 모듈로 흡수.
+
+**왜 testkit인가**: 케이스 형식 ingestion · diff/hash 회귀 · 결과 보고는
+testkit의 핵심 역량과 동일. testtools/CTP에는 없던 *신규 모듈*이므로 strangler-
+fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG4와도 무관 —
+"비-CUBRID DBMS 호환의 신규 추가"가 아니라 "CUBRID를 외부 표준 포맷으로
+검증").
+
+**Phase 정합**:
+- Phase 1 (외부 표면 동결): 영향 없음. sqllogictest는 새 진입점.
+- Phase 2 (아키텍처): 신 모듈 슬롯이 일반 *case-format ingestion 인터페이스*로
+  열리도록 `design/contracts.md`에 반영해야 함 — 이것이 본 항목의 Phase 2에
+  미치는 *유일한* 영향.
+- Phase 3 1차 대체 후보 *비교군*: sqllogictest는 CTP 의존이 0이라 "의존이
+  가장 적은 모듈" 후보로 적격 — 단, 입력 코퍼스가 외부에 있어 testcases 레포
+  외부 의존 관리라는 *새 변수*가 생김. ADR-004(1차 대체 모듈 선정) 시 후보로
+  비교 대상에 포함.
+- Phase 4·5와 병행: strangler-fig 진척과 독립적으로 진행 가능.
+
+**스코프 (incubating 단계 — 확정 전)**:
+- *대상 spec*: SQLite 원형 / DuckDB 확장 / CockroachDB 변형 중 primary target
+  — 미정.
+- *입력 코퍼스 정책*: 외부 트리 import vs mirror vs 자체 작성 — 미정.
+  라이선스 점검 포함.
+- *어댑터 위치*: `impl/sqllogictest/` 신 모듈 vs 인벤토리 모듈 — Phase 2
+  contracts 결정에 종속.
+- *결과 비교 모드*: sqllogictest 표준의 hash 기반 vs CUBRID expected 파일
+  추가 — 미정.
+- *SUT 구동 클라이언트*: JDBC / CCI / cubrid-cli 중 어느 경로 — 미정.
+
+**Open Questions (incubating 정식 진입 시 결정 — owner: hgryoo)**:
+1. *Pain point*: 왜 지금 sqllogictest? (외부 표준 진입 / 다른 DBMS와의 회귀
+   비교 / 테스트 코퍼스 확장 / 특정 RND·CBRD 티켓?)
+2. *Spec target*: 어느 변종을 baseline으로?
+3. *코퍼스 정책*: 외부 트리 import 또는 mirror — 어느 트리, 어떤 라이선스?
+4. *Acceptance*: 통과 case 수 / hash 일치율 / coverage 등 측정 기준?
+5. *Phase 정합 재확인*: Phase 4·5 병행이 1인 가용성을 초과하지 않는지
+   (분기 게이트 §7와 직접 결합).
+
+**ADR 자리표시자**:
+- ADR-EXT-001 *(트리거: 본 항목 incubating 정식 진입 시)* — sqllogictest
+  spec variant 선정 + 입력 코퍼스 import 정책 + 결과 비교 모드 + SUT 구동
+  클라이언트.
+
+**참조**:
+- SQLite sqllogictest 원형: <https://www.sqlite.org/sqllogictest/>
+- DuckDB sqllogictest 확장: github.com/duckdb/duckdb (`test/sqllogictest`)
+- CockroachDB logictest: github.com/cockroachdb/cockroach (`pkg/sql/logictest`)
+
+---
+
 ## 7. 분기별 재평가 게이트 (1인 사이드 프로젝트 완충)
 
 매 분기 종료 시 다음 3개 질문에 *서면으로* 답변:
@@ -168,6 +237,8 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 | common 의존 그래프가 예상보다 복잡 | M0의 deps 그래프 단계에서 발견 | Phase 2 진입 전 설계 1주 보강 |
 | testcases 포맷의 *문서화되지 않은 변형* | 테스트 코퍼스 분석 단계에서 발견 | 신시스템 파서가 관용적(lenient)이어야 한다는 비기능 요구로 승격 |
 | Java 외 언어 선택 시 학습 곡선 | ADR-001 결정 시점 | 1차 대체 모듈은 *언어 결정의 검증 슬라이스*로 활용 |
+| §6a-E1 외부 sqllogictest 코퍼스 라이선스·동기화 부채 | E1 incubating 정식 진입 | ADR-EXT-001로 import 정책 명시; full mirror 대신 의미 있는 부분집합만 vendor in 또는 자동 동기화 스크립트로 운영 |
+| §6a 확장 영역이 strangler-fig 진척을 잠식 | 분기 게이트에서 Phase 4·5 지연 vs E1 진척이 역전 | 분기 게이트 답변에 §6a 진척을 별 행으로 분리 기재; 우선순위 충돌 시 strangler-fig 우선 |
 
 ---
 

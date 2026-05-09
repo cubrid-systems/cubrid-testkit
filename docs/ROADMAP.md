@@ -214,6 +214,136 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 - SQLite sqllogictest 원형: <https://www.sqlite.org/sqllogictest/>
 - DuckDB sqllogictest 확장: github.com/duckdb/duckdb (`test/sqllogictest`)
 - CockroachDB logictest: github.com/cockroachdb/cockroach (`pkg/sql/logictest`)
+- Requirements: `extensions/E1-sqllogictest/requirements.md`
+
+### E2 — Random SQL Fuzzing (SQLsmith 포팅)
+
+**목표**: SQLsmith 류 grammar-aware random SQL generator 를 CUBRID 에 포팅 — parser/planner/executor 강건성 검증 (crash 중심).
+
+**왜 testkit인가**: testkit 의 *random generation 축이 부재* — 손으로 만든 케이스만으로는 deep nesting / lateral / window 조합에서의 internal state corruption 을 못 잡음.
+
+**Phase 정합**: E1 과 동일 — Phase 4·5 와 병행 가능, contracts.md 의 case-format ingestion 인터페이스 공유.
+
+**스코프 (incubating)**:
+- 재사용 (SQLsmith C++ subprocess) vs 재구현 (ADR-001 결정 언어) — 미정
+- CUBRID dialect 가산 범위 (path expression / serial / connect-by / method) — 미정
+- fuzz corpus 위치 (testkit / cubrid 본 repo / 외부) — 미정
+
+**Open Questions**: requirements §6 참조.
+
+**ADR 자리표시자**: ADR-EXT-002 *(트리거: incubating 정식 진입 시)*.
+
+**참조**:
+- SQLsmith: <https://github.com/anse1/sqlsmith>
+- Requirements: `extensions/E2-sqlsmith/requirements.md`
+
+### E3 — Logic Bug Detection (SQLancer NoREC + TLP)
+
+**목표**: SQLancer 의 NoREC (optimizer rewrite bug) + TLP (3-valued logic) oracle 을 CUBRID 에 적용 — wrong-result 검증.
+
+**왜 testkit인가**: testkit 은 *expected file diff* 만 — *정답을 모르는* random query 의 wrong-result 영역이 사각지대.
+
+**Phase 정합**: E1·E2 와 동일 — case-format ingestion 인터페이스 공유. dialect adapter 는 E2 와 *공통 레이어* 가능 (Open Question 3).
+
+**스코프 (incubating)**:
+- 1차 oracle = NoREC (도입 비용 최저, ROI 최고) + TLP — 미확정
+- PQS / SQLaser / SQLancer++ 는 후속 ADR
+- 재사용 (SQLancer Java) vs 재구현 — 미정
+
+**Open Questions**: requirements §6 참조.
+
+**ADR 자리표시자**: ADR-EXT-003 *(트리거: incubating 정식 진입 시)*.
+
+**참조**:
+- SQLancer: <https://github.com/sqlancer/sqlancer>
+- Requirements: `extensions/E3-sqlancer/requirements.md`
+
+### E4 — Distributed Isolation Testing (AWDIT / Jepsen)
+
+**목표**: 분산 / HA / streaming-replication 환경에서의 isolation anomaly 검증.
+
+**왜 testkit인가**: 기존 isolation 모듈은 *단일 노드 다중 클라이언트* 만. 분산 axis 는 별 도구가 필요. *단일노드 축 4* (PostgreSQL `.spec` + Hermitage) 는 strangler-fig isolation 모듈 자체에 흡수 (ADR-004 검토 시).
+
+**Phase 정합 (조건부)**: N24 streaming-replication 또는 N11 logical-replication-extension *graduation 후*. roadmap repo planning 과 동기화.
+
+**스코프 (incubating)**: AWDIT vs Jepsen 1차 선택 / fault injection 채널 / engine-suite 책임 경계 (C-004) — 모두 미정.
+
+**Open Questions**: requirements §6 참조.
+
+**ADR 자리표시자**: ADR-EXT-004.
+
+**참조**:
+- Jepsen: <https://jepsen.io/>
+- PostgreSQL isolation tester: github.com/postgres/postgres (`src/test/isolation`)
+- Requirements: `extensions/E4-distributed-isolation/requirements.md`
+
+### E5 — Parser / Protocol Fuzzing Harness (libFuzzer)
+
+**목표**: byte-level coverage-guided fuzzing 으로 SQL parser / CCI·JDBC binary protocol 강건성 검증.
+
+**왜 testkit인가**: testkit 은 corpus + replay + crash triage 책임. *fuzz target build option* 은 cubrid 본 repo 책임 — 본 항목은 *cross-repo 협업* 이 필수 (C-015 cross-cutting).
+
+**Phase 정합 (조건부)**: cubrid 본 repo 의 `-DENABLE_FUZZING` 등 build option 추가 *선결*.
+
+**스코프 (incubating)**: fuzz target layer (parser / CCI / JDBC) / fuzzer 본체 (libFuzzer / AFL / honggfuzz) / corpus 위치 — 모두 미정.
+
+**Open Questions**: requirements §6 참조.
+
+**ADR 자리표시자**: ADR-EXT-005.
+
+**참조**:
+- libFuzzer: <https://llvm.org/docs/LibFuzzer.html>
+- Requirements: `extensions/E5-parser-fuzzing/requirements.md`
+
+### E6 — Differential Testing (PostgreSQL Pair)
+
+**목표**: 같은 SQL 을 CUBRID 와 PostgreSQL 양쪽에 실행해 *결과 차이* 로 wrong-result 검증. 판정 기준 = 외부 DBMS 자체.
+
+**왜 testkit인가**: oracle 비용이 0 — peer DBMS 가 oracle. 단, dialect mismatch 노이즈 통제가 핵심.
+
+**Phase 정합 (조건부)**: N13 pg-wire-compat *selected 이상* — selected 이후 비용이 급감. C-014 cross-cutting.
+
+**스코프 (incubating)**: canonical subset vs rewrite layer / dialect rewrite catalog / peer DBMS 범위 — 모두 미정.
+
+**Open Questions**: requirements §6 참조.
+
+**ADR 자리표시자**: ADR-EXT-006.
+
+**참조**:
+- Requirements: `extensions/E6-differential/requirements.md`
+
+### E7 — Stateful / Randomized Workload
+
+**목표**: schema mutation + node restart + partition + failover 가 동시 진행되는 long-running 시나리오에서 invariant 검증.
+
+**왜 testkit인가**: invariant 검증 = correctness 영역 = testkit 책임. throughput 은 engine-suite (HammerDB / benchbase) 책임. C-004 책임 경계 정의가 *선결*.
+
+**Phase 정합 (조건부)**: C-004 cross-cutting 결론 *선결*. 분기 게이트 §7 후순위.
+
+**스코프 (incubating)**: scenario (roachtest 류 randomized vs FoundationDB 류 deterministic simulation) / invariant 카탈로그 / engine-suite 자산 재사용 범위 — 모두 미정.
+
+**Open Questions**: requirements §6 참조.
+
+**ADR 자리표시자**: ADR-EXT-007.
+
+**참조**:
+- CockroachDB roachtest: github.com/cockroachdb/cockroach (`pkg/cmd/roachtest`)
+- FoundationDB simulation: <https://apple.github.io/foundationdb/testing.html>
+- Requirements: `extensions/E7-workload/requirements.md`
+
+### §6a 카탈로그 출처 / 인덱스
+
+| ID | 진입성 | 선결 | requirements |
+|---|---|---|---|
+| E1 | 즉시 후보 | — | extensions/E1-sqllogictest/ |
+| E2 | 즉시 후보 | — | extensions/E2-sqlsmith/ |
+| E3 | 즉시 후보 | dialect adapter 위치 (E2 와 공유) | extensions/E3-sqlancer/ |
+| E4 | 조건부 | N24 / N11 graduation | extensions/E4-distributed-isolation/ |
+| E5 | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | extensions/E5-parser-fuzzing/ |
+| E6 | 조건부 | N13 pg-wire-compat selected 이상 | extensions/E6-differential/ |
+| E7 | 조건부 | C-004 책임 경계 정의 | extensions/E7-workload/ |
+
+근거: `survey/dbms-testing-ecosystem.md` (8축 분류, §11 카탈로그 확장 후보).
 
 ---
 
@@ -238,7 +368,10 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 | testcases 포맷의 *문서화되지 않은 변형* | 테스트 코퍼스 분석 단계에서 발견 | 신시스템 파서가 관용적(lenient)이어야 한다는 비기능 요구로 승격 |
 | Java 외 언어 선택 시 학습 곡선 | ADR-001 결정 시점 | 1차 대체 모듈은 *언어 결정의 검증 슬라이스*로 활용 |
 | §6a-E1 외부 sqllogictest 코퍼스 라이선스·동기화 부채 | E1 incubating 정식 진입 | ADR-EXT-001로 import 정책 명시; full mirror 대신 의미 있는 부분집합만 vendor in 또는 자동 동기화 스크립트로 운영 |
-| §6a 확장 영역이 strangler-fig 진척을 잠식 | 분기 게이트에서 Phase 4·5 지연 vs E1 진척이 역전 | 분기 게이트 답변에 §6a 진척을 별 행으로 분리 기재; 우선순위 충돌 시 strangler-fig 우선 |
+| §6a-E2/E3 fuzz·logic-bug corpus 의 testcases 레포 동결(NG1) 위반 | E2·E3 incubating 정식 진입 | 외부 storage 또는 testkit 내부 별 트리에 보관; ADR-EXT-002·003에서 corpus 위치 명시 |
+| §6a-E5 cubrid 본 repo 의 fuzz target build option 미진척 | E5 incubating 정식 진입 시도 | testkit 단독 시작 금지; cubrid 본 repo PR (`-DENABLE_FUZZING` 등) 선결, C-015 cross-cutting 트래킹 |
+| §6a-E4/E6 선결 의존 (N24·N11·N13) 미진척 | E4·E6 incubating 진입 검토 시 | roadmap repo planning 과 동기화; 선결 graduation 전에 진입 시도 금지 |
+| §6a 확장 영역이 strangler-fig 진척을 잠식 | 분기 게이트에서 Phase 4·5 지연 vs E1~E7 진척이 역전 | 분기 게이트 답변에 §6a 진척을 별 행으로 분리 기재; 우선순위 충돌 시 strangler-fig 우선 |
 
 ---
 

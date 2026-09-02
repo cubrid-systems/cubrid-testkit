@@ -42,7 +42,7 @@ chase; it does not volunteer.
 
 ## 3. Found by writing the code
 
-Every literal was taken from CTP's source rather than from the notes. Fourteen disagreed.
+Every literal was taken from CTP's source rather than from the notes. Fifteen disagreed.
 
 | Spec said | Actually | Source |
 |---|---|---|
@@ -63,6 +63,7 @@ Every literal was taken from CTP's source rather than from the notes. Fourteen d
 | `JAVA_HOME_<bits>` | **`JAVA_HOME_64BITS`.** The value is `getBuildBits()`, which returns the string "64bits", upper-cased — not a number | `Test.runTestCase_linux` |
 | — | **A build id can run past the version.** With no `-` after the four-part number the scan takes everything up to the next `)`, so a `cubrid_rel` line without a commit suffix yields `11.2.0.0000) (64bit release build for linux_gnu` as the build id. Deterministic, so it still identifies a build | `CommonUtils.getBuildId` |
 | — | **The retry flag has two spellings.** The console prints `[NOK], TRY->2`; `feedback.log` prints `[NOK]: TRY-> = 2`, using the same literal as a label rather than a prefix | `FeedbackFile.onTestCaseStopEvent` |
+| a configuration with no `env.instanceN` keys is an error — `Not found any environment instance to test on it!` | **it is a local run.** The `Context` constructor adds an environment called `local` when the list comes back empty, so `Main.exec`'s check for an empty list can never fire and that error message is unreachable. The specification recorded the dead branch and not the behaviour. Running against the engine on the machine you are sitting at is how the suite is driven during development, and it is the only way to exercise it without a second host | `Context.java:125-130`, `Main.exec` |
 | the worker collects `<name>.result` and diffs it against `<name>.answer` | **there is no diff.** The case writes its own verdict into `<name>.result`; the worker `cat`s it and fails the case if any line contains the substring `NOK`. The entire shell source contains no reference to `answer` | `Test.collectGeneralResult`, `grep -rn answer shell/src` |
 
 **What this method catches:** anything where the spec paraphrased instead of quoting. Writing a
@@ -172,7 +173,7 @@ nothing, are both invisible until someone has to decide whether to carry them ov
 
 A frozen surface is only as good as the reading behind it, and the reading was done six different
 ways here with six different yields. The spec was not careless — it was written from a careful
-analysis — and it was still wrong in twenty-five places, every one of them F1.
+analysis — and it was still wrong in twenty-six places, every one of them F1.
 
 Three practical consequences:
 
@@ -187,7 +188,7 @@ Three practical consequences:
 
 ## Where CTP does not agree with itself
 
-Some of the twenty-five are not errors the spec could have avoided by reading harder. They are
+Some of the twenty-six are not errors the spec could have avoided by reading harder. They are
 places where CTP cannot reproduce its own behaviour, or where two parts of it contradict each other.
 Each one needs a decision, and the decisions are not all the same:
 

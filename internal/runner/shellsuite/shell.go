@@ -21,10 +21,16 @@ import (
 
 // Shell runs the shell task, and rqg, which is the same machinery under a
 // different category.
-type Shell struct{}
+type Shell struct {
+	// Channels opens the two channels each instance needs. It is a field because
+	// the choice of machine is the one thing that varies between a local run and a
+	// remote one, and because a test cannot be allowed to open the real ones: the
+	// reset that runs before every case would kill the test.
+	Channels func([]*topology.Instance) (workers, monitors map[string]exec.Channel, err error)
+}
 
 // NewShell returns the runner for the shell and rqg tasks.
-func NewShell() *Shell { return &Shell{} }
+func NewShell() *Shell { return &Shell{Channels: openChannels} }
 
 func (s *Shell) Tasks() []cli.Task { return []cli.Task{cli.Shell, cli.RQG} }
 
@@ -48,12 +54,8 @@ func (s *Shell) Validate(req runner.Request) error {
 		return quit("The parameter 'scenario' must be set correctly in %s !", req.ConfigPath)
 	}
 
-	instances, err := topology.From(req.Config)
-	if err != nil {
+	if _, err := topology.From(req.Config); err != nil {
 		return quit("%v", err)
-	}
-	if len(instances) == 0 {
-		return quit("Not found any environment instance to test on it!")
 	}
 
 	// Updating the case corpus is an operations decision and is not done here.
@@ -77,6 +79,11 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	instances, err := topology.From(cfg)
 	if err != nil {
 		return quit("%v", err)
+	}
+	// No configured machine means this one.
+	local := len(instances) == 0
+	if local {
+		instances = []*topology.Instance{topology.Local(cfg)}
 	}
 	envIDs := make([]string, 0, len(instances))
 	for _, inst := range instances {
@@ -104,7 +111,11 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	defer report.Close()
 
 	// One channel per instance for the workers, and a second for each monitor.
-	channels, monitorChannels, err := s.connect(instances)
+	opener := s.Channels
+	if opener == nil {
+		opener = openChannels
+	}
+	channels, monitorChannels, err := opener(instances)
 	if err != nil {
 		return quit("%v", err)
 	}
@@ -144,7 +155,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 
 	// ---- workspace -------------------------------------------------------
 	fmt.Println("============= UPDATE TEST CASES ==================")
-	workspace, err := s.prepareWorkspace(ctx, channels, cfg)
+	workspace, err := s.prepareWorkspace(ctx, channels, cfg, local)
 	if err != nil {
 		return quit("%v", err)
 	}
@@ -182,20 +193,28 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// ---- test ------------------------------------------------------------
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, cfg.Int("testcase_retry_num", 0))
-	err = s.test(ctx, instances, channels, monitorChannels, queue, sink, report, cfg, buildID, bits)
-	fmt.Println("STARTED")
+	err = s.test(ctx, instances, channels, monitorChannels, queue, sink, report, cfg, buildID, bits, local)
 
 	report.TaskStop()
 	fmt.Println("TEST COMPLETE")
 	return err
 }
 
-// connect opens the two channels each instance needs. A worker spends most of its
-// life inside a case, so the monitor that has to interrupt it cannot share.
-func (s *Shell) connect(instances []*topology.Instance) (workers, monitors map[string]exec.Channel, err error) {
+// openChannels opens the two channels each instance needs. A worker spends most
+// of its life inside a case, so the monitor that has to interrupt it cannot
+// share.
+//
+// No instances means a local run, and then both channels are this machine.
+func openChannels(instances []*topology.Instance) (workers, monitors map[string]exec.Channel, err error) {
 	workers = map[string]exec.Channel{}
 	monitors = map[string]exec.Channel{}
+
 	for _, inst := range instances {
+		if inst.IsLocal() {
+			workers[inst.EnvID()] = exec.NewLocal("")
+			monitors[inst.EnvID()] = exec.NewLocal("")
+			continue
+		}
 		ssh := inst.SSH()
 		if ssh.Host == "" {
 			return nil, nil, fmt.Errorf("instance %s has no ssh.host", inst.EnvID())
@@ -217,12 +236,12 @@ func (s *Shell) connect(instances []*topology.Instance) (workers, monitors map[s
 // is excluded, but the copy is not: cases dirty their own directories, and the
 // dispatcher searches the workspace rather than the scenario. Without the copy
 // there would be nothing to find.
-func (s *Shell) prepareWorkspace(ctx context.Context, channels map[string]exec.Channel, cfg *conf.Config) (string, error) {
+func (s *Shell) prepareWorkspace(ctx context.Context, channels map[string]exec.Channel, cfg *conf.Config, local bool) (string, error) {
 	scenario := strings.TrimSpace(cfg.GetOr("scenario", ""))
 	workspace := strings.TrimSpace(cfg.GetOr("testcase_workspace_dir", ""))
 	if workspace == "" || workspace == scenario {
 		for envID, ch := range channels {
-			out, err := ch.Run(ctx, KillScript(false))
+			out, err := ch.Run(ctx, KillScript(local))
 			if err != nil {
 				return "", fmt.Errorf("%s: %w", envID, err)
 			}
@@ -246,7 +265,7 @@ func (s *Shell) prepareWorkspace(ctx context.Context, channels map[string]exec.C
 		wg.Add(1)
 		go func(envID string, ch exec.Channel) {
 			defer wg.Done()
-			if _, err := ch.Run(ctx, KillScript(false)); err != nil {
+			if _, err := ch.Run(ctx, KillScript(local)); err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("%s: %w", envID, err))
 				mu.Unlock()
@@ -360,7 +379,7 @@ func (s *Shell) deploy(ctx context.Context, instances []*topology.Instance,
 // drain.
 func (s *Shell) test(ctx context.Context, instances []*topology.Instance,
 	channels, monitorChannels map[string]exec.Channel, queue *dispatch.Queue,
-	sink *result.Sink, report feedback.Feedback, cfg *conf.Config, buildID, bits string) error {
+	sink *result.Sink, report feedback.Feedback, cfg *conf.Config, buildID, bits string, local bool) error {
 
 	timeout := time.Duration(cfg.Int("testcase_timeout_in_secs", 0)) * time.Second
 	maxRetry := cfg.Int("testcase_retry_num", 0)
@@ -400,12 +419,13 @@ func (s *Shell) test(ctx context.Context, instances []*topology.Instance,
 				BuildID:              buildID,
 			},
 			MaxRetry:       maxRetry,
+			Local:          local,
 			CheckDiskSpace: cfg.Bool("enable_check_disk_space_yn", false),
 			ReserveDisk:    cfg.GetOr("reserve_disk_space_size", "2G"),
 		}
 
 		monitorCtx, stopMonitor := context.WithCancel(ctx)
-		m := &Monitor{Worker: w, Channel: monitorChannels[envID], Timeout: timeout}
+		m := &Monitor{Worker: w, Channel: monitorChannels[envID], Timeout: timeout, Local: local}
 		go m.Watch(monitorCtx)
 
 		wg.Add(1)
@@ -419,6 +439,10 @@ func (s *Shell) test(ctx context.Context, instances []*topology.Instance,
 			}
 		}()
 	}
+	// CTP printed this once the workers were launched, not once they were done,
+	// so it lands before the first [ENV START].
+	fmt.Println("STARTED")
+
 	wg.Wait()
 	return errors.Join(errs...)
 }

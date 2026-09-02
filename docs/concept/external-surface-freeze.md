@@ -534,7 +534,7 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 23 | 배포 형태 | — | — | JVM + 7 jar + 셸 자산 | **단일 바이너리 + 셸 자산 + ctltool + `init_path/` 원격 자산** | NF |
 | 24 | 빌드 | — | — | Ant `build.xml` + `ctltool/Makefile` | `go build` + Justfile + `ctltool/Makefile` 유지 | NF |
 
-**공존 원칙 (행 6·11·12·13):** 미대체 task 는 새 `testkit` 이 **기존 CTP 자산을 subprocess 로 호출**한다. 이 라우팅 규칙을 담는 문서가 `impl/m1/migration-bridge.md`(Phase 3)다.
+**공존 원칙 (행 6·11·12·13):** 미대체 task 는 새 `testkit` 이 **기존 CTP 자산을 subprocess 로 호출**한다. 이 라우팅 규칙을 담는 문서가 `design/migration-bridge.md`(Phase 3)다.
 
 > ⚠️ **용어 주의** — 여기서 "브리지"는 *task 라우팅 shim* 이다. NG5 가 금지하는 "jar 호환 layer"(구 모듈이 새 구현을 라이브러리로 호출하는 것)와 **다른 것**이다. 두 개를 혼동하면 Phase 3 실행자가 ROADMAP §4 가 요구하는 산출물을 NG5 위반으로 오인한다.
 

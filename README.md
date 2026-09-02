@@ -105,17 +105,20 @@ that no consumer was found and the conservative call was made.
 cubrid-testkit/
 ├── CONTEXT.md              the glossary. task ≠ suite ≠ module ≠ runner, and that distinction
 │                           has already caught one design error
+├── go.mod                  the module root is the repository root, as Go expects
 ├── docs/
 │   ├── ROADMAP.md          phases, exit conditions, risks, the quarterly re-evaluation gate
 │   ├── adr/                decisions, numbered, with README.md as the numbering authority
 │   ├── concept/            Phase 1 — north star, the freeze, non-goals, exclusions
 │   ├── design/             Phase 2 — architecture, contracts, one doc per module
 │   ├── analysis/           Phase 0 — what CTP actually does, measured
+│   ├── evidence/           regression evidence, once there is any
 │   ├── extensions/         §6a — testing axes CTP never had
 │   └── survey/             the DBMS testing ecosystem, classified into eight axes
 ├── ext/
 │   └── cubrid-sqlancer/    submodule — §6a-E3, a SQLancer provider for CUBRID
-└── impl/                   Phase 3+ — empty until the shell rewrite starts
+├── cmd/testkit/            the entry point
+└── internal/               everything behind it — Phase 3 has not started, so this is empty
 ```
 
 ## Status

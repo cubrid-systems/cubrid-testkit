@@ -36,5 +36,6 @@ cubrid-testkit 는 CUBRID 의 기능 테스트 케이스를 실행하기 위한 
 ```
 cubrid-testkit/
 ├── docs/        프로젝트 문서 (roadmap, ADR, 분석/설계 노트)
-└── impl/        구현 코드
+├── cmd/testkit/ 진입점
+└── internal/    구현 (Phase 3+)
 ```

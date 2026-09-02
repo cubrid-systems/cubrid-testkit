@@ -53,7 +53,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | 구 클래스 | 축 | 신 컴포넌트 |
 |---|---|---|
 | `Deploy` · `DeployOneNode` | T | `runner/shellsuite/deploy` — `init_path/` 복사, `$init_path` 셋업 |
-| `DeployHA` | T | 동상. ⚠️ **이식하되 미검증** — HA 트리 162 케이스는 master/slave 토폴로지가 없어 회귀 증거에서 제외된다 (ADR-013). `impl/m1/regression-evidence.md` 에 미검증으로 명시할 것 |
+| `DeployHA` | T | 동상. ⚠️ **이식하되 미검증** — HA 트리 162 케이스는 master/slave 토폴로지가 없어 회귀 증거에서 제외된다 (ADR-013). `evidence/regression-shell.md` 에 미검증으로 명시할 것 |
 | **`TestCaseGithub` · `TestCaseSVN`** | **O — 제외 (2026-09-02)** | 케이스 코퍼스를 언제 갱신할지는 운영 결정이다. 단 `testcase_update_yn=yes` 는 **실패**시킨다 — 갱신을 요청했는데 조용히 안 되면 낡은 케이스로 통과했다는 거짓 신호가 난다 (`migration-exclusions.md` §2a) |
 
 ### 3-3. dispatch/ · main/ — 13 클래스

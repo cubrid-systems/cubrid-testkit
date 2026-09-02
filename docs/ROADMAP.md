@@ -35,7 +35,9 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 │   └── survey/            DBMS 테스팅 생태계 조사
 ├── ext/
 │   └── cubrid-sqlancer/   submodule — §6a-E3 SQLancer provider (별도 private 저장소)
-└── impl/                  Phase 3+ — 모듈별 구현
+├── go.mod                 모듈 루트는 저장소 루트다 (Go 표준 배치)
+├── cmd/testkit/           진입점
+└── internal/              구현 (Phase 3+)
 ```
 
 **레포 이름 결정 근거 (ADR-000 자리)**:
@@ -144,9 +146,9 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 **Exit 조건**: 선정된 모듈(**shell / rqg / unittest**, ADR-004)이 새 시스템에서 동작하며, `bin/ctp.sh` 호환 진입점에서 기존 결과와 **회귀 동등성** 확인. 판정 기준은 `external-surface-freeze.md` 의 등급별 — F1 은 diff 0, F2 는 필드 단위 비교, F3 는 수용 여부 (ADR-003 Consequence 3).
 
 **산출물**:
-- `impl/m1/` — 첫 모듈 구현 코드
-- `impl/m1/migration-bridge.md` — 기존 ctp.sh가 새 구현으로 라우팅되는 방식
-- `impl/m1/regression-evidence.md` — 동일 testcases 입력에 대한 신/구 출력 동등성 보고서
+- `internal/runner/shellsuite/` — 첫 Runner 구현 코드
+- `design/migration-bridge.md` — 기존 ctp.sh가 새 구현으로 라우팅되는 방식 *(코드가 아니라 문서이므로 docs/ 아래)*
+- `evidence/regression-shell.md` — 동일 testcases 입력에 대한 신/구 출력 동등성 보고서 (판정 기준은 ADR-013)
 - ADR-010 — 신/구 공존 기간 동안의 *유지보수 정책* *(구 초안의 ADR-005 — 번호 충돌로 재배정, `adr/README.md` 참조)*
 
 ---
@@ -156,8 +158,8 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 **Exit 조건**: 심도 4개 모듈이 모두 새 시스템에서 동작. 인벤토리 모듈은 *새 시스템 위의 얇은 어댑터*로 동작 가능.
 
 **산출물**:
-- `impl/m2/`, `impl/m3/`, `impl/m4/` — 모듈 단위 구현
-- `impl/adapters/{inventory_module}.md` × N — 인벤토리 모듈에 대한 *호환 어댑터* 명세 (재작성 아님)
+- `internal/runner/{sqlsuite,isolation,replication}/` — Runner 단위 구현
+- `design/adapters/{inventory_module}.md` × N — 인벤토리 모듈에 대한 *호환 어댑터* 명세 (재작성 아님)
 - ADR-011 — 인벤토리 모듈 중 *재작성 대상*과 *어댑터 유지 대상* 분류 *(구 초안의 ADR-006 — 번호 충돌로 재배정)*
 
 ---
@@ -208,7 +210,7 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
   — 미정.
 - *입력 코퍼스 정책*: 외부 트리 import vs mirror vs 자체 작성 — 미정.
   라이선스 점검 포함.
-- *어댑터 위치*: `impl/sqllogictest/` 신 모듈 vs 인벤토리 모듈 — Phase 2
+- *어댑터 위치*: `internal/runner/sqllogictest/` 신 Runner vs 인벤토리 모듈 — Phase 2
   contracts 결정에 종속.
 - *결과 비교 모드*: sqllogictest 표준의 hash 기반 vs CUBRID expected 파일
   추가 — 미정.

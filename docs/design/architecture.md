@@ -61,10 +61,13 @@
 
 ## 3. 패키지 구조
 
+저장소 루트가 곧 Go 모듈 루트다. `src/` 같은 중간 디렉터리를 두지 않는 것이 Go 관행이고,
+gopls · golangci-lint · CI 액션이 모두 모듈 루트를 가정한다.
+
 ```
-impl/
-├── cmd/testkit/main.go          진입점. 인자를 cli 에 넘기고 종료 코드를 정한다
-└── internal/
+go.mod                           모듈 루트 = 저장소 루트
+cmd/testkit/main.go              진입점. 인자를 cli 에 넘기고 종료 코드를 정한다
+internal/
     ├── cli/          동결된 CLI 문법 파싱 · task 이름 해석 · conf fallback
     ├── conf/         INI 로딩 · dot-notation 전개 · 우선순위(default < env.instanceN)
     ├── topology/     env.instance* 를 인스턴스/역할 모델로. SSH 자격과 원격 경로
@@ -170,7 +173,7 @@ isolation  → java -cp isolation.jar ... isolation.Main.exec(conf)
 webconsole → java cqt.webconsole.Starter <conf> <webRoot> {start|stop}
 ```
 
-⚠️ **용어** — 이 라우팅을 담는 것이 `impl/m1/migration-bridge.md` 의 "브리지"다.
+⚠️ **용어** — 이 라우팅을 담는 것이 `design/migration-bridge.md` 의 "브리지"다.
 NG5 가 금지하는 "jar 호환 layer"(구 모듈이 새 구현을 라이브러리로 호출)와 다른 것이다.
 
 ---
@@ -253,7 +256,7 @@ type Format interface {
 
 ROADMAP §3 의 Exit 조건에 대한 답.
 
-**빌드**: `impl/` 에서 `go build ./cmd/testkit` 하나로 끝난다. `shellsuite` Runner 가 의존하는 것은
+**빌드**: 저장소 루트에서 `go build ./cmd/testkit` 하나로 끝난다. `shellsuite` Runner 가 의존하는 것은
 `cli` `conf` `topology` `registry` `exec` `dispatch` `caseformat` `result` `feedback` `coreanalyze` 뿐이고,
 그중 어느 것도 기존 CTP 자산을 컴파일 시점에 필요로 하지 않는다. `legacy` Runner 도 `os/exec` 만 쓴다.
 

@@ -9,7 +9,7 @@
 ## 1. 모듈 위치 (의제)
 
 ```
-impl/sqlancer/
+ext/cubrid-sqlancer/   # 확정: 별도 저장소 (ADR-EXT-003)
    ├── oracle/
    │     ├── norec/      # WHERE p ↔ COUNT(*) WHERE (p IS TRUE) rowcount 비교
    │     ├── tlp/        # WHERE p ↔ p IS TRUE / IS FALSE / IS NULL 합집합
@@ -22,15 +22,15 @@ impl/sqlancer/
 ## 2. dialect adapter 위치 (의제)
 
 ```
-impl/dialect/                # 후보 1 — testkit 내부 공통 레이어 (E2/E3 공유)
+internal/catalog/                # 후보 1 — testkit 내부 공통 레이어 (E2/E3 공유)
    ├── catalog.{rs,go,java} # CUBRID system catalog 추상화
    ├── grammar.*            # CUBRID dialect 가산 (path / serial / connect_by / method)
    └── adapter.*            # SQL emitter
 
 # vs
 
-impl/sqlsmith/dialect/       # 후보 2 — 도구별 분산
-impl/sqlancer/dialect/
+internal/runner/sqlsmith/dialect/       # 후보 2 — 도구별 분산
+ext/cubrid-sqlancer/   # 확정: 별도 저장소 (ADR-EXT-003)dialect/
 ```
 
 ADR-EXT-003 (Open Question 3) 에서 결정.

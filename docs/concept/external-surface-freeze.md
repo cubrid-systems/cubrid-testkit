@@ -260,10 +260,21 @@ Testing End!
 ```
 [ENV START] <envId>
 [TESTCASE] <tc> EnvId=<envId> [OK]
-[TESTCASE] <tc> EnvId=<envId> [NOK], retry: <N>
+[TESTCASE] <tc> EnvId=<envId> [NOK]
+[TESTCASE] <tc> EnvId=<envId> [NOK], TRY-><N>
 [ENV STOP] <envId>
 ```
-`, retry: <N>` 은 shell 한정(DispatchTicket), 재시도가 있을 때만.
+
+> **Corrected 2026-09-02, while implementing `internal/result`.** The draft above read
+> `, retry: <N>` and said the suffix appears "only when a retry happened". Both were wrong,
+> and this is an F1 marker, so a consumer would have broken on either.
+>
+> - The literal is `TRY->`, from `Constants.RETRY_FLAG` in the shell module — not `retry: `.
+> - The suffix hangs on `maxRetryCount != 0`, that is on retries being **configured**, not on a
+>   retry having occurred (`shell/main/Test.java:189`). A first-attempt failure therefore prints
+>   `, TRY->0` as soon as `testcase_retry_num` is set.
+> - It never appears on `[OK]`, and never in the isolation module at all
+>   (`isolation/Test.java:135` has no suffix).
 
 ### 4-3. 원격 `runone.sh` 마커 (isolation)
 
@@ -282,13 +293,23 @@ found fatal error
 ### 5-1. 결과 디렉터리 레이아웃 — **F1**
 
 ```
-<CTP_HOME>/result/<task>/<timestamp>/          ← currentLogDir
+<CTP_HOME>/result/<category>/current_runtime_logs/     ← currentLogDir
 ├── main_snapshot.properties        (conf 스냅샷 + AUTO_BUILD_ID / AUTO_BUILD_BITS)
 ├── dispatch_tc_ALL.txt             (전체 케이스 절대경로, 한 줄당 하나 — continue mode 입력)
 ├── dispatch_tc_FIN_<envId>.txt     (env 별 완료 — ALL 과의 차집합이 재개 대상)
-├── test_<envId>.log                (워커 로그)
-└── <resultDir>/main.info
+└── test_<envId>.log                (워커 로그)
 ```
+
+> **Corrected 2026-09-02, while implementing `internal/result`.** Two errors here.
+>
+> - **There is no timestamp in the path.** `Context.java:172-173` builds it as
+>   `getToolHome() + "/result/" + category + "/current_runtime_logs"` — a fixed directory name.
+>   `jdbc/bin/run.sh:66` spells out the same literal. The draft said `result/<task>/<timestamp>/`,
+>   and ADR-013 consequently listed a timestamp among the values to mask during regression
+>   comparison. There is nothing there to mask.
+> - **`main.info` is not part of this layout.** It belongs to the sql/cqt side
+>   (`cqt/console/util/TestUtil.java:108`, `TOTAL_SUMMARY_FILE = "/main.info"`), and the shell
+>   family never writes one. It stays frozen — for the sql runner, in §5-2.
 
 ### 5-2. `main.info` — **F1** (`:` 구분)
 

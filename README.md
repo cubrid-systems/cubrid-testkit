@@ -143,9 +143,13 @@ Settled, and worth knowing before reading further:
 
 ## Conventions
 
-Documentation and commit messages are written in **English**, matching the other repositories in
-this organisation. The Phase 0–2 documents predate that decision and are still in Korean; they are
-being converted.
+This README and all commit messages are written in **English**, matching the other repositories in
+this organisation.
+
+The working documents under `docs/` are in **Korean** and stay that way — they were written that
+way through Phases 0–2 and translating six thousand lines would buy nothing but a chance to
+introduce errors into the one place where precision matters most. New material added at the repo
+level is English; `docs/` continues in Korean.
 
 Every decision that was hard to reverse gets an ADR, numbered in
 [`docs/adr/README.md`](docs/adr/README.md), which is the single authority on numbering — two

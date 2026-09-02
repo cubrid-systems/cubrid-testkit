@@ -1,0 +1,4 @@
+[submodule "ext/cubrid-sqlancer"]
+	path = ext/cubrid-sqlancer
+	url = https://github.com/cubrid-systems/cubrid-sqlancer.git
+	branch = main

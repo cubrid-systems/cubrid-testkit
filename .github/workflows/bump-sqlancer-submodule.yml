@@ -1,0 +1,105 @@
+# cubrid-sqlancer 의 main 이 움직이면 이 저장소의 submodule 포인터를 올리는 PR 을 연다.
+#
+# 트리거 3종:
+#   repository_dispatch — cubrid-sqlancer 가 push 직후 보내는 신호 (즉시)
+#   workflow_dispatch   — 수동
+#   schedule            — 신호가 유실돼도 하루 한 번은 따라잡는다
+#
+# 필요한 secret: SUBMODULE_PAT
+#   scope: cubrid-systems/cubrid-sqlancer 읽기 + 이 저장소 contents/PR 쓰기
+#   (둘 다 private 이므로 GITHUB_TOKEN 으로는 submodule 을 읽을 수 없다)
+name: Bump cubrid-sqlancer submodule
+
+on:
+  repository_dispatch:
+    types: [sqlancer-updated]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-sqlancer-submodule
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.SUBMODULE_PAT }}
+
+      - name: Advance submodule to origin/main
+        id: upd
+        run: |
+          set -euo pipefail
+          cd ext/cubrid-sqlancer
+          git fetch --quiet origin main
+          old="$(git rev-parse HEAD)"
+          new="$(git rev-parse origin/main)"
+          if [ "$old" = "$new" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "already at $new"
+            exit 0
+          fi
+          git checkout --quiet "$new"
+          {
+            echo "changed=true"
+            echo "old=$old"
+            echo "new=$new"
+            echo "short=$(git rev-parse --short "$new")"
+          } >> "$GITHUB_OUTPUT"
+          # PR 본문에 들어갈 변경 목록
+          {
+            echo 'log<<SUBMODULE_LOG'
+            git log --no-merges --format='- %s (%h)' "$old..$new" | head -40
+            echo 'SUBMODULE_LOG'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the pull request
+        if: steps.upd.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
+          NEW: ${{ steps.upd.outputs.new }}
+          OLD: ${{ steps.upd.outputs.old }}
+          SHORT: ${{ steps.upd.outputs.short }}
+          LOG: ${{ steps.upd.outputs.log }}
+        run: |
+          set -euo pipefail
+          branch="bot/bump-sqlancer"
+          git config user.name  "cubrid-systems-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add ext/cubrid-sqlancer
+          git commit -m "chore(submodule): bump cubrid-sqlancer to ${SHORT}
+
+$LOG
+
+이 커밋은 봇이 만들었다. cubrid-sqlancer 의 main 이 ${OLD:0:7} 에서 ${NEW:0:7} 로
+움직여 submodule 포인터를 따라 올린다."
+          git push --force-with-lease origin "$branch"
+
+          if gh pr view "$branch" --json number >/dev/null 2>&1; then
+            echo "기존 PR 갱신됨"
+          else
+            gh pr create \
+              --base main --head "$branch" \
+              --title "chore(submodule): bump cubrid-sqlancer to ${SHORT}" \
+              --body "cubrid-sqlancer 의 \`main\` 이 움직여 submodule 포인터를 올린다.
+
+\`${OLD:0:7}\` → \`${NEW:0:7}\`
+
+## 변경 내용
+
+$LOG
+
+---
+자동 생성 — \`.github/workflows/bump-sqlancer-submodule.yml\`"
+          fi

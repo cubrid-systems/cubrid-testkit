@@ -17,6 +17,9 @@ cubrid-testtools/         (기존, 동결 대상)
 ├── CTP/                   살아 있음 — Phase 0 ~ 4 동안 지속 가동
 └── ROADMAP.md             고수준 의도만 유지, 상세는 새 레포로
 
+cubrid-sqlancer/           (신규, §6a-E3 — cubrid-testkit 이 submodule 로 참조)
+└── SQLancer provider. 독립 실행 도구이며 Phase 2 contracts 이후 통합 검토
+
 cubrid-testkit/            (신규, 이번 작업의 결과물)
 ├── docs/                  모든 문서
 │   ├── README.md          "CTP의 후계 — strangler-fig 진행 중" 명시
@@ -30,6 +33,8 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 │   ├── design/            Phase 2 — 아키텍처/모듈 설계 (미착수)
 │   ├── extensions/        §6a 확장 E1~E7
 │   └── survey/            DBMS 테스팅 생태계 조사
+├── ext/
+│   └── cubrid-sqlancer/   submodule — §6a-E3 SQLancer provider (별도 private 저장소)
 └── impl/                  Phase 3+ — 모듈별 구현
 ```
 

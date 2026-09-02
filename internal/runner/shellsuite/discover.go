@@ -96,12 +96,12 @@ func findAll(dir string) string {
 //
 // docs/evidence/spec-corrections.md 11.
 func Discover(ctx context.Context, ch exec.Channel, workspace string) ([]string, error) {
-	res, err := ch.Run(ctx, findAll(workspace))
+	res, err := runIn(ctx, ch, findAll(workspace))
 	if err != nil {
 		return nil, fmt.Errorf("discover cases under %s: %w", workspace, err)
 	}
 	var cases []string
-	for _, line := range strings.Split(res.Combined(), "\n") {
+	for _, line := range strings.Split(res.Output(), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || !IsCase(line) {
 			continue

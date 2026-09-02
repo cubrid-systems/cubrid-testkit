@@ -87,7 +87,7 @@ func (j *junit) testCase(name, envID string, elapsed time.Duration, outcome, mes
 	}
 	fmt.Fprint(j.w, ">")
 	fmt.Fprintf(j.w, "<![CDATA[\nEnvIdentify: %s\nHostname: %s\n%s\n]]>",
-		envID, os.Getenv("HOSTNAME"), cdataSafe(details))
+		envID, orNull(os.Getenv("HOSTNAME")), cdataSafe(details))
 	fmt.Fprintf(j.w, "</%s>\n    </testcase>\n", outcome)
 }
 

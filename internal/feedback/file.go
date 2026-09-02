@@ -123,7 +123,9 @@ func (f *File) TaskStart(string) {
 	f.start = time.Now()
 	f.writeTaskID(0)
 	f.println("[Task Id] is 0")
-	f.println("[TASK START] Current Time is " + javaDate(time.Now()) + ", start MSG Id is " + f.MsgID)
+	// Java concatenated a null MsgID into the string, so a run without the
+	// scheduler says "is null" rather than trailing off.
+	f.println("[TASK START] Current Time is " + javaDate(time.Now()) + ", start MSG Id is " + orNull(f.MsgID))
 }
 
 func (f *File) TaskContinue() {
@@ -356,6 +358,16 @@ func (f *File) writeTaskID(id int) {
 		return
 	}
 	os.WriteFile(filepath.Join(f.dir, "current_task_id"), []byte(strconv.Itoa(id)+"\n"), 0o644)
+}
+
+// orNull renders an absent value the way Java's string concatenation does. It
+// looks like a bug and is not: "null" is what these lines have always said, and a
+// reader who greps for it should keep finding it.
+func orNull(s string) string {
+	if s == "" {
+		return "null"
+	}
+	return s
 }
 
 // millis renders a duration the way a Java long of milliseconds prints.

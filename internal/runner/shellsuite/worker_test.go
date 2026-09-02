@@ -155,7 +155,7 @@ func (g *guardedChannel) Run(ctx context.Context, script string) (exec.Result, e
 	g.mu.Unlock()
 
 	switch {
-	case script == versionScript:
+	case strings.Contains(script, versionScript):
 		v := g.version
 		if v == "" {
 			v = "CUBRID 11.4.5 (11.4.5.1875-74d17e9) (64bit release build for Linux) (Apr 29 2026 15:30:55)"

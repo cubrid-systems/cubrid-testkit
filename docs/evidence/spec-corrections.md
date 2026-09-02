@@ -42,7 +42,7 @@ chase; it does not volunteer.
 
 ## 3. Found by writing the code
 
-Every literal was taken from CTP's source rather than from the notes. Fifteen disagreed.
+Every literal was taken from CTP's source rather than from the notes. Nineteen disagreed.
 
 | Spec said | Actually | Source |
 |---|---|---|
@@ -64,12 +64,19 @@ Every literal was taken from CTP's source rather than from the notes. Fifteen di
 | — | **A build id can run past the version.** With no `-` after the four-part number the scan takes everything up to the next `)`, so a `cubrid_rel` line without a commit suffix yields `11.2.0.0000) (64bit release build for linux_gnu` as the build id. Deterministic, so it still identifies a build | `CommonUtils.getBuildId` |
 | — | **The retry flag has two spellings.** The console prints `[NOK], TRY->2`; `feedback.log` prints `[NOK]: TRY-> = 2`, using the same literal as a label rather than a prefix | `FeedbackFile.onTestCaseStopEvent` |
 | a configuration with no `env.instanceN` keys is an error — `Not found any environment instance to test on it!` | **it is a local run.** The `Context` constructor adds an environment called `local` when the list comes back empty, so `Main.exec`'s check for an empty list can never fire and that error message is unreachable. The specification recorded the dead branch and not the behaviour. Running against the engine on the machine you are sitting at is how the suite is driven during development, and it is the only way to exercise it without a second host | `Context.java:125-130`, `Main.exec` |
+| — | **Every script CTP sends has a prologue.** Outside the frame it sources `~/.bash_profile`, preserving an explicitly-set `CTP_HOME` across it; inside the frame it resolves `CTP_HOME`, sets `ulimit -c unlimited`, puts `$CTP_HOME/bin` and `common/script` on `PATH`, `cd`s home and exports `init_path`. An ssh exec session is neither a login nor interactive, so without it a case fails on its own first line — `. $init_path/init.sh` | `ScriptInput.getCommands`, `GeneralScriptInput`, `ShellScriptInput` |
+| — | **CTP discards standard error.** `SSHConnect` reads `exec.getInputStream()` and nothing else; the local path concatenates stdout and stderr and then truncates at the completion marker, which sits at the end of stdout. That is why a case is run as `sh <case>.sh 2>&1` and the reset script is not | `SSHConnect.execute`, `LocalInvoker.execCommands` |
+| — | **`[INFO] CLEAN PROCESSES: ` and `[INFO] Reset CUBRID: `** are the worker log's literals for the two steps before each case | `Test.resetProcess`, `Test.resetCUBRID_linux` |
+| — | **Java prints `null` for an absent value.** `start MSG Id is null` when the scheduler set no `MSG_ID`; `Hostname: null` in the XML when `$HOSTNAME` is unset. Both are what these lines have always said | `FeedbackFile` |
 | the worker collects `<name>.result` and diffs it against `<name>.answer` | **there is no diff.** The case writes its own verdict into `<name>.result`; the worker `cat`s it and fails the case if any line contains the substring `NOK`. The entire shell source contains no reference to `answer` | `Test.collectGeneralResult`, `grep -rn answer shell/src` |
 
 **What this method catches:** anything where the spec paraphrased instead of quoting. Writing a
 literal into a program forces you to know it exactly; prose lets you almost know it.
 
 ## 4. Found by running it
+
+Two kinds: running the new runner, and running it *beside* CTP on the same cases. The second is what
+`regression-shell.md` is, and it found the last four rows here on its own.
 
 | | |
 |---|---|
@@ -81,6 +88,9 @@ literal into a program forces you to know it exactly; prose lets you almost know
 | **Four more result files.** `feedback.log`, `test_status.data`, `current_task_id` and `test-<category>.xml` are written by the feedback backend, which is the default. The last is JUnit XML with a GitHub URL in the `classname` attribute — the one output here that something other than a person reads | `FeedbackFile` |
 | **`test_status.data` is not reproducible.** `Properties.store` stamps the current time into a comment and emits keys in hash order, so the counters file differed on every run for reasons that had nothing to do with the run | `CommonUtils.writeProperties` |
 | **A resumed run's XML report is broken.** `writeTestSuiteStart` is reached only from `setTotalTestCase`, which returns early in continue mode — so no `<testsuite>` is opened, cases become children of `<testsuites>`, and the close writes one end-element too many, throws, and skips its own flush | `FeedbackFile.finalizeXmlWriter` |
+
+| **`check_<envId>.log`** — a twenty-one line requirements check (variables, commands, directories) written to the file *and* to standard output before any case runs. The specification had neither the file nor the console lines | `CheckRequirement` |
+| **`monitor_<envId>.log` is created whether or not anything is written to it**, so every result directory has one, usually empty | `TestMonitor`, `Log` |
 
 **What this method catches:** whole surfaces nobody thought to write down. Reading more carefully
 would not have found these, because the question "what else does it print?" has no place to be
@@ -173,7 +183,7 @@ nothing, are both invisible until someone has to decide whether to carry them ov
 
 A frozen surface is only as good as the reading behind it, and the reading was done six different
 ways here with six different yields. The spec was not careless — it was written from a careful
-analysis — and it was still wrong in twenty-six places, every one of them F1.
+analysis — and it was still wrong in thirty-two places, every one of them F1.
 
 Three practical consequences:
 
@@ -188,7 +198,7 @@ Three practical consequences:
 
 ## Where CTP does not agree with itself
 
-Some of the twenty-six are not errors the spec could have avoided by reading harder. They are
+Some of the thirty-two are not errors the spec could have avoided by reading harder. They are
 places where CTP cannot reproduce its own behaviour, or where two parts of it contradict each other.
 Each one needs a decision, and the decisions are not all the same:
 

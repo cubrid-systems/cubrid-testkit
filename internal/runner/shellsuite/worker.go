@@ -109,23 +109,23 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console string) {
 	add := func(flag, msg string) { items = append(items, resultItem(flag, msg)) }
 
-	w.quietly(ctx, KillScript(w.Local), "reset processes")
-	w.quietly(ctx, RestoreScript(), "restore CUBRID")
+	w.quietly(ctx, KillScript(w.Local), "CLEAN PROCESSES:", "Fail to reset processes")
+	w.quietly(ctx, RestoreScript(), "Reset CUBRID:", "Fail to reset CUBRID")
 	if w.CheckDiskSpace {
 		w.diskSpace(ctx)
 	}
 
-	res, err := w.Channel.Run(ctx, RunScript(c, w.Options))
+	res, err := runIn(ctx, w.Channel, RunScript(c, w.Options))
 	if err != nil {
 		add("NOK", "Runtime error ("+err.Error()+")")
 		return items, console
 	}
-	console = res.Combined()
+	console = res.Output()
 	w.log(console)
 
 	// do_check_more_errors appends what it finds to the case's own result file, so
 	// on this host its stdout is deliberately not read.
-	if _, err := w.Channel.Run(ctx, FinalCheckScript(c, w.Options)); err != nil {
+	if _, err := runIn(ctx, w.Channel, FinalCheckScript(c, w.Options)); err != nil {
 		add("NOK", "Runtime error. Fail to check more errors on "+w.Channel.Describe()+": "+err.Error())
 	}
 
@@ -142,11 +142,11 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 func (w *Worker) collect(ctx context.Context, c Case) ([]string, error) {
 	var text string
 	for attempt := range collectAttempts {
-		res, err := w.Channel.Run(ctx, CollectScript(c))
+		res, err := runIn(ctx, w.Channel, CollectScript(c))
 		if err != nil {
 			return nil, err
 		}
-		text = res.Combined()
+		text = res.Output()
 		if strings.TrimSpace(text) != "" {
 			break
 		}
@@ -210,13 +210,13 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, elapsed time.Duration
 
 // quietly runs a script whose output belongs in the worker log and whose failure
 // is not the case's fault.
-func (w *Worker) quietly(ctx context.Context, script, what string) {
-	res, err := w.Channel.Run(ctx, script)
+func (w *Worker) quietly(ctx context.Context, script, label, onError string) {
+	res, err := runIn(ctx, w.Channel, script)
 	if err != nil {
-		w.log("[ERROR] Fail to " + what + " (" + err.Error() + ")")
+		w.log("[ERROR] " + onError + " (" + err.Error() + ")")
 		return
 	}
-	w.log("[INFO] " + what + ": " + res.Combined())
+	w.log("[INFO] " + label + " " + res.Output())
 }
 
 // diskSpace calls the deployed check. CTP passed it two mail addresses and let it
@@ -228,7 +228,7 @@ func (w *Worker) diskSpace(ctx context.Context) {
 		fmt.Sprintf("check_disk_space `df -P $HOME | grep -v Filesystem | awk '{print $1}'` %s \"\" \"\"", w.ReserveDisk),
 	}, "\n")
 	start := time.Now()
-	if _, err := w.Channel.Run(ctx, script); err != nil {
+	if _, err := runIn(ctx, w.Channel, script); err != nil {
 		w.log("[FAIL] Check disk space FAIL on " + w.Channel.Describe())
 		w.log(err.Error())
 		return

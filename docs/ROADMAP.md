@@ -110,7 +110,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 - [x] `concept/external-surface-freeze.md` — 동결 명세. **§10 이 본 Phase 의 Exit 조건인 신↔구 1:1 매핑 표(22행)**
 - [x] `concept/non-goals.md` — NG1~NG11
 - [x] ADR-001 / ADR-002 / ADR-003 확정본
-- [x] `concept/phase0-retrospective.md` — 게이트 통과 기록 (구 `PHASE0_EXIT.md`)
+- [x] `concept/phase0-retrospective.md` — 게이트 통과 기록 (구 `concept/phase0-retrospective.md`(구 `PHASE0_EXIT.md`))
 
 **잔여 (Phase 2 진입 전 해소)**: `external-surface-freeze.md` §11-1(ext/script 외부 호출자 전수 확인) · §11-2(CI grep 대상 확인) · ADR-005(orphan task 폐기 정책) · NG3 결번 확인
 

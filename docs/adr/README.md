@@ -28,7 +28,7 @@
 ### ⚠️ 번호 충돌 해소 기록 (2026-09-02)
 
 ROADMAP 초안(§4·§5)은 `ADR-005 = 공존 유지보수 정책` / `ADR-006 = 인벤토리 분류` 로 적었고,
-`PHASE0_EXIT.md` §2-5(Phase 4 정밀 분석 산출)는 `ADR-005 = orphan enum 폐기` / `ADR-006 = DB setup recipe` 로 적어 **005·006 이 이중 배정**되어 있었다.
+`concept/phase0-retrospective.md`(구 `concept/phase0-retrospective.md`(구 `PHASE0_EXIT.md`)) §2-5 — Phase 4 정밀 분석 산출는 `ADR-005 = orphan enum 폐기` / `ADR-006 = DB setup recipe` 로 적어 **005·006 이 이중 배정**되어 있었다.
 
 **해소:** 005~009 는 Phase 4 정밀 분석의 5개 블록(coherent set)을 유지하고, ROADMAP 의 두 항목을 **010 / 011 로 재배정**했다. ROADMAP §4·§5 에 재배정 주석을 남겼다.
 

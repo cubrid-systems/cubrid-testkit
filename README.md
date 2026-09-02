@@ -142,7 +142,8 @@ Settled, and worth knowing before reading further:
 - **`jdbc` does not come along.** It shares a jar with `shell`, but it is a separate entry point that calls that jar directly, so it keeps working untouched. An earlier draft claimed otherwise
 - **RMI worker mode is retired.** It is unreachable with what ships: the config key defaults to `ssh`, appears in none of the 13 config files, its agent config is not shipped, and nothing launches its server. Asking for it now fails loudly instead of silently falling back
 - **Windows is stale** and out of scope. The native runner refuses it and says so
-- Regression equivalence is proven by **comparing normalised output over the whole shell corpus** — 3,722 cases, with the 204 in `_25_unstable` counted separately because their own readme says they depend on machine load and elapsed time
+- **The runner runs on one machine** ([ADR-014](docs/adr/ADR-014-one-machine.md)). Local by default; a remote machine is still one machine. Reaching *several* machines — the instance inventory, deploying to each, spreading cases between them — is QA operations, not test execution, and nothing CTP ships configures it: every SSH key in the 14 config files is a placeholder or commented out
+- Regression equivalence is proven by **comparing normalised output over the whole shell corpus** — 3,452 cases, with the 195 in `_25_unstable` counted separately because their own readme says they depend on machine load and elapsed time. Those counts were 3,722 and 204 until the discovery rule was corrected ([`spec-corrections.md`](docs/evidence/spec-corrections.md))
 
 ## Where to start reading
 

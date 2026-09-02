@@ -76,21 +76,33 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	category := categoryFor(req, string(req.Task))
 	continueMode := cfg.Bool("test_continue_yn", false)
 
-	instances, err := topology.From(cfg)
+	configured, err := topology.From(cfg)
 	if err != nil {
 		return quit("%v", err)
 	}
-	// No configured machine means this one.
-	local := len(instances) == 0
-	if local {
-		instances = []*topology.Instance{topology.Local(cfg)}
+	machine, extra := oneMachine(cfg, configured)
+	local := machine.IsLocal()
+
+	// CTP printed the whole instance list here. It still prints what the
+	// configuration named, so a run that mentions eight machines does not quietly
+	// look like a run that mentioned one.
+	names := make([]string, 0, len(configured))
+	for _, inst := range configured {
+		names = append(names, inst.EnvID())
 	}
-	envIDs := make([]string, 0, len(instances))
-	for _, inst := range instances {
-		envIDs = append(envIDs, inst.EnvID())
+	if len(names) == 0 {
+		names = []string{machine.EnvID()}
 	}
-	fmt.Printf("Available Env: [%s]\n", strings.Join(envIDs, ", "))
+	fmt.Printf("Available Env: [%s]\n", strings.Join(names, ", "))
 	fmt.Printf("Continue Mode: %v\n", continueMode)
+
+	for _, name := range extra {
+		fmt.Printf("[WARN] %s is configured but will not be used: this runner runs on one machine "+
+			"(ADR-014). Running everything on %s; to use %s as well, run a second runner against it\n",
+			name, machine.EnvID(), name)
+	}
+
+	instances := []*topology.Instance{machine}
 
 	if url := strings.TrimSpace(cfg.GetOr("cubrid_download_url", "")); url != "" {
 		fmt.Printf("[WARN] cubrid_download_url is set but installing builds is not this runner's job "+
@@ -233,11 +245,26 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	return err
 }
 
-// openChannels opens the two channels each instance needs. A worker spends most
-// of its life inside a case, so the monitor that has to interrupt it cannot
-// share.
+// oneMachine picks the machine this run uses, and names the ones it will not.
 //
-// No instances means a local run, and then both channels are this machine.
+// A configuration that names none describes this machine, which is what CTP did
+// too. A configuration that names several describes a fleet, and a fleet belongs
+// to the operations layer -- so the first is used and the rest are reported.
+// Leaving them out costs throughput, not correctness, which is why this warns
+// instead of failing (ADR-014, migration-exclusions.md 2a).
+func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.Instance, []string) {
+	if len(configured) == 0 {
+		return topology.Local(cfg), nil
+	}
+	var extra []string
+	for _, inst := range configured[1:] {
+		extra = append(extra, inst.EnvID())
+	}
+	return configured[0], extra
+}
+
+// openChannels opens the two channels the machine needs. A worker spends most of
+// its life inside a case, so the monitor that has to interrupt it cannot share.
 func openChannels(instances []*topology.Instance) (workers, monitors map[string]exec.Channel, err error) {
 	workers = map[string]exec.Channel{}
 	monitors = map[string]exec.Channel{}
@@ -371,8 +398,9 @@ func (s *Shell) recordSkipped(report feedback.Feedback, cases []string, kind fee
 	}
 }
 
-// deploy configures each instance and takes the snapshot every case is restored
-// from. Installing a build is not part of it.
+// deploy configures the machine and takes the snapshot every case is restored
+// from. It prepares the engine under test; it does not provision anything
+// (ADR-014). Installing a build is not part of it either.
 func (s *Shell) deploy(ctx context.Context, instances []*topology.Instance,
 	channels map[string]exec.Channel, sink *result.Sink) error {
 
@@ -410,8 +438,12 @@ func (s *Shell) deploy(ctx context.Context, instances []*topology.Instance,
 	return errors.Join(errs...)
 }
 
-// test starts one worker and one monitor per instance and waits for the queue to
-// drain.
+// test starts the worker and its monitor and waits for the queue to drain.
+//
+// One machine means one worker: a case restores the whole CUBRID install before
+// it runs, so two cases cannot share a machine even if two workers could share a
+// queue. The queue keeps its concurrency anyway -- it is what defines the retry
+// ordering, and that is worth having whatever the worker count is.
 func (s *Shell) test(ctx context.Context, instances []*topology.Instance,
 	channels, monitorChannels map[string]exec.Channel, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config, buildID, bits string, local bool) error {

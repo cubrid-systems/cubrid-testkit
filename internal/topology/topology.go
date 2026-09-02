@@ -1,4 +1,10 @@
-// Package topology reads the machines a run uses out of the configuration.
+// Package topology reads the machine a run uses out of the configuration.
+//
+// A run uses one (ADR-014). The instance keys can describe several, because the
+// frozen configuration allows it and because a reader has to be told which ones
+// are being left out -- but choosing between them, deploying to all of them and
+// spreading cases across them is fleet management, and that is the operations
+// layer's job rather than this one's.
 //
 // The shape comes from two families of key:
 //

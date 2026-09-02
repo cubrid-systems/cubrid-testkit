@@ -1,0 +1,132 @@
+// Package topology reads the machines a run uses out of the configuration.
+//
+// The shape comes from two families of key:
+//
+//	default.<role>.<property>          applies to every instance
+//	env.instance<N>.<role>.<property>  applies to instance N, and wins
+//
+// Both are frozen (docs/concept/external-surface-freeze.md §2-3). <property> is
+// not drawn from a list: whatever follows the role is carried through, which is
+// how an arbitrary cubrid.conf parameter reaches the remote machine.
+package topology
+
+import (
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+)
+
+// Roles that appear under default.* and env.instanceN.*.
+const (
+	RoleSSH          = "ssh"
+	RoleCUBRID       = "cubrid"
+	RoleBroker1      = "broker1"
+	RoleBroker2      = "broker2"
+	RoleBrokerCommon = "brokercommon"
+	RoleHA           = "ha"
+	RoleCM           = "cm"
+	RoleMaster       = "master"
+	RoleSlave        = "slave"
+)
+
+// Roles is every role the frozen configuration uses.
+var Roles = []string{
+	RoleSSH, RoleCUBRID, RoleBroker1, RoleBroker2,
+	RoleBrokerCommon, RoleHA, RoleCM, RoleMaster, RoleSlave,
+}
+
+var instancePattern = regexp.MustCompile(`^env\.instance([0-9]+)\.`)
+
+// Instance is one machine in the run, identified the way CTP identifies it.
+type Instance struct {
+	ID int
+
+	// roles holds the merged property maps: defaults first, then the instance's
+	// own keys on top.
+	roles map[string]map[string]string
+}
+
+// EnvID is what appears in the frozen markers, as in "[ENV START] env1".
+func (i *Instance) EnvID() string { return fmt.Sprintf("env%d", i.ID) }
+
+// Role returns the merged properties for a role. The map is a copy.
+func (i *Instance) Role(role string) map[string]string {
+	out := map[string]string{}
+	for k, v := range i.roles[role] {
+		out[k] = v
+	}
+	return out
+}
+
+// SSH is the connection to this instance.
+type SSH struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	// Related lists the extra hosts an HA instance touches, from
+	// env.instanceN.ssh.relatedhosts.
+	Related string
+}
+
+// SSH reads the ssh role.
+func (i *Instance) SSH() SSH {
+	p := i.roles[RoleSSH]
+	return SSH{
+		Host:     p["host"],
+		Port:     firstNonEmpty(p["port"], "22"),
+		User:     p["user"],
+		Password: p["pwd"],
+		Related:  p["relatedhosts"],
+	}
+}
+
+// From builds the instances a configuration describes, ordered by id.
+//
+// An instance exists because at least one env.instanceN.* key mentions it. A
+// configuration with no such key describes no instances, which is correct for the
+// local-only tasks.
+func From(cfg *conf.Config) ([]*Instance, error) {
+	ids := map[int]bool{}
+	for _, k := range cfg.Keys() {
+		if m := instancePattern.FindStringSubmatch(k); m != nil {
+			n, err := strconv.Atoi(m[1])
+			if err != nil {
+				return nil, fmt.Errorf("instance number in %q: %w", k, err)
+			}
+			ids[n] = true
+		}
+	}
+
+	ordered := make([]int, 0, len(ids))
+	for id := range ids {
+		ordered = append(ordered, id)
+	}
+	sort.Ints(ordered)
+
+	out := make([]*Instance, 0, len(ordered))
+	for _, id := range ordered {
+		inst := &Instance{ID: id, roles: map[string]map[string]string{}}
+		for _, role := range Roles {
+			merged := cfg.Prefixed("default." + role)
+			for k, v := range cfg.Prefixed(fmt.Sprintf("env.instance%d.%s", id, role)) {
+				merged[k] = v
+			}
+			inst.roles[role] = merged
+		}
+		out = append(out, inst)
+	}
+	return out, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}

@@ -36,7 +36,10 @@ than asserting them:
 
 That last row is the honest one. The analysis that justified this project had a hole in it, found
 later by re-running the survey properly. It is written down where it happened rather than quietly
-fixed.
+fixed, and so are the eight further places the freeze specification turned out to be wrong once
+code started reading the same source it did — [`evidence/spec-corrections.md`](docs/evidence/spec-corrections.md)
+collects them by how each was caught, because the four methods yielded four different classes of
+error and none of them found the others.
 
 None of this is an argument that CTP was built badly. It is an argument that a runner and an
 operations pipeline have different reasons to change, and keeping them in one program makes both
@@ -152,6 +155,7 @@ Settled, and worth knowing before reading further:
 | how it is built | [`design/architecture.md`](docs/design/architecture.md) · [`design/contracts.md`](docs/design/contracts.md) |
 | what happens next | [`ROADMAP.md`](docs/ROADMAP.md) · [`design/module-shell.md`](docs/design/module-shell.md) |
 | every decision so far | [`adr/README.md`](docs/adr/README.md) |
+| where the freeze spec was wrong, and how each error was caught | [`evidence/spec-corrections.md`](docs/evidence/spec-corrections.md) |
 
 ## Conventions
 

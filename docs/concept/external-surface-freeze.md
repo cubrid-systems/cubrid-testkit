@@ -499,6 +499,30 @@ finish()    # 정리
 > with `source: not found` and `function: not found`. No frozen output changes. A test asserts the
 > shipped `function` syntax runs, so a change back to `sh` fails in CI rather than only on Debian.
 
+### 7-3a. 원격 실행의 프레이밍 — **F1**
+
+> **Added 2026-09-02, while implementing the SSH channel.** The spec described what runs remotely
+> but not how output is delimited.
+
+`SSHConnect` sends the script through one `ChannelExec` and keeps only what lies between two
+markers (`ScriptInput`):
+
+```
+echo ALL_${NOTEXIST}STARTED
+   … the script …
+echo ALL_${NOTEXIST}COMPLETED
+```
+
+- The markers the reader looks for are `ALL_STARTED` and `ALL_COMPLETED`.
+- **The indirection is the mechanism, not an accident.** `$NOTEXIST` is unset, so the shell prints
+  `ALL_STARTED` while the script *text* says `ALL_${NOTEXIST}STARTED`. A shell that echoes its input
+  — `set -x`, a login banner, a replayed `sudo` line — therefore cannot be mistaken for the frame.
+  A rewrite that "simplifies" this to `echo ALL_STARTED` reintroduces the bug it was written to
+  avoid, and only under `set -x`.
+- The reader stops at `ALL_COMPLETED`; anything after it is discarded. Only stdout is read.
+- Connection settings: `StrictHostKeyChecking=no`, and
+  `PreferredAuthentications=password,publickey,keyboard-interactive`.
+
 ### 7-4. 원격 환경 전제 — **F3** (Windows 항목은 **NF**)
 
 `$CTP_HOME` · `$init_path` · `$JAVA_HOME`(+ multi-jdk `$JAVA_HOME_<VERSION>`) · `$CUBRID` · `$TEST_BIG_SPACE`(선택) · PATH 의 `cubrid`.

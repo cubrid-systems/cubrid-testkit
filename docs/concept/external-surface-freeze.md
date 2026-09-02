@@ -155,10 +155,24 @@ env.instance<N>.<role>.<property>  → instance<N> 오버라이드 (default 를 
 
 | 모듈 | 레이아웃 | 근거 |
 |---|---|---|
-| sql / medium / shell 계열 | `<...>/cases/<name>.<ext>` + `<...>/answers/<name>.answer` — **자매 디렉터리** | `case-formats.md` §2·§3 |
+| sql / medium | `<...>/cases/<name>.<ext>` + `<...>/answers/<name>.answer` — **자매 디렉터리** | `case-formats.md` §2·§3 |
+| **shell** | `<name>/cases/<name>.sh` — 스크립트 이름 = **두 단계 위 디렉터리 이름**. `answers/` 는 케이스가 쓰는 관례일 뿐 **러너는 읽지 않는다** (2026-09-02 정정) | `Dispatch.getAllTestCaseScripts` · `evidence/spec-corrections.md` |
 | **isolation** | `_NN_<isolation_level>/<topic>/<...>/` 안에 `.ctl` 과 `.answer` 가 **같은 디렉터리에 co-located**. `cases/`·`answers/` 자매 디렉터리 **없음** | `case-formats.md`:22,152 · `isolation/io-contract.md` §3-1 |
 
 `cases/` 세그먼트 필수 규칙은 **shell 모듈의 `Test.java` 한정**이다 (`lastIndexOf("cases")` 로 경로 분리 — `shell/io-contract.md` §3-1). isolation 에 적용하면 안 된다.
+
+**2026-09-02 정정 — shell 의 케이스 판별.** 위 표의 shell 행은 원래 "`cases/` 아래 아무 `*.sh`" 였고,
+그건 CTP 의 규칙이 아니다. `Dispatch` 는 `find` 결과를 awk 로 거른다:
+
+```
+awk -F "/" '{ if( $(NF-2)".sh"== $NF) print }'
+```
+
+즉 **파일 이름이 두 단계 위 디렉터리 이름 + `.sh`** 여야 하고, `cases` 라는 세그먼트는 검사조차
+하지 않는다. 이유는 `init_path/shell_utils.sh` 의 `do_check_more_errors` 가 결과 파일 이름을
+**디렉터리 이름**에서 만드는데(`${case_name}.result`) 러너는 **스크립트 이름**에서 만들기 때문이다 —
+둘이 같을 때만 일치한다. 이 규칙 때문에 `cases/` 안의 `PrintInfo.sh`·`common.sh` 같은 270개
+헬퍼가 케이스가 아니며, 코퍼스 크기도 3,722 이 아니라 **3,452** 다 (ADR-013 재계수).
 
 ### 3-2. answer variant — **F1**
 

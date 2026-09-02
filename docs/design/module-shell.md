@@ -95,10 +95,10 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 |---|---|
 | CLI | `ctp.sh {shell\|rqg\|unittest\|jdbc}` + `run_shell.sh` 의 축 T 옵션 8개 |
 | conf | `shell.conf` 26 · `shell_ci.conf` 42 · `ha_shell.conf` 28 · `unittest.conf`(옵션) · **`shell_agent.conf`** |
-| 케이스 | `<...>/cases/*.sh` + `<...>/answers/*.answer`. **`cases/` 세그먼트 필수는 이 모듈 한정** |
+| 케이스 | `<name>/cases/<name>.sh` — 스크립트 이름이 **두 단계 위 디렉터리 이름과 같아야** 한다 (2026-09-02 정정, `evidence/spec-corrections.md`). `answers/` 는 케이스가 쓰는 관례이지 러너가 읽는 파일이 아니다 |
 | 케이스 prologue | `. $init_path/init.sh` → `init test` → `set -x` |
 | unittest plug-in | `shell/local/<TEST_TYPE>.sh` 의 `init`/`list`/`execute`/`finish` + **`EEOOKK`** 마커 |
-| stdout | `[ENV START/STOP]` · `[TESTCASE] ... [OK\|NOK][, retry: N]` · `CORE_FILE:` |
+| stdout | `[ENV START/STOP]` · `[TESTCASE] <case> EnvId=<env> [OK\|NOK][, TRY-><N>]`. **`CORE_FILE:` 는 이 모듈 표면이 아니다** — sql/medium 의 `run_sql.sh` 소유 (2026-09-02 정정) |
 | 결과 파일 | `main_snapshot.properties` · `dispatch_tc_{ALL,FIN_*}.txt` · `test_<env>.log` · `main.info` |
 | 원격 자산 | `init_path/` 통째 복사. `commonforjdbc.jar` 포함 (배포 자산이지 빌드 산출물 아님) |
 | 종료 코드 | 0 / 255 |
@@ -110,20 +110,29 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 ```
 Validate   conf · scenario 디렉터리 · build URL 확인          실패 → 255
 deploy     인스턴스마다 init_path/ 복사, $init_path 셋업       exec.ssh
-discover   scenario 아래 cases/*.sh 수집                      caseformat "sh"
-           exclusion 적용 → macroSkipped / tempSkipped 분리
+discover   <name>/cases/<name>.sh 수집 → 정렬                shellsuite.IsCase
+           skip 매크로 · exclusion 적용 → macroSkipped / tempSkipped 분리
 dispatch   dispatch_tc_ALL.txt 기록 → env 별 워커 goroutine
   워커 루프 (env 마다)
-     ├ 케이스 하나 꺼냄
-     ├ 원격 실행 (타임아웃 = testcase_timeout_in_secs)
-     ├ <name>.result 회수 → .answer 와 diff
-     ├ core 발견 시 CORE_FILE: 출력
-     ├ 실패 + 재시도 남음 → 다시 큐로 (retry: N)
+     ├ 케이스 하나 꺼냄 (dispatch.Queue)
+     ├ CUBRID 초기화 → 원격 실행 (타임아웃 = testcase_timeout_in_secs)
+     ├ do_check_more_errors → <name>.result 회수 → NOK 줄 유무로 판정
+     ├ 실패 + core 없음 + 재시도 남음 → 재시도 큐 (1차 패스 완료 후 처리)
      └ [TESTCASE] 마커 · dispatch_tc_FIN_<env>.txt · Feedback
-report     main.info · 실패 케이스 백업 tar.gz                 종료 코드 0
+report     실패 케이스 백업 tar.gz                             종료 코드 0
 ```
 
 **continue mode** 는 `ALL − ⋃FIN` 차집합으로 재개한다.
+
+**판정은 diff 가 아니다** (2026-09-02 정정). 러너는 `.answer` 를 읽지 않는다 — shell 모듈 전체
+소스에 `answer` 라는 문자열이 없다. 케이스가 스스로 `<name>.result` 에 판정을 쓰고, 러너는 그 파일을
+`cat` 해서 `NOK` 부분문자열이 든 줄이 하나라도 있으면 실패로 본다. `.answer` 대조는 케이스가
+`$init_path` 헬퍼로 직접 하는 일이다. `main.info` 도 이 모듈이 쓰지 않는다 (sql/cqt 소유).
+
+**재시도는 1차 패스가 전부 끝난 뒤에 시작한다.** 워커가 3번 케이스를 일찍 실패시켜도 3000번이
+도는 동안 재시도하지 않는다. 재시도의 목적이 "불안정한 케이스"와 "깨진 빌드"를 가르는 것이므로,
+빌드가 전 범위를 한 번 받아본 뒤라야 그 구분이 의미를 가진다. **core 를 남긴 실패는 재시도하지
+않는다** — 다시 돌리면 찾으러 온 증거를 덮어쓴다.
 
 ---
 

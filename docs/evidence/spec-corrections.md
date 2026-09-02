@@ -35,6 +35,7 @@ Chasing the spec's own open questions.
 | `conf/shell_agent.conf` is a runtime config, graded F3 | **not shipped.** `Server.java` reads it by relative path, and it is in none of the 13 files | listing `conf/` |
 | RMI worker mode: retention undecided | **unreachable with what ships** — the key defaults to `ssh`, appears in no config, the agent config is absent, and nothing launches its server | reading `Context.java:163` |
 | `found core file` had no known consumer | **two test cases grep for it**, in a frozen repository | `grep` across the testcases repos |
+| `CORE_FILE:` is part of the shell module's stdout | it belongs to **sql/medium**. `common/ext/run_sql.sh` writes and greps it; the whole shell source contains no such string | `grep -rn CORE_FILE shell/` |
 
 **What this method catches:** things the analysis stopped short of. It needs a specific question to
 chase; it does not volunteer.
@@ -52,6 +53,8 @@ Every literal was taken from CTP's source rather than from the notes. Four disag
 | the unittest plug-in returns values via an `EEOOKK` marker | **three** markers: `GPROPSTART` ends the plug-in's output, values sit between `G_PROPERTY_<K>=` and `EEOOKK` | `GeneralLocalTest.invoke` |
 
 | — | **Remote output is delimited by a frame.** `echo ALL_${NOTEXIST}STARTED` … `echo ALL_${NOTEXIST}COMPLETED`, and only what lies between `ALL_STARTED` and `ALL_COMPLETED` is kept. The unset variable is the mechanism: the script's own text never matches the marker, so a shell echoing its input cannot open the frame early | `ScriptInput`, `SSHConnect` |
+| a shell case is any `<…>/cases/*.sh` | a case is `<name>/cases/<name>.sh` — **the script must be named after the directory two levels up**. The rule is an awk predicate, `$(NF-2)".sh" == $NF`, and the `cases/` segment is never checked at all | `Dispatch.getAllTestCaseScripts` |
+| the worker collects `<name>.result` and diffs it against `<name>.answer` | **there is no diff.** The case writes its own verdict into `<name>.result`; the worker `cat`s it and fails the case if any line contains the substring `NOK`. The entire shell source contains no reference to `answer` | `Test.collectGeneralResult`, `grep -rn answer shell/src` |
 
 **What this method catches:** anything where the spec paraphrased instead of quoting. Writing a
 literal into a program forces you to know it exactly; prose lets you almost know it.
@@ -63,6 +66,7 @@ literal into a program forces you to know it exactly; prose lets you almost know
 | **The dispatcher prints a banner around every task** — a rule, `TEST STARTED`, `TEST END`, `ELAPSE TIME`. The spec had no dispatcher output at all. The opening rule is printed *before* the task name is resolved, so an unknown task gets a banner and then help | `CTP.java:132-143,192-196` |
 | **unittest's output resembles nothing else** — step headings with a trailing space, a one-based index, `[SUCC]`/`[FAIL]` rather than `[OK]`/`[NOK]`, verdict on the same line as the name. The spec had described unittest's *plug-in contract* and never its output | `GeneralLocalTest.start` |
 | **Two console lines come from a feedback backend.** `Test Category:` and `The Number of Test Cases:` are printed by `FeedbackFile`, to its own file *and* to stdout. Nobody looking for console output would look there | `FeedbackFile.java:134-137` |
+| **`dispatch_tc_ALL.txt` is not reproducible.** It records the case list in `find` order, and `find` order is `readdir` order: three consecutive runs over the same unchanged tree gave three different lists, on two separate quiet trees. CTP cannot reproduce its own dispatch order, so this file was never an F1 surface — and neither is which environment ran which case | `find … \| cmp`, run three times |
 
 **What this method catches:** whole surfaces nobody thought to write down. Reading more carefully
 would not have found these, because the question "what else does it print?" has no place to be
@@ -87,16 +91,70 @@ environment always satisfied them.
 
 ---
 
+## One wrong rule, five wrong numbers
+
+The discovery rule above is worth following through, because it shows how far a single wrong
+sentence travels once other documents start counting with it.
+
+"A case is any `*.sh` under `cases/`" was used to size every corpus in ADR-013. Every one of those
+numbers was too large:
+
+| | Spec said | Actually | Source |
+|---|---|---|---|
+| shell corpus | 3,722 | **3,452** | `cubrid-testcases-private-ex/shell` |
+| `_01_utility` smoke set | 234 | **217** | same |
+| `_25_unstable` | 204 | **195** | same |
+| HA tree | 162 | **367** | `cubrid-testcases-private/HA/shell` |
+| `manually` | 12 | **2** | `cubrid-testcases-private/manually` |
+
+The 270 extra files are not tests. They are helpers the cases source or call: `PrintInfo.sh` (38
+copies), `ModifySysConf.sh` (11), `diagdb_parse.sh` (11), `build.sh`, `common.sh`, `sql.sh`. Running
+them as cases would not merely have inflated a count — it would have run 270 scripts standalone that
+were written to run inside another one.
+
+The naming rule has a reason, and finding it explains the whole thing. `do_check_more_errors` in
+`init_path/shell_utils.sh` derives the result file from the **directory** name:
+
+```sh
+result_file_full_name=${test_case_dir%/cases*}/cases/${case_name}.result
+```
+
+while the worker derives it from the **script** name. The two agree only when the script is named
+after its directory. A case that broke the convention would have its verdict read from a file
+nobody wrote.
+
+Two things fell out of chasing it:
+
+- **20 directories contain `cases/*.sh` and no case at all** — `_07_index_enhancement/_01_deadlock_default_isolation`
+  and its `tc_ds_*.sh` among them. They look like tests, they are in the repository, and CTP has
+  never run them. That is a finding for the test owners, not for the port.
+- **The rule now lives in one function**, `shellsuite.IsCase`, with a test that walks the real
+  corpus and asserts it selects exactly what CTP's awk selects — 3,452, agreeing case for case.
+
+**What this method catches:** nothing on its own. It is what happens when a corrected rule is
+carried back through everything that had quietly depended on it. The cost of *not* doing it is that
+the numbers keep looking authoritative.
+
 ## What this says about the freeze
 
-A frozen surface is only as good as the reading behind it, and the reading was done four different
-ways here with four different yields. The spec was not careless — it was written from a careful
-analysis — and it was still wrong in nine places, every one of them F1.
+A frozen surface is only as good as the reading behind it, and the reading was done five different
+ways here with five different yields. The spec was not careless — it was written from a careful
+analysis — and it was still wrong in thirteen places, every one of them F1.
 
-Two practical consequences:
+Three practical consequences:
 
 1. **The regression evidence, not the specification, is the contract** (ADR-013). A document can be
    wrong quietly; a diff cannot.
 2. **Corrections are recorded where the mistake was, and dated.** A spec that silently improves is
    indistinguishable from one that was always right, and the reader has no way to tell which parts
    have been tested against reality.
+3. **A correction is not finished until everything downstream of it is re-derived.** One wrong
+   sentence about case discovery produced five wrong corpus sizes in a second document, and those
+   numbers looked exactly as trustworthy as the right ones would have.
+
+Two of the thirteen are not errors the spec could have avoided by reading harder — they are places
+where CTP does not agree with itself. `find` order makes `dispatch_tc_ALL.txt` irreproducible across
+CTP's own runs, and `lastIndexOf("cases")` disagrees with the discovery rule on names no case
+currently uses. Both are recorded as deviations rather than reproduced: the first is sorted, the
+second matches the path segment. Where the original is nondeterministic, F1 is not a grade anything
+can earn, and pretending otherwise would only move the problem into the evidence.

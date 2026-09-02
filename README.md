@@ -1,4 +1,4 @@
-![cubrid-testkit — a test runner that only runs tests: find the cases, run them, judge them, write down what happened. Scheduling, notifying and issue filing belong somewhere else.](docs/assets/banner.svg)
+![cubrid-testkit — finds the cases, runs them, judges them, records what happened. Every task it takes over keeps the same commands and the same output. Shown: a run marking cases OK and NOK, and the summary it writes out.](docs/assets/banner.svg)
 
 **cubrid-testkit** runs CUBRID's functional tests, and that is the whole of it. Find the cases, run
 them against an engine, decide whether each one passed, write down what happened.

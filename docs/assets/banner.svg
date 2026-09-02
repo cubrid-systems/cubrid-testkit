@@ -1,43 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" width="880" height="200" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="cubrid-testkit — a test runner that only runs tests: find the cases, run them, judge them, record what happened. Every task it takes over keeps the same commands, the same output and the same exit codes.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" width="880" height="200" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="cubrid-testkit — finds the cases, runs them, judges them, records what happened. Every task it takes over keeps the same commands and the same output. Shown: a run marking cases OK and NOK, and the summary it writes out.">
 <style>
   .name{font-size:36px;font-weight:700;fill:#f8fafc;letter-spacing:-0.5px}
   .tag{font-size:13.5px;fill:#94a3b8}
   .meta{font-size:11px;fill:#64748b;letter-spacing:1.2px}
-  .lbl{font-size:8.5px;font-weight:700;fill:#22c55e;letter-spacing:1.2px}
-  .step{font-size:11.5px;font-weight:700;fill:#e2e8f0}
-  .sd{font-size:8.5px;fill:#64748b}
-  .box{fill:#14532d;stroke:#22c55e;stroke-width:1.3}
-  .flow{stroke:#22c55e;stroke-width:1.5;fill:none;marker-end:url(#g)}
+  .mono{font-size:10.5px;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .dim{fill:#475569}
+  .txt{fill:#94a3b8}
+  .ok{fill:#22c55e;font-weight:700}
+  .no{fill:#f87171;font-weight:700}
+  .sum{fill:#e2e8f0}
+  .panel{fill:#0b1220;stroke:#1e293b;stroke-width:1}
+  .rule{stroke:#1e293b;stroke-width:1}
 </style>
-<defs><marker id="g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
-  <path d="M0 0 L10 5 L0 10 z" fill="#22c55e"/></marker></defs>
 <rect x="0" y="0" width="880" height="200" fill="#0f172a"/>
 <rect x="0" y="0" width="6" height="200" fill="#2563eb"/>
 
 <text class="name" x="40" y="76">cubrid-testkit</text>
-<text class="tag"  x="41" y="104">A test runner that only runs tests — find the cases, run them, judge them, record what happened.</text>
-<text class="tag"  x="41" y="123">Every task it takes over keeps the same commands, the same output, the same exit codes.</text>
+<text class="tag"  x="41" y="104">Finds the cases, runs them, judges them, records what happened.</text>
+<text class="tag"  x="41" y="123">Every task it takes over keeps the same commands and the same output.</text>
 <text class="meta" x="41" y="158">FOR ENGINE DEVELOPERS AND QA · CUBRID SYSTEMS RESEARCH</text>
 
-<text class="lbl" x="510" y="68">THE WHOLE JOB</text>
+<rect class="panel" x="556" y="34" width="290" height="132" rx="6"/>
 
-<rect class="box" x="508" y="80" width="76" height="34" rx="5"/>
-<text class="step" x="521" y="101">discover</text>
-<text class="sd" x="513" y="128">cases on disk</text>
+<text class="mono dim" x="570" y="56">[ENV START] env1</text>
 
-<rect class="box" x="596" y="80" width="76" height="34" rx="5"/>
-<text class="step" x="623" y="101">run</text>
-<text class="sd" x="605" y="128">against an engine</text>
+<text class="mono txt" x="570" y="76">[TESTCASE] _01_utility/backupdb</text>
+<text class="mono ok"  x="800" y="76">[OK]</text>
 
-<rect class="box" x="684" y="80" width="76" height="34" rx="5"/>
-<text class="step" x="702" y="101">judge</text>
-<text class="sd" x="695" y="128">pass or fail</text>
+<text class="mono txt" x="570" y="94">[TESTCASE] _06_issues/bug_5342</text>
+<text class="mono no"  x="794" y="94">[NOK]</text>
 
-<rect class="box" x="772" y="80" width="76" height="34" rx="5"/>
-<text class="step" x="789" y="101">record</text>
-<text class="sd" x="777" y="128">markers, files</text>
+<text class="mono txt" x="570" y="112">[TESTCASE] _05_addition/cast</text>
+<text class="mono ok"  x="800" y="112">[OK]</text>
 
-<path class="flow" d="M584 97 L594 97"/>
-<path class="flow" d="M672 97 L682 97"/>
-<path class="flow" d="M760 97 L770 97"/>
+<text class="mono dim" x="570" y="132">[ENV STOP] env1</text>
+
+<line class="rule" x1="570" y1="142" x2="832" y2="142"/>
+<text class="mono sum" x="570" y="157">main.info</text>
+<text class="mono txt" x="646" y="157">total:3  success:2  fail:1</text>
 </svg>

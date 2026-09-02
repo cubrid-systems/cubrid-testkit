@@ -255,6 +255,57 @@ Test Result Directory:<path>
 Testing End!
 ```
 
+### 4-1a. 모든 task 를 감싸는 dispatcher 배너 — **F1**
+
+> **Added 2026-09-02, found by running the first old-vs-new comparison.** The spec had no
+> dispatcher output at all. Every task is bracketed by `CTP.java`'s own lines, whichever module
+> ends up running.
+
+```
+(blank line)
+====================================== <TASK IN CAPITALS> ==========================================
+[<TASK IN CAPITALS>] TEST STARTED (Wed Sep 02 21:03:13 KST 2026)
+(blank line)
+   ... the task's own output ...
+[<TASK IN CAPITALS>] TEST END (Wed Sep 02 21:05:44 KST 2026)
+[<TASK IN CAPITALS>] ELAPSE TIME: <n> seconds
+```
+
+- The opening rule is printed **before** the task name is resolved, so an unrecognised name gets a
+  banner and then help (`CTP.java:132-137`).
+- The date is `java.util.Date.toString()` — `EEE MMM dd HH:mm:ss zzz yyyy`.
+- Elapsed is **whole seconds, truncated**: CTP divides milliseconds by `1000.0` and casts to `long`.
+- `webconsole` returns before the task loop, so it gets none of this.
+
+### 4-1b. unittest 의 출력 — **F1**
+
+> **Added 2026-09-02.** The spec described unittest's *plug-in contract* but never its output, which
+> resembles nothing else in the system.
+
+```
+=> Init Step: 
+<init's own output>
+(blank)
+=> List Step: 
+Test Category:<category>
+The Number of Test Cases: <n> (macro skipped: <a>, bug skipped: <b>)
+=> Execute Step: 
+[TESTCASE-1] <case> [SUCC]
+[TESTCASE-2] <case> [FAIL]
+=> Finish Step: 
+<finish's own output>
+(blank)
+```
+
+- Each heading carries a **trailing space** after the colon.
+- The index is **one-based**, and the verdict is `[SUCC]` / `[FAIL]` — not `[OK]` / `[NOK]`.
+- The verdict lands on the **same line** as the case name (`print`, then `println`).
+- An empty list prints `[ERROR] Not found any test cases.` and the run **ends normally**: CTP returns
+  from `start()` and the exit code stays 0.
+- The two `Test Category:` / `The Number of Test Cases:` lines come from **`FeedbackFile`**, which
+  writes them to its own file *and* to standard output. They are console surface even though a
+  feedback backend produces them (`FeedbackFile.java:134-137`).
+
 ### 4-2. shell / isolation 계열
 
 ```

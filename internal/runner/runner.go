@@ -14,9 +14,12 @@ import (
 
 // Request is everything a Runner needs to carry out one task.
 type Request struct {
-	Task        cli.Task
-	Home        *conf.Home
-	ConfigPath  string // already resolved, explicit or fallen back
+	Task       cli.Task
+	Home       *conf.Home
+	ConfigPath string // already resolved, explicit or fallen back
+	// Config is the parsed file, or nil when there was none. unittest tolerates a
+	// missing file because CTP called GeneralLocalTest with a null argument.
+	Config      *conf.Config
 	Interactive bool
 	Extra       []string // webconsole's start|stop, and nothing else so far
 }

@@ -51,6 +51,8 @@ Every literal was taken from CTP's source rather than from the notes. Four disag
 | `main.info` is part of the shell layout | it belongs to sql/cqt; the shell family never writes one | `TestUtil.TOTAL_SUMMARY_FILE` |
 | the unittest plug-in returns values via an `EEOOKK` marker | **three** markers: `GPROPSTART` ends the plug-in's output, values sit between `G_PROPERTY_<K>=` and `EEOOKK` | `GeneralLocalTest.invoke` |
 
+| — | **Remote output is delimited by a frame.** `echo ALL_${NOTEXIST}STARTED` … `echo ALL_${NOTEXIST}COMPLETED`, and only what lies between `ALL_STARTED` and `ALL_COMPLETED` is kept. The unset variable is the mechanism: the script's own text never matches the marker, so a shell echoing its input cannot open the frame early | `ScriptInput`, `SSHConnect` |
+
 **What this method catches:** anything where the spec paraphrased instead of quoting. Writing a
 literal into a program forces you to know it exactly; prose lets you almost know it.
 

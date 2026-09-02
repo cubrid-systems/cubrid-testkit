@@ -155,13 +155,16 @@ Settled, and worth knowing before reading further:
 
 ## Conventions
 
-This README and all commit messages are written in **English**, matching the other repositories in
-this organisation.
+**Everything written from here on is in English** — documents, commit messages, all of it,
+matching the other repositories in this organisation.
 
-The working documents under `docs/` are in **Korean** and stay that way — they were written that
-way through Phases 0–2 and translating six thousand lines would buy nothing but a chance to
-introduce errors into the one place where precision matters most. New material added at the repo
-level is English; `docs/` continues in Korean.
+The Phase 0–2 documents under `docs/` are in Korean and stay that way. Translating six thousand
+lines of analysis buys nothing except a chance to introduce errors into the one place where wording
+is the whole value: a freeze specification is worth exactly what its sentences are worth.
+
+So `docs/` will be mixed for a while, and the split runs by date rather than by directory. That is
+worth stating plainly instead of pretending to a consistency the tree does not have. When an old
+Korean document is substantially rewritten rather than amended, it can come across then.
 
 Every decision that was hard to reverse gets an ADR, numbered in
 [`docs/adr/README.md`](docs/adr/README.md), which is the single authority on numbering — two

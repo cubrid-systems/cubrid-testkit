@@ -131,7 +131,7 @@ cubrid-testkit/
 | 0 — analysis | **done** | 39 documents. Appendix A of the CLI map was added later, after the first survey turned out to have covered one entry point out of fifteen |
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
-| **3 — rewrite `shell`** | **not started** | `shell` · `rqg` · `unittest`, Linux only |
+| **3 — rewrite `shell`** | **in progress** | `unittest` runs natively; `shell` runs end-to-end and matches CTP's verdicts on four real cases ([`regression-shell.md`](docs/evidence/regression-shell.md)). The gate is the full corpus, and `run_shell.sh`'s eight axis-T options are not written |
 | 4 — the rest | — | `sql` family, `isolation`, `ha_repl`, `cdc_repl`, `jdbc` |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 

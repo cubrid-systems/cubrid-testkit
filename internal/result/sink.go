@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
@@ -141,6 +142,61 @@ func (s *Sink) Finished(envID, name string) error {
 	}
 	_, err = fmt.Fprintln(f, name)
 	return err
+}
+
+// Remaining is the case list a resumed run has left: everything in
+// dispatch_tc_ALL.txt that no environment recorded as finished.
+//
+// A case that was still being retried when the run stopped is not in any FIN
+// file, so it comes back -- which is right, because it never reached a verdict.
+func (s *Sink) Remaining() ([]string, error) {
+	all, err := readLines(filepath.Join(s.dir, "dispatch_tc_ALL.txt"))
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", s.dir, err)
+	}
+	done := map[string]bool{}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "dispatch_tc_FIN") || !strings.HasSuffix(name, ".txt") {
+			continue
+		}
+		lines, err := readLines(filepath.Join(s.dir, name))
+		if err != nil {
+			return nil, err
+		}
+		for _, l := range lines {
+			done[l] = true
+		}
+	}
+
+	var left []string
+	for _, c := range all {
+		if !done[c] {
+			left = append(left, c)
+		}
+	}
+	return left, nil
+}
+
+func readLines(path string) ([]string, error) {
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	var out []string
+	for _, l := range strings.Split(string(body), "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 // All writes dispatch_tc_ALL.txt, the full pool for this run.

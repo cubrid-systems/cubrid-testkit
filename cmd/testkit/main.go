@@ -86,6 +86,16 @@ func run(args []string) int {
 	reg.Register(legacy.New(cli.Active...))
 	reg.Register(shellsuite.NewUnitTest())
 
+	// The shell runner is complete but has never been compared against CTP on a
+	// real machine, and taking over the task that runs 3,452 cases on the strength
+	// of unit tests would be the wrong way round. It is opt-in until
+	// docs/evidence/regression-shell.md exists; then this gate comes off and the
+	// registration below becomes unconditional, which is the whole mechanism of
+	// the migration (ADR-004, ADR-013).
+	if os.Getenv("TESTKIT_NATIVE_SHELL") == "1" {
+		reg.Register(shellsuite.NewShell())
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

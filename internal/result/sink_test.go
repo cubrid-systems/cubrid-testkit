@@ -136,3 +136,61 @@ func TestWorkerLogIsPerEnvironment(t *testing.T) {
 		t.Errorf("got %q", string(b))
 	}
 }
+
+// A resumed run takes the pool minus everything any environment finished. A case
+// that was mid-retry when the run stopped is in no finished list, so it comes
+// back -- which is right, because it never reached a verdict.
+func TestRemainingIsThePoolMinusWhatFinished(t *testing.T) {
+	home := &conf.Home{Path: t.TempDir()}
+	s, err := Open(home, "shell", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all := []string{"a/cases/a.sh", "b/cases/b.sh", "c/cases/c.sh", "d/cases/d.sh"}
+	if err := s.All(all); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finished("env1", "a/cases/a.sh"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Finished("env2", "c/cases/c.sh"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	resumed, err := Open(home, "shell", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resumed.Close()
+
+	left, err := resumed.Remaining()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"b/cases/b.sh", "d/cases/d.sh"}
+	if len(left) != len(want) {
+		t.Fatalf("got %v, want %v", left, want)
+	}
+	for i := range want {
+		if left[i] != want[i] {
+			t.Fatalf("got %v, want %v", left, want)
+		}
+	}
+}
+
+func TestRemainingIsEmptyWhenThereIsNothingToResume(t *testing.T) {
+	s, err := Open(&conf.Home{Path: t.TempDir()}, "shell", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	left, err := s.Remaining()
+	if err != nil {
+		t.Fatalf("resuming a directory with no previous run failed: %v", err)
+	}
+	if len(left) != 0 {
+		t.Errorf("got %v, want nothing", left)
+	}
+}

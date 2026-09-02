@@ -415,7 +415,38 @@ list()      # 케이스를 한 줄당 하나씩 stdout
 execute()   # $1 = testcase, 결과를 IS_SUCC=true|false
 finish()    # 정리
 ```
-호출 측은 stdout 의 **`EEOOKK` 마커**로 환경 변수를 회수. 마커 문자열까지 F1.
+
+> **Expanded 2026-09-02, while implementing `internal/runner/shellsuite`.** The draft named one
+> marker; the protocol has three, and it also constrains the shell.
+>
+> **How the plug-in is driven** (`GeneralLocalTest.invoke`). Each call builds one script:
+>
+> ```
+> cd ${CTP_HOME}; source shell/local/<TEST_TYPE>.sh; <command>
+> ; echo GPROPSTART
+> echo G_PROPERTY_<K>=${<K>}EEOOKK      # one line per variable wanted back
+> ```
+>
+> `${CTP_HOME}` is left for the shell to expand — CTP does not substitute it here.
+> Sourcing is what lets the four entry points be *functions* rather than four scripts, and it is
+> why `execute` can see what `init` exported.
+>
+> **Three frozen literals, not one:** `GPROPSTART` ends the plug-in's own output; each value is
+> what sits between `G_PROPERTY_<K>=` and the next `EEOOKK`, trimmed.
+>
+> **The verdict is a variable, not an exit code.** `execute` sets `IS_SUCC`; a failing case leaves
+> the shell exit status untouched. A plug-in that never sets it has *not* passed.
+>
+> **The contract requires a bash-compatible shell.** `shell/local/unittest.sh`, the only plug-in
+> CTP ships, declares `function init { ... }` — bash/ksh syntax that dash rejects — and the
+> protocol uses `source`, which is likewise not POSIX. CTP runs the script with `sh <tmpfile>`
+> (`common/LocalInvoker.exec`), so this has only ever worked because its machines have
+> `/bin/sh` → bash.
+>
+> **Recorded deviation:** testkit says `bash <tmpfile>` rather than `sh <tmpfile>`. It reproduces
+> what happens wherever CTP works, and additionally works where `/bin/sh` is dash — there CTP fails
+> with `source: not found` and `function: not found`. No frozen output changes. A test asserts the
+> shipped `function` syntax runs, so a change back to `sh` fails in CI rather than only on Debian.
 
 ### 7-4. 원격 환경 전제 — **F3** (Windows 항목은 **NF**)
 

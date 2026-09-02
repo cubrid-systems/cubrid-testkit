@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 640" width="880" height="640" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="cubrid-testkit architecture: frozen entry scripts call one Go binary, which routes each task either to a native runner or to the old CTP as a subprocess; both produce the same frozen output, and QA operations are excluded">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .band{font-size:9px;font-weight:700;fill:#9ca3af;letter-spacing:1.1px}
+  .h{font-size:11.5px;font-weight:700;fill:#1f2937}
+  .d{font-size:9.5px;fill:#6b7280}
+  .m{font-size:9px;fill:#2563eb;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .box{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .boxn{fill:#f0fdf4;stroke:#1a7f37;stroke-width:1.4}
+  .boxl{fill:#f9fafb;stroke:#9ca3af;stroke-width:1.2;stroke-dasharray:4 3}
+  .boxf{fill:#eff6ff;stroke:#2563eb;stroke-width:1.4}
+  .hdbox{fill:#eef2f7;stroke:#d1d5db;stroke-width:1}
+  .outbox{fill:#fafafa;stroke:#e5e7eb;stroke-width:1;stroke-dasharray:3 3}
+  .arw{stroke:#6b7280;stroke-width:1.4;fill:none;marker-end:url(#a)}
+  .note{font-size:9px;fill:#9ca3af}
+</style>
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+  <path d="M0 0 L10 5 L0 10 z" fill="#6b7280"/></marker></defs>
+<rect x="0" y="0" width="880" height="640" fill="#ffffff"/>
+
+<text class="ttl" x="30" y="30">cubrid-testkit — one binary, two kinds of runner, one frozen surface</text>
+<text class="sub" x="30" y="48">A task is either rewritten or still CTP. From the outside there is no way to tell which.</text>
+
+<!-- ENTRY -->
+<text class="band" x="30" y="76">ENTRY — the scripts people and CI already call. Frozen, and now thin shims</text>
+<rect class="boxf" x="30" y="84" width="640" height="60" rx="6"/>
+<rect class="box" x="44" y="98" width="140" height="32" rx="4"/><text class="m" x="54" y="118">bin/ctp.sh</text>
+<rect class="box" x="196" y="98" width="180" height="32" rx="4"/><text class="m" x="206" y="118">init_path/run_shell.sh</text>
+<rect class="box" x="388" y="98" width="130" height="32" rx="4"/><text class="m" x="398" y="118">sql/bin/run.sh</text>
+<rect class="box" x="530" y="98" width="126" height="32" rx="4"/><text class="m" x="540" y="118">jdbc/bin/run.sh</text>
+
+<path class="arw" d="M350 146 L350 176"/>
+<text class="note" x="360" y="166">same argv, same env — the shim adds nothing</text>
+
+<!-- TESTKIT -->
+<text class="band" x="30" y="200">TESTKIT — a single Go binary</text>
+<rect class="hdbox" x="30" y="208" width="640" height="152" rx="6"/>
+<rect class="box" x="44" y="222" width="132" height="44" rx="4"/>
+<text class="h" x="54" y="240">cli · conf</text><text class="d" x="54" y="256">INI, dot-notation</text>
+<rect class="box" x="188" y="222" width="132" height="44" rx="4"/>
+<text class="h" x="198" y="240">topology</text><text class="d" x="198" y="256">env.instance*</text>
+<rect class="box" x="332" y="222" width="132" height="44" rx="4"/>
+<text class="h" x="342" y="240">registry</text><text class="d" x="342" y="256">the only dispatch</text>
+<rect class="box" x="476" y="222" width="180" height="44" rx="4"/>
+<text class="h" x="486" y="240">exec · dispatch</text><text class="d" x="486" y="256">local · ssh, worker pool</text>
+
+<rect class="boxn" x="44" y="282" width="290" height="62" rx="5"/>
+<text class="h" x="56" y="301">native runner — shellsuite</text>
+<text class="d" x="56" y="317">shell · rqg · unittest</text>
+<text class="d" x="56" y="331">Linux only. Windows is stale and refused explicitly</text>
+
+<rect class="boxl" x="350" y="282" width="306" height="62" rx="5"/>
+<text class="h" x="362" y="301">legacy runner — the old CTP, as a subprocess</text>
+<text class="d" x="362" y="317">sql · medium · kcc · neis05 · neis08 · sql_by_cci</text>
+<text class="d" x="362" y="331">isolation · ha_repl · cdc_repl · jdbc · webconsole</text>
+
+<path class="arw" d="M189 362 L189 392"/>
+<path class="arw" d="M503 362 L503 392"/>
+
+<!-- TARGETS -->
+<text class="band" x="30" y="416">WHAT ACTUALLY RUNS THE CASES</text>
+<rect class="box" x="30" y="424" width="304" height="76" rx="6"/>
+<text class="h" x="44" y="443">remote workers over SSH</text>
+<text class="d" x="44" y="459">init_path/ deployed, $init_path set up</text>
+<text class="d" x="44" y="473">runone.sh · ctltool · the case itself</text>
+<text class="d" x="44" y="489">a case may still need $JAVA_HOME</text>
+<rect class="box" x="350" y="424" width="320" height="76" rx="6"/>
+<text class="h" x="364" y="443">CTP assets, still built</text>
+<text class="d" x="364" y="459">cubridqa-*.jar · cqt · ccqt · webconsole</text>
+<text class="d" x="364" y="473">argv and env reproduced byte for byte</text>
+<text class="d" x="364" y="489">no jar-compatibility layer, ever</text>
+
+<path class="arw" d="M182 502 L182 532"/>
+<path class="arw" d="M510 502 L510 532"/>
+
+<!-- OUTPUT -->
+<text class="band" x="30" y="556">FROZEN OUTPUT — the same from either path</text>
+<rect class="boxf" x="30" y="564" width="640" height="60" rx="6"/>
+<rect class="box" x="44" y="578" width="150" height="32" rx="4"/><text class="m" x="54" y="598">stdout markers</text>
+<rect class="box" x="206" y="578" width="150" height="32" rx="4"/><text class="m" x="216" y="598">main.info</text>
+<rect class="box" x="368" y="578" width="150" height="32" rx="4"/><text class="m" x="378" y="598">dispatch_tc_*.txt</text>
+<rect class="box" x="530" y="578" width="126" height="32" rx="4"/><text class="m" x="540" y="598">exit 0 / 255</text>
+
+<!-- EXCLUDED rail -->
+<text class="band" x="690" y="200">EXCLUDED — QA operations</text>
+<rect class="outbox" x="690" y="208" width="160" height="292" rx="6"/>
+<text class="d" x="702" y="230">Not a smaller version of</text>
+<text class="d" x="702" y="243">this system. A different</text>
+<text class="d" x="702" y="256">axis, deliberately left out.</text>
+<rect class="box" x="702" y="272" width="136" height="26" rx="4"/><text class="d" x="712" y="289">scheduler · queue</text>
+<rect class="box" x="702" y="306" width="136" height="26" rx="4"/><text class="d" x="712" y="323">mail · reporting</text>
+<rect class="box" x="702" y="340" width="136" height="26" rx="4"/><text class="d" x="712" y="357">issue registration</text>
+<rect class="box" x="702" y="374" width="136" height="26" rx="4"/><text class="d" x="712" y="391">FeedbackDB backend</text>
+<rect class="box" x="702" y="408" width="136" height="26" rx="4"/><text class="d" x="712" y="425">repo self-upgrade</text>
+<text class="d" x="702" y="452">It will be rebuilt later as</text>
+<text class="d" x="702" y="465">a layer that consumes the</text>
+<text class="d" x="702" y="478">output on the left — one</text>
+<text class="d" x="702" y="491">direction only.</text>
+</svg>

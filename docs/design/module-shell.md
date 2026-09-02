@@ -2,7 +2,8 @@
 
 - **Date:** 2026-09-02
 - **Status:** Accepted (Phase 2 산출물 — ADR-004 Consequence 1 에 따라 4개 모듈 중 가장 깊게)
-- **담당 task:** `shell` · `rqg` · `unittest` · **`jdbc`**
+- **담당 task:** `shell` · `rqg` · `unittest`  *(2026-09-02: `jdbc` 는 범위에서 제외 — §7-5)*
+- **어휘:** 이 문서는 **구 module** 을 **신 Runner** 로 옮기는 매핑이다. task / suite / module / Runner 의 정의는 `CONTEXT.md`
 - **Inputs:** `analysis/shell/{requirements,design,io-contract,implementation-notes,test-corpus}.md` · `analysis/_overview/cli-tree.md` 부록 A · `design/{architecture,contracts}.md`
 
 ---
@@ -20,7 +21,7 @@
 ctp.sh shell     ──▶ reflection → shell.main.Main.exec(conf)
 ctp.sh rqg       ──▶ 같은 경로 + TEST_CATEGORY=rqg
 ctp.sh unittest  ──▶ reflection → shell.main.GeneralLocalTest.exec(conf)
-ctp.sh jdbc      ──▶ sh jdbc/bin/run.sh <conf> → shell.main.JdbcLocalTest   ⚠️ 뒤늦게 식별
+ctp.sh jdbc      ──▶ sh jdbc/bin/run.sh <conf> → shell.main.JdbcLocalTest   ⚠️ 범위 밖 (§7-5)
 shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                    ⚠️ 두 번째 CLI 트리
 ```
 
@@ -52,8 +53,8 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | 구 클래스 | 축 | 신 컴포넌트 |
 |---|---|---|
 | `Deploy` · `DeployOneNode` | T | `runner/shellsuite/deploy` — `init_path/` 복사, `$init_path` 셋업 |
-| `DeployHA` | T | 동상 (HA 토폴로지 분기) |
-| **`TestCaseGithub` · `TestCaseSVN`** | **미결 (§7-2)** | 케이스 레포를 git pull/svn up 하는 코드. 축 판정 보류 |
+| `DeployHA` | T | 동상. ⚠️ **이식하되 미검증** — HA 트리 162 케이스는 master/slave 토폴로지가 없어 회귀 증거에서 제외된다 (ADR-013). `impl/m1/regression-evidence.md` 에 미검증으로 명시할 것 |
+| **`TestCaseGithub` · `TestCaseSVN`** | **O — 제외 (2026-09-02)** | 케이스 코퍼스를 언제 갱신할지는 운영 결정이다. 단 `testcase_update_yn=yes` 는 **실패**시킨다 — 갱신을 요청했는데 조용히 안 되면 낡은 케이스로 통과했다는 거짓 신호가 난다 (`migration-exclusions.md` §2a) |
 
 ### 3-3. dispatch/ · main/ — 13 클래스
 
@@ -70,7 +71,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | `Feedback` (인터페이스) | T | `feedback.Feedback` (C5) |
 | `GeneralLocalTest` | T | `runner/shellsuite` 의 unittest 경로. **4함수 컨트랙트 + `EEOOKK` 보존** |
 | `JdbcLocalTest` | T | `runner/shellsuite` 의 jdbc 경로 |
-| **`RunShellMain`** | **T/O 혼재** | 옵션 13개 중 **T 8개만**. `--enable-report` `--report-cron` `--mailto` `--mailcc` `--issue` 는 제외 |
+| **`RunShellMain`** | **T/O 혼재** | 옵션 13개 중 **T 8개만**. O 축 5개는 **경고 후 진행** (`migration-exclusions.md` §2a) |
 | **`ManualReportJob`** | **O** | **제외** — 리포트 잡 |
 
 ### 3-4. result/ — 3 클래스
@@ -84,7 +85,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 
 | 구 클래스 | 축 | 신 컴포넌트 |
 |---|---|---|
-| `Server` · `ShellService` · `ShellServiceImpl` | T | **미결** — RMI 워커 모드의 존치 여부가 freeze §11-6. `Channel` 의 세 번째 구현이 되거나 사라진다. **Phase 3 착수 전 결정** |
+| `Server` · `ShellService` · `ShellServiceImpl` | — | **이식하지 않는다 (2026-09-02).** RMI 워커 모드는 배포 자산만으로 도달 불가능함이 확인되어 폐기 (freeze §7-7). `agent_protocol=rmi` 는 경고 후 ssh 로 진행 |
 
 ---
 
@@ -144,17 +145,19 @@ report     main.info · 실패 케이스 백업 tar.gz                 종료 �
 
 ---
 
-## 7. 미결 — Phase 3 착수 전에 답해야 하는 것
+## 7. 결정 기록 — 2026-09-02 인터뷰에서 해소
 
-| # | 항목 | 왜 지금 필요한가 |
+| # | 항목 | 결정 |
 |---|---|---|
-| 7-1 | **RMI 워커 모드 존치/폐기** (freeze §11-6) | `service/` 3클래스의 운명과 `Channel` 구현 수가 갈린다 |
-| 7-2 | **`TestCaseGithub` / `TestCaseSVN` 의 축 판정** | 케이스 레포 갱신은 운영(O)에 가깝지만, `testcase_update_yn` · `testcase_git_branch` 가 F3 수용 대상이라 무시하면 조용한 동작 변화가 된다. **수용하되 무시**할지, **축 T 로 옮길**지 결정 필요 |
-| 7-3 | **shell `*_fail_backup_package*.tar.gz` 의 Windows 동작** (freeze §11-14) | isolation 과 달리 OS 조건이 소스에 없다. 잘못 빼면 Windows 레인에서 실패 아티팩트가 조용히 사라진다 |
-| 7-4 | **`shell_ci` exclusive 키 14 vs 16 불일치** (freeze §11-11) | 범위 산정에 직접 영향 |
-| 7-5 | **jdbc 출력 표면 미분석** (freeze §11-8) | inventory stub 이 비어 있다. jdbc 가 이 모듈에 딸려 오므로 Phase 3 범위다 |
+| 7-1 | RMI 워커 모드 | **폐기.** 배포 자산만으로 도달 불가능(freeze §7-7). `service/` 3클래스 미이식. `agent_protocol=rmi` 는 경고 후 ssh |
+| 7-2 | `TestCaseGithub` / `TestCaseSVN` | **축 O — 제외.** 단 `testcase_update_yn=yes` 는 실패시킨다 (`migration-exclusions.md` §2a) |
+| 7-3 | shell fail-backup 의 Windows 동작 | **질문 소멸.** Windows 가 공식 stale 이라 범위 밖 |
+| 7-4 | `shell_ci` exclusive 키 14 vs 16 | **미해소 — Phase 3 착수 시 확인** (freeze §11-11). 범위 산정에만 영향 |
+| **7-5** | **`jdbc` 를 범위에 넣는가** | **제외.** `jdbc/bin/run.sh` 는 `shell.main.JdbcLocalTest` 를 **jar 에서 직접** 띄우고 testkit 을 경유하지 않는다. 구 `cubridqa-shell.jar` 는 다른 3모듈 때문에 어차피 계속 빌드되므로 jdbc 는 손대지 않아도 그대로 돈다. **초안이 "딸려 온다"고 단정한 것은 근거가 없었다** |
+| **7-6** | **Windows** | **범위 밖.** 공식 stale. native runner 는 명시적으로 거부한다 |
+| **7-7** | **회귀 동등성의 정의** | **정규화 후 diff 0.** 코퍼스·마스킹 목록·제외 항목은 **ADR-013** |
 
-### 7-6. 범위 재산정 (ADR-004 Consequence 7)
+### 7-8. 범위 재산정 (ADR-004 Consequence 7)
 
 | 증감 | 항목 |
 |---|---|
@@ -163,7 +166,11 @@ report     main.info · 실패 케이스 백업 tar.gz                 종료 �
 | **+** | `shell_agent.conf` 처리 |
 | **−** | `ManualReportJob` · `FeedbackDB` · `GeneralFeedback` 의 메일 경로 |
 | **−** | `--report-cron` 제외로 **`cubridqa-scheduler.jar` 의존이 통째로 사라진다** |
-| **?** | `service/` 3클래스 — 7-1 에 종속 |
-| **?** | `TestCaseGithub` · `TestCaseSVN` — 7-2 에 종속 |
+| **−** | `service/` 3클래스 — RMI 폐기로 미이식 |
+| **−** | `TestCaseGithub` · `TestCaseSVN` — 축 O 제외 |
+| **−** | `JdbcLocalTest` — 범위 밖 |
+| **−** | Windows 경로 분기 전반 |
 
-**순증감은 7-1·7-2 가 정해져야 확정된다.** 그 전까지 ≈5000 LoC 추정은 근거가 약한 숫자로 취급한다.
+**7-1·7-2·7-5·7-6 이 모두 제외 방향으로 정해져 순증감은 음수다.** 그래도 ≈5000 LoC 라는 숫자 자체는
+근거가 약하므로(원래 `Main.exec` 한 갈래만 가정한 값이다) **재추정하지 않고 폐기한다.**
+범위는 LoC 가 아니라 위 표의 항목 목록으로 표현한다.

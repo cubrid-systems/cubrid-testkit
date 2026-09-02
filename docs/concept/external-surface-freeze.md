@@ -123,7 +123,7 @@ ha_repl.conf  cdc_repl.conf  webconsole.conf
 
 | 파일 | 용도 | 등급 |
 |---|---|---|
-| `conf/shell_agent.conf` | `agent_login_port` (default 1099) — shell RMI 서비스 | **F3** — 1차 대체 모듈의 런타임 conf |
+| ~~`conf/shell_agent.conf`~~ | RMI 에이전트용 | **등급 대상 아님 (2026-09-02)** — 이 파일은 **배포되지 않는다**. `Server.java:40` 이 `../conf/shell_agent.conf` 를 상대경로로 읽지만 13개 배포 conf 에 없다. 배포되지 않는 파일은 외부 표면이 아니다. RMI 모드 폐기(§7-7)와 함께 소멸 |
 | `sql/` 작업 디렉터리의 `local.properties` | cqt 의 `isdebug` / `qaview` | NF — 메인 conf 로 통합 권고 |
 
 ### 2-2. 키 스키마 — 81 고유 키 **F3**
@@ -396,10 +396,15 @@ finish()    # 정리
 ```
 호출 측은 stdout 의 **`EEOOKK` 마커**로 환경 변수를 회수. 마커 문자열까지 F1.
 
-### 7-4. 원격 환경 전제 — **F3**
+### 7-4. 원격 환경 전제 — **F3** (Windows 항목은 **NF**)
 
 `$CTP_HOME` · `$init_path` · `$JAVA_HOME`(+ multi-jdk `$JAVA_HOME_<VERSION>`) · `$CUBRID` · `$TEST_BIG_SPACE`(선택) · PATH 의 `cubrid`.
-Windows: `cygpath` · cygwin · `*Regedit.bat`.
+~~Windows: `cygpath` · cygwin · `*Regedit.bat`~~ → **NF (2026-09-02)** — Windows 는 공식 stale 이므로
+지킬 의무가 없다. native runner 는 Windows 를 **명시적으로 거부**한다.
+
+⚠️ 단 testcases 에는 Windows 자산이 남아 있다 — `cygpath` 를 참조하는 케이스 **59개**,
+`.answer_win` / `.answer_WIN` 파일 **155개**. NG1 동결 자산이라 사라지지 않는다.
+**"동결된 입력이지만 실행하지 않는 것"** 으로 분류한다. 안 그러면 나중에 왜 안 도는지가 미궁이 된다.
 ⚠️ `$JAVA_HOME` 은 **케이스가 사용**하므로 새 시스템이 Go 여도 원격에 계속 셋업해야 한다.
 
 ### 7-5. 케이스 결과 회수 채널
@@ -414,12 +419,21 @@ Windows: `cygpath` · cygwin · `*Regedit.bat`.
 
 **시그니처만 동결하고 끝내면 안 된다.** 이 체인이 다르면 모든 isolation 케이스의 판정이 달라진다. 정규화 패턴 전수 목록은 §11-15, 정형화는 ADR-009.
 
-### 7-7. RMI alive-ping (shell)
+### 7-7. RMI 워커 모드 — **폐기 (2026-09-02)**
 
-```
-echo HELLO   →   응답이 HELLO 이면 alive, 아니면 1초 대기 후 재시도
-```
-RMI 모드 존치 여부 자체가 미결 (§11-6)이므로 **등급 미결**.
+**배포 자산만으로는 도달할 수 없다**는 것이 확인되어 폐기한다.
+
+| 근거 | |
+|---|---|
+| conf 키 | `Context.java:163` 이 `agent_protocol` 을 읽고 **기본값이 `"ssh"`**. 이 키는 배포되는 13개 conf 어디에도 없다 |
+| 에이전트 conf | `conf/shell_agent.conf` 가 **배포되지 않는다** |
+| 서버 기동 | `service/Server` 를 띄우는 launcher 가 15개 진입점 조사에 **없다** |
+
+**처리:** `agent_protocol=rmi` 가 conf 에 오면 **경고 후 ssh 로 진행**한다. 조용히 폐기하지 않는 이유는
+NG7(dead surface 를 침묵하는 no-op 으로 남기지 않는다)이고, 실패가 아니라 경고인 이유는 §2-5 의 규칙이다 —
+ssh 는 원래 기본값이므로 **테스트 결과가 달라지지 않는다**.
+
+alive-ping 규약(`echo HELLO` → `HELLO`)도 함께 소멸한다. §11-6 은 이것으로 **해소**.
 
 ### 7-8. 원격 배포 자산 — **F1 (배포물)**
 
@@ -535,15 +549,15 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 11-3 | `.sql` pragma 전수 목록 + `--@<connId>` 확인 | 케이스 파서 범위 | Phase 4 (sql 대체 전) |
 | 11-4 | 백업 tar.gz 파일명 정확한 구분자 | F2 → F1 승격 여부 | Phase 4 |
 | 11-5 | ~~Feedback DB 스키마~~ | **해제됨** — `FeedbackDB` 는 축 O 제외 | — |
-| 11-6 | `ShellService` RMI 인터페이스 + **RMI 모드 존치/폐기 판단** | §7-7·§10 행 15 의 등급 확정 | **Phase 3 착수 전** |
+| 11-6 | ~~RMI 모드 존치/폐기~~ | **해소 (2026-09-02) — 폐기.** 근거는 §7-7 | 완료 |
 | 11-7 | answer variant 선택의 **`runMode` 값 출처** | 알고리즘은 확인됨. 값이 어디서 오는지가 미상 | Phase 4 |
-| 11-8 | **jdbc / ha_repl / cdc_repl 출력 표면 미분석** — inventory stubs 0/5 | §10 행 10·12 와 §6-1 의 `-1` 이 유추 | Phase 4 (jdbc 는 **Phase 3**, §1-3 T4 때문) |
+| 11-8 | **jdbc / ha_repl / cdc_repl 출력 표면 미분석** — inventory stubs 0/5 | §10 행 10·12 와 §6-1 의 `-1` 이 유추 | **Phase 4** — jdbc 가 Phase 3 범위에서 빠져(`module-shell.md` §7-5) 더 이상 Phase 3 블로커가 아니다 |
 | 11-9 | ~~로컬 체크아웃과 baseline 차이~~ | **해소 (2026-09-02)** — `ComponentEnum.java` · `Test.java` · `bin/ctp.sh` 모두 **변경 없음**. 본 명세의 근거는 유효하다 | 완료 |
 | 11-10 | `bin/ini.sh` / `IniCommand` 의 CLI 표면 + 외부 사용자 | 등급 부여 | Phase 2 |
 | 11-11 | `shell_ci` exclusive 키 14 vs 16 불일치 | Phase 3 범위 산정 | Phase 2 |
 | 11-12 | `.diff_1` 이 입력인가 산출물인가 | §3-2 vs §5 배치 | Phase 4 |
 | 11-13 | `.ctl` grammar 정형화 | ADR-008 | Phase 2 |
-| 11-14 | shell `*_fail_backup_package*.tar.gz` 의 Windows 동작 | 실패 아티팩트 유실 위험 | **Phase 3** |
+| 11-14 | ~~shell fail-backup 의 Windows 동작~~ | **소멸 (2026-09-02)** — Windows 가 범위 밖이 되어 질문 자체가 사라졌다 | 완료 |
 | 11-15 | **`runone.sh` sed 정규화 패턴 전수 목록** | §7-6 — 모든 isolation 판정이 여기 의존 | Phase 4 (ADR-009) |
 | 11-16 | `jdbc_config_file` charset XML 스키마 | §8-5 | Phase 4 |
 | 11-17 | `ErrorInterrupt` cascade-abort 정책 | 실행 중단 동작이 관측 가능 | Phase 4 |

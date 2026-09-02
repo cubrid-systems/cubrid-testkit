@@ -101,7 +101,7 @@ ROADMAP 과 extensions 문서가 NG1·NG2·NG4 를 참조하지만 **NG3 은 어
 | 항목 | 판정 | 근거 |
 |---|---|---|
 | §6a 확장 E1~E7 | **범위 안** (additive) | ROADMAP §6a. 단 strangler-fig 우선(§8 risk 마지막 행) |
-| Windows / cygwin 지원 | **범위 안** (유지) | 기존 케이스가 `cygpath`·`*Regedit.bat` 에 의존. 단 *네이티브* Windows 지원 추가는 범위 밖 |
+| Windows / cygwin 지원 | **범위 밖 (2026-09-02 정정)** | Windows 는 **공식 stale**. native runner 는 명시적으로 거부한다. testcases 에 남은 Windows 자산(`cygpath` 참조 59 케이스, `.answer_win/_WIN` 155 파일)은 **"동결된 입력이지만 실행하지 않는 것"** 으로 분류. 초안은 "범위 안(유지)"이라고 적었다 |
 | interactive 모드 | **범위 안** (동작 보존) | F1. `#SCRIPTCONT` **메커니즘**만 NF |
 | ctltool native 자산 | **범위 안** (그대로 빌드·호출) | ADR-002 / ADR-007 Option B |
 | core dump 분석 (`coreanalyzer`) | **범위 안** | `CORE_FILE:` 마커가 F1 이므로 기능 자체가 필요 |

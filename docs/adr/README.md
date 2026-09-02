@@ -10,7 +10,8 @@
 | [001](ADR-001-implementation-language.md) | Implementation language | **Go** | 2026-09-02 |
 | [002](ADR-002-build-tool.md) | Build tool | `go build` + `go.mod` + Justfile 메타 + `ctltool/Makefile` 유지 | 2026-09-02 |
 | [003](ADR-003-external-surface-freeze.md) | External surface freeze | CLI/conf/출력/종료코드/원격컨트랙트만 동결. jar·Java API 제외. F1/F2/F3/NF 4등급 | 2026-09-02 |
-| [004](ADR-004-first-replacement-candidate.md) | First replacement candidate | **Option C' — shell 단독** (rqg / unittest 포함) | 2026-09-02 |
+| [004](ADR-004-first-replacement-candidate.md) | First replacement candidate | **Option C' — shell 단독** (rqg / unittest). ~~jdbc~~ 는 2026-09-02 결정으로 제외 | 2026-09-02 |
+| [013](ADR-013-regression-equivalence.md) | How regression equivalence is proven | 정규화 후 diff 0. 코퍼스 = shell 전체 3,722, 스모크 = `_01_utility` 234. `_25_unstable` 별도 집계, HA·manually·Windows 제외 | 2026-09-02 |
 
 ## 예약 (미결 — 트리거 대기)
 
@@ -24,6 +25,8 @@
 | 010 | 신/구 공존 기간의 유지보수 정책 | Phase 3 | ROADMAP §4 |
 | 011 | 인벤토리 모듈의 재작성 / 어댑터 분류 | Phase 4 | ROADMAP §5 |
 | 012 | **QA 운영 층**의 경계와 재구축 설계 (scheduler / mail / issue / queue) | Phase 5 완료 후 또는 운영 필요 발생 시 | `migration-exclusions.md` §3 |
+
+> 013 은 아래 예약 번호보다 먼저 확정되었다. 예약은 *트리거 대기*일 뿐 순서가 아니다.
 
 ### ⚠️ 번호 충돌 해소 기록 (2026-09-02)
 

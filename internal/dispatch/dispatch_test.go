@@ -1,9 +1,6 @@
 package dispatch
 
-import (
-	"sync"
-	"testing"
-)
+import "testing"
 
 func drain(t *testing.T, q *Queue, outcome func(Ticket) (success, core bool)) []Ticket {
 	t.Helper()
@@ -86,44 +83,29 @@ func TestAnEmptyQueueIsFinishedImmediately(t *testing.T) {
 	}
 }
 
-// Run under -race: every case goes to exactly one worker, and the queue drains.
-func TestConcurrentWorkersEachTakeACaseOnce(t *testing.T) {
-	cases := make([]string, 200)
+// One worker, every case once, in order. The queue used to hold a condition
+// variable so several workers on several machines could share it; with one
+// machine there is one worker (ADR-014), and this is what is left to check.
+func TestEveryCaseIsHandedOutOnceInOrder(t *testing.T) {
+	cases := []string{"a", "b", "c", "d"}
+	q := New(cases, 0)
+
+	var got []string
+	for {
+		tk, ok := q.Claim()
+		if !ok {
+			break
+		}
+		got = append(got, tk.Case)
+		q.Complete(tk, true, false)
+	}
+
+	if len(got) != len(cases) {
+		t.Fatalf("got %v, want %v", got, cases)
+	}
 	for i := range cases {
-		cases[i] = string(rune('a'+i%26)) + string(rune('0'+i/26))
-	}
-	q := New(cases, 1)
-
-	var mu sync.Mutex
-	firstPass := map[string]int{}
-
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				tk, ok := q.Claim()
-				if !ok {
-					return
-				}
-				mu.Lock()
-				if !tk.IsRetry() {
-					firstPass[tk.Case]++
-				}
-				mu.Unlock()
-				q.Complete(tk, true, false)
-			}
-		}()
-	}
-	wg.Wait()
-
-	if len(firstPass) != len(cases) {
-		t.Fatalf("%d distinct cases ran, want %d", len(firstPass), len(cases))
-	}
-	for c, n := range firstPass {
-		if n != 1 {
-			t.Errorf("case %q ran %d times in the first pass", c, n)
+		if got[i] != cases[i] {
+			t.Fatalf("got %v, want %v", got, cases)
 		}
 	}
 	if !q.Finished() {
@@ -131,26 +113,44 @@ func TestConcurrentWorkersEachTakeACaseOnce(t *testing.T) {
 	}
 }
 
-func TestStopReleasesWaitingWorkers(t *testing.T) {
-	q := New([]string{"a", "b"}, 0)
+// Claim does not block any more, so Stop is not a wake-up: it is how a cancelled
+// context ends the run between one case and the next.
+func TestStopEndsTheQueue(t *testing.T) {
+	q := New([]string{"a", "b", "c"}, 0)
 
-	// Claim "a" and never complete it, so the second worker blocks waiting for
-	// the first pass to finish.
-	if _, ok := q.Claim(); !ok {
+	tk, ok := q.Claim()
+	if !ok {
 		t.Fatal("nothing to claim")
 	}
-	if _, ok := q.Claim(); !ok {
-		t.Fatal("nothing to claim")
-	}
-
-	released := make(chan bool, 1)
-	go func() {
-		_, ok := q.Claim()
-		released <- ok
-	}()
+	q.Complete(tk, true, false)
 
 	q.Stop()
-	if ok := <-released; ok {
+
+	if _, ok := q.Claim(); ok {
 		t.Error("Claim returned a ticket after Stop")
 	}
+	if !q.Finished() {
+		t.Error("a stopped queue does not report itself finished")
+	}
+}
+
+// Stop arrives from the goroutine watching the context while the worker is
+// between claims, so those two do race and the mutex still has to hold. Run
+// under -race.
+func TestStopIsSafeAlongsideAWorker(t *testing.T) {
+	q := New([]string{"a", "b", "c", "d", "e"}, 1)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			tk, ok := q.Claim()
+			if !ok {
+				return
+			}
+			q.Complete(tk, false, false)
+		}
+	}()
+	q.Stop()
+	<-done
 }

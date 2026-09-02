@@ -2,11 +2,9 @@ package shellsuite
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
@@ -22,11 +20,11 @@ import (
 // Shell runs the shell task, and rqg, which is the same machinery under a
 // different category.
 type Shell struct {
-	// Channels opens the two channels each instance needs. It is a field because
-	// the choice of machine is the one thing that varies between a local run and a
+	// Channels opens the two channels the machine needs. It is a field because the
+	// choice of machine is the one thing that varies between a local run and a
 	// remote one, and because a test cannot be allowed to open the real ones: the
 	// reset that runs before every case would kill the test.
-	Channels func([]*topology.Instance) (workers, monitors map[string]exec.Channel, err error)
+	Channels func(*topology.Instance) (worker, monitor exec.Channel, err error)
 }
 
 // NewShell returns the runner for the shell and rqg tasks.
@@ -102,8 +100,6 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 			name, machine.EnvID(), name)
 	}
 
-	instances := []*topology.Instance{machine}
-
 	if url := strings.TrimSpace(cfg.GetOr("cubrid_download_url", "")); url != "" {
 		fmt.Printf("[WARN] cubrid_download_url is set but installing builds is not this runner's job "+
 			"(docs/concept/migration-exclusions.md 1-4a). Testing the build that is installed; "+
@@ -122,26 +118,18 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	}
 	defer report.Close()
 
-	// One channel per instance for the workers, and a second for each monitor.
 	opener := s.Channels
 	if opener == nil {
 		opener = openChannels
 	}
-	channels, monitorChannels, err := opener(instances)
+	worker, monitor, err := opener(machine)
 	if err != nil {
 		return quit("%v", err)
 	}
-	defer func() {
-		for _, ch := range channels {
-			ch.Close()
-		}
-		for _, ch := range monitorChannels {
-			ch.Close()
-		}
-	}()
+	defer worker.Close()
+	defer monitor.Close()
 
-	first := channels[instances[0].EnvID()]
-	buildInfo, err := runIn(ctx, first, versionScript)
+	buildInfo, err := runIn(ctx, worker, versionScript)
 	if err != nil {
 		return quit("Please confirm your build installation for local test! (%v)", err)
 	}
@@ -168,39 +156,36 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// ---- requirements ----------------------------------------------------
 	// A machine that cannot run cases should say so once, here, rather than
 	// through 3,452 identical failures.
-	for _, inst := range instances {
-		envID := inst.EnvID()
-		logFile, err := sink.Check(envID)
-		if err != nil {
-			return err
-		}
-		title := envID
-		if !inst.IsLocal() {
-			title = inst.SSH().User + "@" + inst.SSH().Host + ":" + inst.SSH().Port
-		}
-		check := &CheckRequirement{
-			EnvID:       envID,
-			Title:       title,
-			Protocol:    cfg.GetOr("service_protocol_type", "ssh"),
-			Channel:     channels[envID],
-			Scenario:    strings.TrimSpace(cfg.GetOr("scenario", "")),
-			ExcludeFile: strings.TrimSpace(cfg.GetOr("testcase_exclude_from_file", "")),
-			Out:         os.Stdout,
-			Log:         logFile,
-		}
-		check.Check(ctx)
+	envID := machine.EnvID()
+	checkLog, err := sink.Check(envID)
+	if err != nil {
+		return err
+	}
+	title := envID
+	if !machine.IsLocal() {
+		title = machine.SSH().User + "@" + machine.SSH().Host + ":" + machine.SSH().Port
+	}
+	(&CheckRequirement{
+		EnvID:       envID,
+		Title:       title,
+		Protocol:    cfg.GetOr("service_protocol_type", "ssh"),
+		Channel:     worker,
+		Scenario:    strings.TrimSpace(cfg.GetOr("scenario", "")),
+		ExcludeFile: strings.TrimSpace(cfg.GetOr("testcase_exclude_from_file", "")),
+		Out:         os.Stdout,
+		Log:         checkLog,
+	}).Check(ctx)
 
-		// CTP's Log constructor creates its file whether or not anything is ever
-		// written to it, so every run leaves a monitor_<envId>.log behind -- usually
-		// empty, always present.
-		if err := sink.Monitor(envID, ""); err != nil {
-			return err
-		}
+	// CTP's Log constructor creates its file whether or not anything is ever
+	// written to it, so every run leaves a monitor_<envId>.log behind -- usually
+	// empty, always present.
+	if err := sink.Monitor(envID, ""); err != nil {
+		return err
 	}
 
 	// ---- workspace -------------------------------------------------------
 	fmt.Println("============= UPDATE TEST CASES ==================")
-	workspace, err := s.prepareWorkspace(ctx, channels, cfg, local)
+	workspace, err := s.prepareWorkspace(ctx, worker, cfg, local)
 	if err != nil {
 		return quit("%v", err)
 	}
@@ -208,7 +193,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 
 	// ---- case list -------------------------------------------------------
 	fmt.Println("============= FETCH TEST CASES ==================")
-	cases, macroSkipped, tempSkipped, err := s.caseList(ctx, first, sink, cfg, workspace, continueMode)
+	cases, macroSkipped, tempSkipped, err := s.caseList(ctx, worker, sink, cfg, workspace, continueMode)
 	if err != nil {
 		return quit("%v", err)
 	}
@@ -230,7 +215,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 
 	// ---- deploy ----------------------------------------------------------
 	fmt.Println("============= DEPLOY ==================")
-	if err := s.deploy(ctx, instances, channels, sink); err != nil {
+	if err := s.deploy(ctx, machine, worker, sink); err != nil {
 		return quit("%v", err)
 	}
 	fmt.Println("DONE")
@@ -238,7 +223,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// ---- test ------------------------------------------------------------
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, cfg.Int("testcase_retry_num", 0))
-	err = s.test(ctx, instances, channels, monitorChannels, queue, sink, report, cfg, buildID, bits, local)
+	err = s.test(ctx, machine, worker, monitor, queue, sink, report, cfg, buildID, bits, local)
 
 	report.TaskStop()
 	fmt.Println("TEST COMPLETE")
@@ -263,33 +248,26 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 	return configured[0], extra
 }
 
-// openChannels opens the two channels the machine needs. A worker spends most of
-// its life inside a case, so the monitor that has to interrupt it cannot share.
-func openChannels(instances []*topology.Instance) (workers, monitors map[string]exec.Channel, err error) {
-	workers = map[string]exec.Channel{}
-	monitors = map[string]exec.Channel{}
-
-	for _, inst := range instances {
-		if inst.IsLocal() {
-			// CTP reached even the local machine through SSHConnect, so a local run
-			// gets the profile just as a remote one does.
-			workers[inst.EnvID()] = &exec.Local{SourceProfile: true}
-			monitors[inst.EnvID()] = &exec.Local{SourceProfile: true}
-			continue
-		}
-		ssh := inst.SSH()
-		if ssh.Host == "" {
-			return nil, nil, fmt.Errorf("instance %s has no ssh.host", inst.EnvID())
-		}
-		open := func() exec.Channel {
-			return exec.NewSSH(exec.SSHConfig{
-				Host: ssh.Host, Port: ssh.Port, User: ssh.User, Password: ssh.Password,
-			})
-		}
-		workers[inst.EnvID()] = open()
-		monitors[inst.EnvID()] = open()
+// openChannels opens the two channels the machine needs.
+//
+// Two, not one. A worker spends most of its life blocked inside a case, and the
+// timeout monitor has to reach the same machine while that is happening.
+func openChannels(inst *topology.Instance) (worker, monitor exec.Channel, err error) {
+	if inst.IsLocal() {
+		// CTP reached even the local machine through SSHConnect, so a local run
+		// gets the profile just as a remote one does.
+		return &exec.Local{SourceProfile: true}, &exec.Local{SourceProfile: true}, nil
 	}
-	return workers, monitors, nil
+	ssh := inst.SSH()
+	if ssh.Host == "" {
+		return nil, nil, fmt.Errorf("instance %s has no ssh.host", inst.EnvID())
+	}
+	open := func() exec.Channel {
+		return exec.NewSSH(exec.SSHConfig{
+			Host: ssh.Host, Port: ssh.Port, User: ssh.User, Password: ssh.Password,
+		})
+	}
+	return open(), open(), nil
 }
 
 // prepareWorkspace materialises the case tree the run will read from.
@@ -298,51 +276,32 @@ func openChannels(instances []*topology.Instance) (workers, monitors map[string]
 // is excluded, but the copy is not: cases dirty their own directories, and the
 // dispatcher searches the workspace rather than the scenario. Without the copy
 // there would be nothing to find.
-func (s *Shell) prepareWorkspace(ctx context.Context, channels map[string]exec.Channel, cfg *conf.Config, local bool) (string, error) {
+func (s *Shell) prepareWorkspace(ctx context.Context, ch exec.Channel, cfg *conf.Config, local bool) (string, error) {
 	scenario := strings.TrimSpace(cfg.GetOr("scenario", ""))
 	workspace := strings.TrimSpace(cfg.GetOr("testcase_workspace_dir", ""))
-	if workspace == "" || workspace == scenario {
-		for envID, ch := range channels {
-			out, err := runIn(ctx, ch, KillScript(local))
-			if err != nil {
-				return "", fmt.Errorf("%s: %w", envID, err)
-			}
-			fmt.Println("CLEAN PROCESSES:")
-			fmt.Println(out.Output())
+
+	out, err := runIn(ctx, ch, KillScript(local))
+	if err != nil {
+		return "", err
+	}
+	fmt.Println("CLEAN PROCESSES:")
+	fmt.Println(out.Output())
+
+	if workspace != "" && workspace != scenario {
+		script := strings.Join([]string{
+			"mkdir -p " + workspace,
+			"rm -rf " + workspace + "/*",
+			"cp -r " + scenario + "/* " + workspace,
+		}, "\n")
+		if _, err := runIn(ctx, ch, script); err != nil {
+			return "", err
 		}
-		fmt.Println("SKIP TEST CASES UPDATE")
-		return scenario, nil
+	} else {
+		workspace = scenario
 	}
 
-	script := strings.Join([]string{
-		"mkdir -p " + workspace,
-		"rm -rf " + workspace + "/*",
-		"cp -r " + scenario + "/* " + workspace,
-	}, "\n")
-
-	var wg sync.WaitGroup
-	errs := make([]error, 0, len(channels))
-	var mu sync.Mutex
-	for envID, ch := range channels {
-		wg.Add(1)
-		go func(envID string, ch exec.Channel) {
-			defer wg.Done()
-			if _, err := runIn(ctx, ch, KillScript(local)); err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", envID, err))
-				mu.Unlock()
-				return
-			}
-			if _, err := runIn(ctx, ch, script); err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", envID, err))
-				mu.Unlock()
-			}
-		}(envID, ch)
-	}
-	wg.Wait()
 	fmt.Println("SKIP TEST CASES UPDATE")
-	return workspace, errors.Join(errs...)
+	return workspace, nil
 }
 
 // caseList produces the cases to run, either by discovery or, when resuming, by
@@ -401,115 +360,72 @@ func (s *Shell) recordSkipped(report feedback.Feedback, cases []string, kind fee
 // deploy configures the machine and takes the snapshot every case is restored
 // from. It prepares the engine under test; it does not provision anything
 // (ADR-014). Installing a build is not part of it either.
-func (s *Shell) deploy(ctx context.Context, instances []*topology.Instance,
-	channels map[string]exec.Channel, sink *result.Sink) error {
+func (s *Shell) deploy(ctx context.Context, machine *topology.Instance,
+	ch exec.Channel, sink *result.Sink) error {
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var errs []error
-	for _, inst := range instances {
-		wg.Add(1)
-		go func(inst *topology.Instance) {
-			defer wg.Done()
-			ch := channels[inst.EnvID()]
-			log := func(line string) { sink.Worker(inst.EnvID(), line) }
+	log := func(line string) { sink.Worker(machine.EnvID(), line) }
 
-			if script := ConfigureScript(inst); script != "" {
-				out, err := runIn(ctx, ch, script)
-				if err != nil {
-					mu.Lock()
-					errs = append(errs, fmt.Errorf("%s: configure: %w", inst.EnvID(), err))
-					mu.Unlock()
-					return
-				}
-				log(out.Output())
-			}
-			out, err := runIn(ctx, ch, SnapshotScript())
-			if err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: snapshot: %w", inst.EnvID(), err))
-				mu.Unlock()
-				return
-			}
-			log(out.Output())
-		}(inst)
+	if script := ConfigureScript(machine); script != "" {
+		out, err := runIn(ctx, ch, script)
+		if err != nil {
+			return fmt.Errorf("%s: configure: %w", machine.EnvID(), err)
+		}
+		log(out.Output())
 	}
-	wg.Wait()
-	return errors.Join(errs...)
+	out, err := runIn(ctx, ch, SnapshotScript())
+	if err != nil {
+		return fmt.Errorf("%s: snapshot: %w", machine.EnvID(), err)
+	}
+	log(out.Output())
+	return nil
 }
 
-// test starts the worker and its monitor and waits for the queue to drain.
+// test runs the cases and waits for the queue to drain.
 //
 // One machine means one worker: a case restores the whole CUBRID install before
 // it runs, so two cases cannot share a machine even if two workers could share a
-// queue. The queue keeps its concurrency anyway -- it is what defines the retry
-// ordering, and that is worth having whatever the worker count is.
-func (s *Shell) test(ctx context.Context, instances []*topology.Instance,
-	channels, monitorChannels map[string]exec.Channel, queue *dispatch.Queue,
-	sink *result.Sink, report feedback.Feedback, cfg *conf.Config, buildID, bits string, local bool) error {
+// queue.
+//
+// The monitor gets its own goroutine and its own channel, because the worker is
+// blocked inside a case for as long as the case takes and the timeout has to
+// reach the machine anyway.
+func (s *Shell) test(ctx context.Context, machine *topology.Instance,
+	workerCh, monitorCh exec.Channel, queue *dispatch.Queue,
+	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
+	buildID, bits string, local bool) error {
 
-	timeout := time.Duration(cfg.Int("testcase_timeout_in_secs", 0)) * time.Second
-	maxRetry := cfg.Int("testcase_retry_num", 0)
-
-	// A cancelled context has to reach workers blocked waiting for the first pass
-	// to finish, and Claim does not take one.
-	stop := make(chan struct{})
-	defer close(stop)
-	go func() {
-		select {
-		case <-ctx.Done():
-			queue.Stop()
-		case <-stop:
-		}
-	}()
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var errs []error
-	for _, inst := range instances {
-		envID := inst.EnvID()
-		ssh := inst.SSH()
-		w := &Worker{
-			EnvID:   envID,
-			Channel: channels[envID],
-			Queue:   queue,
-			Sink:    sink,
-			Report:  report,
-			Options: CaseOptions{
-				Bits:                 bits,
-				BigSpaceDir:          cfg.GetOr("large_space_dir", ""),
-				Charset:              cfg.GetOr("cubrid_db_charset", "en_US"),
-				IgnoreCoresByKeyword: cfg.GetOr("ignore_core_by_keywords", ""),
-				SSHHost:              ssh.Host,
-				SSHPort:              ssh.Port,
-				SSHUser:              ssh.User,
-				BuildID:              buildID,
-			},
-			MaxRetry:       maxRetry,
-			Local:          local,
-			CheckDiskSpace: cfg.Bool("enable_check_disk_space_yn", false),
-			ReserveDisk:    cfg.GetOr("reserve_disk_space_size", "2G"),
-		}
-
-		monitorCtx, stopMonitor := context.WithCancel(ctx)
-		m := &Monitor{Worker: w, Channel: monitorChannels[envID], Timeout: timeout, Local: local}
-		go m.Watch(monitorCtx)
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer stopMonitor()
-			if err := w.Run(ctx); err != nil {
-				mu.Lock()
-				errs = append(errs, fmt.Errorf("%s: %w", envID, err))
-				mu.Unlock()
-			}
-		}()
+	ssh := machine.SSH()
+	w := &Worker{
+		EnvID:   machine.EnvID(),
+		Channel: workerCh,
+		Queue:   queue,
+		Sink:    sink,
+		Report:  report,
+		Options: CaseOptions{
+			Bits:                 bits,
+			BigSpaceDir:          cfg.GetOr("large_space_dir", ""),
+			Charset:              cfg.GetOr("cubrid_db_charset", "en_US"),
+			IgnoreCoresByKeyword: cfg.GetOr("ignore_core_by_keywords", ""),
+			SSHHost:              ssh.Host,
+			SSHPort:              ssh.Port,
+			SSHUser:              ssh.User,
+			BuildID:              buildID,
+		},
+		MaxRetry:       cfg.Int("testcase_retry_num", 0),
+		Local:          local,
+		CheckDiskSpace: cfg.Bool("enable_check_disk_space_yn", false),
+		ReserveDisk:    cfg.GetOr("reserve_disk_space_size", "2G"),
 	}
-	// CTP printed this once the workers were launched, not once they were done,
-	// so it lands before the first [ENV START].
-	fmt.Println("STARTED")
 
-	wg.Wait()
-	return errors.Join(errs...)
+	monitorCtx, stopMonitor := context.WithCancel(ctx)
+	defer stopMonitor()
+	go (&Monitor{
+		Worker:  w,
+		Channel: monitorCh,
+		Timeout: time.Duration(cfg.Int("testcase_timeout_in_secs", 0)) * time.Second,
+		Local:   local,
+	}).Watch(monitorCtx)
+
+	fmt.Println("STARTED")
+	return w.Run(ctx)
 }

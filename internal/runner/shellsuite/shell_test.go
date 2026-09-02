@@ -121,8 +121,8 @@ func TestTheWholeTaskOverRealCases(t *testing.T) {
 	}, "\n"))
 
 	ch := &guardedChannel{inner: exec.NewLocal("")}
-	s := &Shell{Channels: func([]*topology.Instance) (map[string]exec.Channel, map[string]exec.Channel, error) {
-		return map[string]exec.Channel{"local": ch}, map[string]exec.Channel{"local": ch}, nil
+	s := &Shell{Channels: func(*topology.Instance) (exec.Channel, exec.Channel, error) {
+		return ch, ch, nil
 	}}
 
 	if err := s.Run(t.Context(), req); err != nil {
@@ -184,8 +184,8 @@ func TestARunWithNoCasesIsNotAFailure(t *testing.T) {
 	req, _ := request(t, "scenario="+t.TempDir()+"\ntest_category=shell\n")
 
 	ch := &guardedChannel{inner: exec.NewLocal("")}
-	s := &Shell{Channels: func([]*topology.Instance) (map[string]exec.Channel, map[string]exec.Channel, error) {
-		return map[string]exec.Channel{"local": ch}, map[string]exec.Channel{"local": ch}, nil
+	s := &Shell{Channels: func(*topology.Instance) (exec.Channel, exec.Channel, error) {
+		return ch, ch, nil
 	}}
 
 	if err := s.Run(t.Context(), req); err != nil {

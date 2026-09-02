@@ -42,7 +42,7 @@ chase; it does not volunteer.
 
 ## 3. Found by writing the code
 
-Every literal was taken from CTP's source rather than from the notes. Ten disagreed.
+Every literal was taken from CTP's source rather than from the notes. Fourteen disagreed.
 
 | Spec said | Actually | Source |
 |---|---|---|
@@ -59,6 +59,10 @@ Every literal was taken from CTP's source rather than from the notes. Ten disagr
 | — | **Cases see `TEST_BUIILD_ID`**, with three i's. Nothing in the corpus reads it | `Test.addSshInfoScript` |
 | — | `getExportsOfMEKYParams` exports variables beginning **`MKEY`**. The method name has the two letters the other way round, and the name is what the analysis had copied | `CommonUtils` |
 | — | **The engine is not configured at all when only broker-wide parameters are set.** The emptiness test covers five roles and omits `brokercommon`, which is where `MASTER_SHM_ID` lives — so two installs on one machine end up sharing a shared-memory segment and interfering rather than failing | `DeployOneNode.updateCUBRIDConfigurations` |
+| — | **Excluding the case update excludes the case tree.** `TestCaseGithub.update` does two things: a git pull, and — when `testcase_workspace_dir` differs from `scenario` — a wipe-and-copy of the case tree into the workspace. The dispatcher searches the *workspace*. Drop the whole method as axis O and the run finds no cases at all | `TestCaseGithub.update`, `Dispatch.findAllTestCase` |
+| `JAVA_HOME_<bits>` | **`JAVA_HOME_64BITS`.** The value is `getBuildBits()`, which returns the string "64bits", upper-cased — not a number | `Test.runTestCase_linux` |
+| — | **A build id can run past the version.** With no `-` after the four-part number the scan takes everything up to the next `)`, so a `cubrid_rel` line without a commit suffix yields `11.2.0.0000) (64bit release build for linux_gnu` as the build id. Deterministic, so it still identifies a build | `CommonUtils.getBuildId` |
+| — | **The retry flag has two spellings.** The console prints `[NOK], TRY->2`; `feedback.log` prints `[NOK]: TRY-> = 2`, using the same literal as a label rather than a prefix | `FeedbackFile.onTestCaseStopEvent` |
 | the worker collects `<name>.result` and diffs it against `<name>.answer` | **there is no diff.** The case writes its own verdict into `<name>.result`; the worker `cat`s it and fails the case if any line contains the substring `NOK`. The entire shell source contains no reference to `answer` | `Test.collectGeneralResult`, `grep -rn answer shell/src` |
 
 **What this method catches:** anything where the spec paraphrased instead of quoting. Writing a
@@ -72,6 +76,10 @@ literal into a program forces you to know it exactly; prose lets you almost know
 | **unittest's output resembles nothing else** — step headings with a trailing space, a one-based index, `[SUCC]`/`[FAIL]` rather than `[OK]`/`[NOK]`, verdict on the same line as the name. The spec had described unittest's *plug-in contract* and never its output | `GeneralLocalTest.start` |
 | **Two console lines come from a feedback backend.** `Test Category:` and `The Number of Test Cases:` are printed by `FeedbackFile`, to its own file *and* to stdout. Nobody looking for console output would look there | `FeedbackFile.java:134-137` |
 | **`dispatch_tc_ALL.txt` is not reproducible.** It records the case list in `find` order, and `find` order is `readdir` order: three consecutive runs over the same unchanged tree gave three different lists, on two separate quiet trees. CTP cannot reproduce its own dispatch order, so this file was never an F1 surface — and neither is which environment ran which case | `find … \| cmp`, run three times |
+
+| **Four more result files.** `feedback.log`, `test_status.data`, `current_task_id` and `test-<category>.xml` are written by the feedback backend, which is the default. The last is JUnit XML with a GitHub URL in the `classname` attribute — the one output here that something other than a person reads | `FeedbackFile` |
+| **`test_status.data` is not reproducible.** `Properties.store` stamps the current time into a comment and emits keys in hash order, so the counters file differed on every run for reasons that had nothing to do with the run | `CommonUtils.writeProperties` |
+| **A resumed run's XML report is broken.** `writeTestSuiteStart` is reached only from `setTotalTestCase`, which returns early in continue mode — so no `<testsuite>` is opened, cases become children of `<testsuites>`, and the close writes one end-element too many, throws, and skips its own flush | `FeedbackFile.finalizeXmlWriter` |
 
 **What this method catches:** whole surfaces nobody thought to write down. Reading more carefully
 would not have found these, because the question "what else does it print?" has no place to be
@@ -162,9 +170,9 @@ nothing, are both invisible until someone has to decide whether to carry them ov
 
 ## What this says about the freeze
 
-A frozen surface is only as good as the reading behind it, and the reading was done five different
-ways here with five different yields. The spec was not careless — it was written from a careful
-analysis — and it was still wrong in thirteen places, every one of them F1.
+A frozen surface is only as good as the reading behind it, and the reading was done six different
+ways here with six different yields. The spec was not careless — it was written from a careful
+analysis — and it was still wrong in twenty-five places, every one of them F1.
 
 Three practical consequences:
 
@@ -177,9 +185,28 @@ Three practical consequences:
    sentence about case discovery produced five wrong corpus sizes in a second document, and those
    numbers looked exactly as trustworthy as the right ones would have.
 
-Two of the thirteen are not errors the spec could have avoided by reading harder — they are places
-where CTP does not agree with itself. `find` order makes `dispatch_tc_ALL.txt` irreproducible across
-CTP's own runs, and `lastIndexOf("cases")` disagrees with the discovery rule on names no case
-currently uses. Both are recorded as deviations rather than reproduced: the first is sorted, the
-second matches the path segment. Where the original is nondeterministic, F1 is not a grade anything
-can earn, and pretending otherwise would only move the problem into the evidence.
+## Where CTP does not agree with itself
+
+Some of the twenty-five are not errors the spec could have avoided by reading harder. They are
+places where CTP cannot reproduce its own behaviour, or where two parts of it contradict each other.
+Each one needs a decision, and the decisions are not all the same:
+
+| | Kept or changed |
+|---|---|
+| `find` order makes `dispatch_tc_ALL.txt` irreproducible across CTP's own runs | **changed** — sorted, so two runs can be compared at all |
+| `lastIndexOf("cases")` disagrees with the discovery rule on names no case currently uses | **changed** — matches the path segment; proven identical on all 3,452 real cases |
+| the emptiness test for engine configuration omits `brokercommon`, so a broker-only configuration — including `MASTER_SHM_ID` — is silently skipped and two instances share a shared-memory segment | **changed** — collisions do not fail, they interfere, and the results look real |
+| `test_status.data` carries a timestamp and hash-ordered keys, so it differs between two identical runs | **changed** — sorted, no timestamp; still readable as Java Properties, which is what a resumed run needs |
+| a resumed run's JUnit report is unbalanced XML, and the exception it throws skips the flush | **changed** — the suite opens on first use, so both modes produce a document that parses |
+| the JVM sweep is a shell syntax error and kills nothing | **kept** — repairing it widens what the runner kills |
+| a build id with no commit suffix runs on to the next `)` | **kept** — ugly, but deterministic, and it is what identifies the build in `main_snapshot.properties` and in every case's environment |
+| `TEST_BUIILD_ID` is exported to every case and read by none | **kept** — removing it changes what cases can see, for nothing |
+
+The rule that decides between the two columns is the config-key policy, applied to behaviour rather
+than to keys: **change it when leaving it alone would make someone trust a wrong result; keep it
+otherwise.** A nondeterministic dispatch file, a shared shared-memory segment and a report that
+silently loses its tail all produce results that look real and are not. A sweep that has never
+swept, a typo nobody reads and an ugly-but-stable build id produce nothing at all.
+
+Where the original is nondeterministic, F1 is not a grade anything can earn, and pretending
+otherwise would only move the problem into the evidence.

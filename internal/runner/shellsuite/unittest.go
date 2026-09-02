@@ -83,7 +83,7 @@ func (u *UnitTest) Run(ctx context.Context, req runner.Request) error {
 	// FeedbackFile prints these two lines to standard output as well as to its own
 	// file, so they are part of the console surface even though they come from a
 	// feedback backend. CTP emits them once the case list is known.
-	fb := &feedback.File{Category: categoryFor(req, testType), Out: os.Stdout}
+	fb := feedback.Console(categoryFor(req, testType), os.Stdout)
 	fb.TaskStart("")
 	fb.TotalTestCase(len(cases), 0, 0)
 

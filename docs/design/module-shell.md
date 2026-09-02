@@ -99,7 +99,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | 케이스 prologue | `. $init_path/init.sh` → `init test` → `set -x` |
 | unittest plug-in | `shell/local/<TEST_TYPE>.sh` 의 `init`/`list`/`execute`/`finish` + **`EEOOKK`** 마커 |
 | stdout | `[ENV START/STOP]` · `[TESTCASE] <case> EnvId=<env> [OK\|NOK][, TRY-><N>]`. **`CORE_FILE:` 는 이 모듈 표면이 아니다** — sql/medium 의 `run_sql.sh` 소유 (2026-09-02 정정) |
-| 결과 파일 | `main_snapshot.properties` · `dispatch_tc_{ALL,FIN_*}.txt` · `test_<env>.log` · **`monitor_<env>.log`** (2026-09-02 추가 — `Log` 생성자가 파일을 즉시 만들기 때문에 리눅스에서는 보통 빈 파일로 남지만 매 실행마다 존재한다). `main.info` 는 이 모듈 것이 아니다 |
+| 결과 파일 | `main_snapshot.properties` · `dispatch_tc_{ALL,FIN_*}.txt` · `test_<env>.log` · **`monitor_<env>.log`** · **`feedback.log`** · **`test_status.data`** · **`current_task_id`** · **`test-<category>.xml`** (2026-09-02 추가 — 뒤 넷은 기본 백엔드인 `FeedbackFile` 이 쓴다. `monitor_*` 는 `Log` 생성자가 파일을 즉시 만들어 리눅스에서는 보통 빈 파일). `main.info` 는 이 모듈 것이 아니다 |
 | 원격 자산 | `init_path/` 통째 복사. `commonforjdbc.jar` 포함 (배포 자산이지 빌드 산출물 아님) |
 | 종료 코드 | 0 / 255 |
 

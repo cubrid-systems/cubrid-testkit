@@ -7,11 +7,7 @@
 // docs/design/contracts.md C5.
 package feedback
 
-import (
-	"fmt"
-	"io"
-	"time"
-)
+import "time"
 
 // SkipType says why a case did not run. The constants keep CTP's names because
 // they travel into stored feedback.
@@ -56,8 +52,8 @@ type Feedback interface {
 	EnvStop(envID string)
 }
 
-// Null discards everything. It is the default, and it is what feedback_type=null
-// selected.
+// Null discards everything. It is what feedback_type is set to anything other
+// than "file" or "database" -- the default, when the key is absent, is File.
 type Null struct{}
 
 func (Null) TaskStart(string)                   {}
@@ -69,47 +65,3 @@ func (Null) CaseStop(CaseStop)                  {}
 func (Null) CaseStopRetry(CaseStop)             {}
 func (Null) CaseMonitor(string, string, string) {}
 func (Null) EnvStop(string)                     {}
-
-// File is feedback_type=file.
-//
-// It writes to its own file and, for two of the events, to standard output as
-// well -- FeedbackFile.setTotalTestCase prints the same two lines twice, once to
-// each. Those two lines are therefore part of the frozen console output even
-// though they come from a feedback backend rather than from the runner.
-type File struct {
-	Category string
-	Out      io.Writer // standard output
-	Log      io.Writer // the feedback file; may be nil
-}
-
-func (f *File) emit(format string, args ...any) {
-	if f.Log != nil {
-		fmt.Fprintf(f.Log, format+"\n", args...)
-	}
-	if f.Out != nil {
-		fmt.Fprintf(f.Out, format+"\n", args...)
-	}
-}
-
-func (f *File) TaskStart(string) {}
-func (f *File) TaskContinue()    {}
-func (f *File) TaskStop()        {}
-
-// TotalTestCase prints the two lines CTP prints once the case list is known.
-func (f *File) TotalTestCase(total, macroSkipped, tempSkipped int) {
-	f.emit("Test Category:%s", f.Category)
-	f.emit("The Number of Test Cases: %d (macro skipped: %d, bug skipped: %d)", total, macroSkipped, tempSkipped)
-}
-
-func (f *File) CaseStart(string, string) {}
-func (f *File) CaseStop(CaseStop)        {}
-func (f *File) CaseStopRetry(CaseStop)   {}
-
-// CaseMonitor writes one line to the feedback file and nowhere else.
-func (f *File) CaseMonitor(name, action, envID string) {
-	if f.Log != nil {
-		fmt.Fprintf(f.Log, "%s %s %s\n", action, name, envID)
-	}
-}
-
-func (f *File) EnvStop(string) {}

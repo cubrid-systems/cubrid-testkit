@@ -1,7 +1,8 @@
 # ROADMAP — CUBRID Test Kit
 
 - **날짜**: 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
-- **현재 위치**: **Phase 1 진행 중** — Phase 0 완료(2026-04-29), 게이트 통과(2026-09-02, `concept/phase0-retrospective.md` §11)
+- **현재 위치**: **Phase 1 진행 중** — Phase 0 완료(2026-04-29), 게이트 통과(2026-09-02)
+- **동시 트랙**: **§6a-E3 (SQLancer) 진행 중** — 사용자 결정으로 우선 승격 (ADR-EXT-003). 구현체는 별도 저장소 `cubrid-sqlancer`
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)
   + 확장 영역(외부 테스트 포맷 흡수, §6a)
 - **제약 요약**: 기존 testcases 레포 수정 불가(NG1) / 외부 인터페이스 동결(NG2, 범위는 ADR-003) / 구현 언어 = Go(ADR-001) / 빌드 = `go build` + Justfile(ADR-002)
@@ -258,7 +259,12 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 
 **Open Questions**: requirements §6 참조.
 
-**ADR 자리표시자**: ADR-EXT-003 *(트리거: incubating 정식 진입 시)*.
+**ADR**: **ADR-EXT-003 — Accepted (2026-09-02).** 사용자 결정으로 동시 트랙 승격.
+- 재사용(SQLancer 본체) + CUBRID provider 신규 작성. 상류에는 CUBRID provider 가 **없다**
+- 별도 저장소 `cubrid-sqlancer` + 라이브러리 의존 (SQLancer 가 ServiceLoader 로 외부 jar provider 를 공식 지원)
+- 1차 oracle = NoREC. dialect 지식은 코드가 아니라 **데이터(카탈로그 파일)** 로 공유
+- corpus 는 testcases 레포 밖 (NG1)
+- testkit 과의 통합은 Phase 2 의 `design/contracts.md` 이후. 그때까지 **독립 실행 도구**
 
 **참조**:
 - SQLancer: <https://github.com/sqlancer/sqlancer>
@@ -343,7 +349,7 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 |---|---|---|---|
 | E1 | 즉시 후보 | — | extensions/E1-sqllogictest/ |
 | E2 | 즉시 후보 | — | extensions/E2-sqlsmith/ |
-| E3 | 즉시 후보 | dialect adapter 위치 (E2 와 공유) | extensions/E3-sqlancer/ |
+| E3 | **진행 중 (동시 트랙)** | — (ADR-EXT-003 로 해소) | extensions/E3-sqlancer/ + `cubrid-sqlancer` 저장소 |
 | E4 | 조건부 | N24 / N11 graduation | extensions/E4-distributed-isolation/ |
 | E5 | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | extensions/E5-parser-fuzzing/ |
 | E6 | 조건부 | N13 pg-wire-compat selected 이상 | extensions/E6-differential/ |
@@ -377,7 +383,8 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 | §6a-E2/E3 fuzz·logic-bug corpus 의 testcases 레포 동결(NG1) 위반 | E2·E3 incubating 정식 진입 | 외부 storage 또는 testkit 내부 별 트리에 보관; ADR-EXT-002·003에서 corpus 위치 명시 |
 | §6a-E5 cubrid 본 repo 의 fuzz target build option 미진척 | E5 incubating 정식 진입 시도 | testkit 단독 시작 금지; cubrid 본 repo PR (`-DENABLE_FUZZING` 등) 선결, C-015 cross-cutting 트래킹 |
 | §6a-E4/E6 선결 의존 (N24·N11·N13) 미진척 | E4·E6 incubating 진입 검토 시 | roadmap repo planning 과 동기화; 선결 graduation 전에 진입 시도 금지 |
-| §6a 확장 영역이 strangler-fig 진척을 잠식 | 분기 게이트에서 Phase 4·5 지연 vs E1~E7 진척이 역전 | 분기 게이트 답변에 §6a 진척을 별 행으로 분리 기재; 우선순위 충돌 시 strangler-fig 우선 |
+| §6a 확장 영역이 strangler-fig 진척을 잠식 | 분기 게이트에서 Phase 4·5 지연 vs E1~E7 진척이 역전 | 분기 게이트 답변에 §6a 진척을 별 행으로 분리 기재; 우선순위 충돌 시 strangler-fig 우선. **E3 는 2026-09-02 사용자 결정으로 동시 트랙이며, 이 규칙은 자원 충돌이 실제 발생할 때 적용된다** |
+| CUBRID 서버 코어(10~20GB)로 인한 디스크 고갈 | E3 실행 중 서버 크래시 반복 | 코어 기본 비활성(`ulimit -c 0`) + `$CUBRID/log/coredump` 스택으로 원인 파악 (ADR-EXT-003 C7) |
 
 ---
 

@@ -12,7 +12,7 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 |---|---|---|---|---|---|
 | E1 | 1 | sqllogictest 적용 | 즉시 후보 | — | [E1-sqllogictest/](E1-sqllogictest/requirements.md) |
 | E2 | 2 | Random SQL fuzzing (SQLsmith) | 즉시 후보 | — | [E2-sqlsmith/](E2-sqlsmith/requirements.md) |
-| E3 | 3 | Logic bug detection (SQLancer NoREC+TLP) | 즉시 후보 | dialect adapter 위치 (E2 와 공유) | [E3-sqlancer/](E3-sqlancer/requirements.md) |
+| E3 | 3 | Logic bug detection (SQLancer NoREC+TLP) | **진행 중 (동시 트랙)** | — | [E3-sqlancer/](E3-sqlancer/requirements.md) · [ADR-EXT-003](../adr/ADR-EXT-003-sqlancer-cubrid.md) · 저장소 `cubrid-sqlancer` |
 | E4 | 4 | Distributed isolation testing (AWDIT/Jepsen) | 조건부 | N24 / N11 graduation | [E4-distributed-isolation/](E4-distributed-isolation/requirements.md) |
 | E5 | 5 | Parser/protocol fuzzing harness (libFuzzer) | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | [E5-parser-fuzzing/](E5-parser-fuzzing/requirements.md) |
 | E6 | 6 | Differential testing (PostgreSQL pair) | 조건부 | N13 pg-wire-compat selected 이상 | [E6-differential/](E6-differential/requirements.md) |
@@ -43,7 +43,7 @@ extensions/E{N}-{name}/
 |---|---|---|
 | ADR-EXT-001 | E1 incubating 정식 진입 | sqllogictest spec variant + 코퍼스 import 정책 + 결과 비교 모드 + SUT 클라이언트 |
 | ADR-EXT-002 | E2 incubating 정식 진입 | SQLsmith 재사용/재구현 + dialect 가산 범위 + corpus 위치 + crash 판정 채널 |
-| ADR-EXT-003 | E3 incubating 정식 진입 | 1차 oracle 선정 + dialect adapter 위치 + 재사용/재구현 + corpus 정책 |
+| ADR-EXT-003 | ~~트리거~~ **Accepted 2026-09-02** | NoREC 1차 + 별도 저장소(ServiceLoader SPI) + 재사용 + corpus 는 testcases 밖 |
 | ADR-EXT-004 | E4 incubating 정식 진입 | AWDIT/Jepsen 1차 선택 + 토폴로지 자동화 + fault injection 채널 + corpus |
 | ADR-EXT-005 | E5 incubating 정식 진입 | fuzz target build option (cubrid 본 repo) + fuzzer 본체 + corpus + 책임 경계 |
 | ADR-EXT-006 | E6 incubating 정식 진입 | peer DBMS + mode (canonical vs rewrite) + dialect rewrite catalog + corpus |

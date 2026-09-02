@@ -33,7 +33,9 @@ definition of what is frozen and what is not.
 
 **Masked** — may differ between runs:
 
-1. the timestamp in `<CTP_HOME>/result/<task>/<ts>/`
+1. ~~the timestamp in the result directory name~~ — **struck 2026-09-02.** There is no timestamp:
+   the directory is `result/<category>/current_runtime_logs`, a fixed name. The freeze spec said
+   otherwise and this list inherited the error. Nothing to mask, and one fewer rule to write.
 2. absolute path prefixes — `CTP_HOME`, the scenario root
 3. elapsed values — `totalTime`, `Elapse Time`, per-case durations
 4. case completion order (sort before comparing; `dispatch_tc_FIN_<env>` keeps its per-env membership,

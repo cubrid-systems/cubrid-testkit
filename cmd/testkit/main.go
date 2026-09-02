@@ -17,12 +17,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
+	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
+	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
 )
 
 // version is stamped at build time: -ldflags "-X main.version=..."
@@ -81,11 +84,17 @@ func run(args []string) int {
 	// Legacy claims everything. A native runner registered after this one takes
 	// over the tasks it names, and that is the whole mechanism of the migration.
 	reg.Register(legacy.New(cli.Active...))
+	reg.Register(shellsuite.NewUnitTest())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	for _, task := range inv.Tasks {
+		// The dispatcher's banner comes before the name is resolved, so even a task
+		// that turns out to be retired gets one. CTP prints it that way.
+		start := time.Now()
+		result.TaskBanner(os.Stdout, string(task), start)
+
 		if cli.IsRetired(task) {
 			// CTP accepted these and did nothing, without saying so. The outcome is
 			// unchanged -- nothing runs, the exit code is untouched -- but the
@@ -106,9 +115,17 @@ func run(args []string) int {
 			ConfigPath:  home.ConfigFor(task.Suite(), inv.ConfigPath),
 			Interactive: inv.Interactive,
 		}
+		// A missing file is not fatal here. CTP passed a null configuration to the
+		// unittest entry point, and the legacy path hands the path back to CTP,
+		// which reports its own absence in its own words.
+		if cfg, err := home.Load(req.ConfigPath); err == nil {
+			req.Config = cfg
+		}
 		if task == cli.WebConsole && inv.WebConsoleAction != "" {
 			req.Extra = []string{inv.WebConsoleAction}
 		}
+
+		result.TaskStarted(os.Stdout, string(task), start)
 
 		if err := rn.Validate(req); err != nil {
 			return report(err, exitPreflight)
@@ -116,6 +133,9 @@ func run(args []string) int {
 		if err := rn.Run(ctx, req); err != nil {
 			return report(err, exitEnvironment)
 		}
+
+		end := time.Now()
+		result.TaskEnded(os.Stdout, string(task), end, end.Sub(start))
 	}
 	return exitOK
 }

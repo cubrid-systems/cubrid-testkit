@@ -210,3 +210,43 @@ func (s *Sink) Close() error {
 	s.fin = map[string]*os.File{}
 	return firstErr
 }
+
+// ---------------------------------------------------------------------------
+// unittest
+//
+// The unittest task prints nothing like the shell family. It has step headings
+// and its own case line, with a one-based index and [SUCC]/[FAIL] rather than
+// [OK]/[NOK]. GeneralLocalTest.start is the source for every literal below,
+// including the trailing space after each heading and the leading space before
+// the verdict, which lands on the same line as the case name.
+//
+// None of this was in the Phase 0 notes, which described only the shell markers.
+// ---------------------------------------------------------------------------
+
+// Step prints one of the four headings: Init, List, Execute, Finish.
+func (s *Sink) Step(name string) { fmt.Fprintf(s.stdout, "=> %s Step: \n", name) }
+
+// Raw prints a block of the plug-in's own output, as the step handlers do.
+func (s *Sink) Raw(text string) { fmt.Fprintln(s.stdout, text) }
+
+// Blank prints the empty line that separates sections.
+func (s *Sink) Blank() { fmt.Fprintln(s.stdout) }
+
+// UnitCaseStart prints the case line without a verdict. The verdict arrives on
+// the same line, so this deliberately does not end it.
+func (s *Sink) UnitCaseStart(index int, name string) {
+	fmt.Fprintf(s.stdout, "[TESTCASE-%d] %s", index, name)
+}
+
+// UnitCaseVerdict closes the line UnitCaseStart opened.
+func (s *Sink) UnitCaseVerdict(ok bool) {
+	if ok {
+		fmt.Fprintln(s.stdout, " [SUCC]")
+		return
+	}
+	fmt.Fprintln(s.stdout, " [FAIL]")
+}
+
+// NoCases reports an empty list, which CTP treats as a finished run rather than
+// an error: it returns from start() and the exit code stays 0.
+func (s *Sink) NoCases() { fmt.Fprintln(s.stdout, "[ERROR] Not found any test cases.") }

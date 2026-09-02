@@ -68,3 +68,6 @@ Thumbs.db
 ehthumbs.db
 
 .omc/
+
+# build output
+/testkit

@@ -60,10 +60,10 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 
 | 구 클래스 | 축 | 신 컴포넌트 |
 |---|---|---|
-| `Dispatch` | T | `dispatch` — 케이스 풀, env 별 분배, `dispatch_tc_*.txt` |
+| `Dispatch` | T | `dispatch` — 케이스 풀과 **재시도 순서**. `dispatch_tc_*.txt`. **env 별 분배는 축 O** (2026-09-03, ADR-014): 한 대 = 워커 하나다 |
 | `Main` | T | `runner/shellsuite` 의 `Run` |
 | `Test` | T | 워커 루프. `extractItems` 의 *"마지막 flag 가 이긴다"* 규칙 보존 |
-| `TestFactory` | T | 워커 생성 · 결과 백업 |
+| `TestFactory` | T/O 혼재 | 워커 생성 · 결과 백업은 T. **N대 동시 배포·env 별 워커 fan-out·실행 중 기계 추가(`joinTest`·`startConfigMonitor`)는 축 O — 제외** (2026-09-03, ADR-014) |
 | `TestMonitor` | T | `monitor` — per-case 타임아웃 감시. **`context.WithTimeout` 이 아니다** (2026-09-02 정정): 타임아웃은 케이스 명령을 취소하지 않고 **케이스가 기다리는 원격 프로세스를 죽인다**. 취소하면 채널만 닫히고 원격 프로세스는 살아남아 다음 케이스가 포트/락을 못 잡는다. 그래서 모니터는 **자기 SSH 세션**을 따로 가진다 |
 | `Context` | T | `conf.Config` + `topology` 로 대체. **암묵적 전역 제거 = M4** |
 | `CheckRequirement` | T | `Runner.Validate` (C1) |
@@ -103,6 +103,22 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | 원격 자산 | `init_path/` 통째 복사. `commonforjdbc.jar` 포함 (배포 자산이지 빌드 산출물 아님) |
 | 종료 코드 | 0 / 255 |
 | **로컬 모드** | `env.instanceN.*` 키가 하나도 없으면 **에러가 아니라 로컬 실행**이다 (2026-09-02 정정). env id 는 `local`, 채널은 `exec.Local`, kill 스크립트는 `*.sh` 쓸어담기를 뺀 로컬 형태. `Main.exec` 의 `Not found any environment instance` 는 **도달 불가능한 분기**다 — `Context` 생성자가 이미 `local` 을 넣어 놨다 |
+
+---
+
+## 4a. 범위: 기계 한 대 (2026-09-03, ADR-014)
+
+이 러너는 **한 대에서 돈다**. 로컬이 기본이고, 원격이어도 '한 대'다.
+
+| | |
+|---|---|
+| 축 T | "DB 가 있는 곳에서 이 명령을 돌려라" — `Channel` 하나 (C3) |
+| 축 O | "기계 8대가 있고, 3,452개를 나눠 뿌리고, 각각에 빌드를 깔고, 죽으면 빼라" — 플릿 |
+
+`env.instanceN` 이 여럿이면 **첫 번째만 쓰고 나머지를 이름과 함께 경고**한다. 아래 §5·§6 의
+"env 마다" 는 이 결정으로 대체되었다 — 워커는 하나다.
+
+`exec.SSH` 는 삭제가 아니라 **강등**이다. 그 한 대가 원격일 때 쓰는 구현으로 남는다.
 
 ---
 

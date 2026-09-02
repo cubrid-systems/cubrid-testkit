@@ -201,3 +201,45 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(body)
 }
+
+// The runner runs on one machine (ADR-014). A configuration that names several
+// describes a fleet, and a fleet is the operations layer's -- so the first is
+// used and the rest are named rather than silently dropped.
+func TestSeveralConfiguredMachinesBecomeOneAndAWarning(t *testing.T) {
+	req, _ := request(t, strings.Join([]string{
+		"scenario=/somewhere",
+		"env.instance1.ssh.host=alpha",
+		"env.instance2.ssh.host=beta",
+		"env.instance3.ssh.host=gamma",
+	}, "\n"))
+
+	configured, err := topology.From(req.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, extra := oneMachine(req.Config, configured)
+
+	if machine.EnvID() != "env1" {
+		t.Errorf("chose %s, want the first configured machine", machine.EnvID())
+	}
+	if len(extra) != 2 || extra[0] != "env2" || extra[1] != "env3" {
+		t.Errorf("unused machines = %v, want [env2 env3] so they can be reported", extra)
+	}
+}
+
+func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
+	req, _ := request(t, "scenario=/somewhere\n")
+
+	configured, err := topology.From(req.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, extra := oneMachine(req.Config, configured)
+
+	if !machine.IsLocal() {
+		t.Errorf("chose %s, want the local machine", machine.EnvID())
+	}
+	if len(extra) != 0 {
+		t.Errorf("nothing was configured, so nothing can be left out: %v", extra)
+	}
+}

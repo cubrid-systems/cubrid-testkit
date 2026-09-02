@@ -19,8 +19,8 @@
   <path d="M0 0 L10 5 L0 10 z" fill="#6b7280"/></marker></defs>
 <rect x="0" y="0" width="880" height="640" fill="#ffffff"/>
 
-<text class="ttl" x="30" y="30">cubrid-testkit — one binary, two kinds of runner, one frozen surface</text>
-<text class="sub" x="30" y="48">A task is either rewritten or still CTP. From the outside there is no way to tell which.</text>
+<text class="ttl" x="30" y="30">cubrid-testkit — one binary that runs tests, and nothing else</text>
+<text class="sub" x="30" y="48">A task is either rewritten here or still handled by CTP. From the outside there is no way to tell which.</text>
 
 <!-- ENTRY -->
 <text class="band" x="30" y="76">ENTRY — the scripts people and CI already call. Frozen, and now thin shims</text>

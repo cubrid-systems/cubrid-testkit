@@ -1,13 +1,17 @@
-![cubrid-testkit — goal: replace CTP one task at a time while everything the outside can see stays byte-identical, and separate what tests the engine from what merely runs QA around it](docs/assets/banner.svg)
+![cubrid-testkit — a test runner that only runs tests: find the cases, run them, judge them, write down what happened. Scheduling, notifying and issue filing belong somewhere else.](docs/assets/banner.svg)
 
-**cubrid-testkit** is the successor to CTP, the functional test runner for the CUBRID engine.
-It replaces CTP **one task at a time**, and while that is going on, nothing anyone outside can
-observe is allowed to change: the same commands, the same config keys, the same markers on stdout,
-the same result files, the same exit codes.
+**cubrid-testkit** runs CUBRID's functional tests, and that is the whole of it. Find the cases, run
+them against an engine, decide whether each one passed, write down what happened.
 
-The second thing it does is subtract. CTP grew a scheduler, a mailer, an issue filer and a message
-queue inside the test runner. None of that decides whether a test passes, so none of it is being
-carried over.
+Everything else a QA system needs — deciding when to run, telling people the result, filing the
+issue that comes out of it — is a different job and belongs somewhere else. CTP, which this grew
+out of, did all of it in one program: a test runner with a scheduler, a mailer, an issue filer and
+a message queue inside it. Pulling the runner back out of that is the point.
+
+Replacing CTP is therefore not the goal but the route. It happens one task at a time, and while it
+does, nothing anyone outside can observe is allowed to change — the same commands, the same config
+keys, the same markers on stdout, the same result files, the same exit codes — because the old
+system has to keep running the whole time.
 
 For engine developers and QA. Part of
 [CUBRID Systems Research](https://github.com/cubrid-systems).
@@ -16,10 +20,11 @@ For engine developers and QA. Part of
 > done, Phase 2 (architecture) is done, and Phase 3 — rewriting the `shell` task in Go — has not
 > started. See [Status](#status).
 
-## Why replace CTP at all
+## What CTP fused together
 
-CTP works. The problem is what it became on the way there, and Phase 0 measured it rather than
-asserting it:
+CTP works, and it is not going away tomorrow. The problem is that it answers seven questions in one
+program, and only four of them are about running a test. Phase 0 measured the consequences rather
+than asserting them:
 
 | What analysis found | Where |
 |---|---|
@@ -32,6 +37,10 @@ asserting it:
 That last row is the honest one. The analysis that justified this project had a hole in it, found
 later by re-running the survey properly. It is written down where it happened rather than quietly
 fixed.
+
+None of this is an argument that CTP was built badly. It is an argument that a runner and an
+operations pipeline have different reasons to change, and keeping them in one program makes both
+harder to move.
 
 ## Architecture
 

@@ -1,7 +1,7 @@
 # ADR-002: Build Tool
 
-- **Status:** Proposed (Phase 0 M0 출력. ADR-001 결정에 종속하여 결정)
-- **Date:** 2026-04-29
+- **Status:** **Accepted** (2026-09-02, ADR-001 = Go 확정에 따라 자동 도출)
+- **Date:** 2026-04-29 (draft) / 2026-09-02 (accepted)
 - **Trigger:** Phase 0 M0 종료 (ADR-001과 함께)
 - **Depends on:** ADR-001 (Implementation Language)
 
@@ -164,10 +164,41 @@ ADR-001 = Polyglot
 
 ## 7. Decision
 
-(미정. ADR-001 결정 후 본 ADR 결정. 결정 후 Status → Accepted, Decision/Why/Consequences 섹션 채움.)
+**`go build` + `go.mod` 를 주 빌드로, `Justfile` 을 메타 빌드로 채택한다. `isolation/ctltool/Makefile` 은 그대로 유지한다.**
 
-## 8. Consequences (결정 후 채움)
+ADR-001 = Go 이므로 §5 Recommendation Tree 의 해당 분기를 그대로 적용한다.
 
-- CI 파이프라인 설계 입력
-- IDE 통합 설정 결정
-- 신/구 빌드 공존 기간의 산출물 동결 정책 결정
+### 7-1. 빌드 레이어
+
+| 레이어 | 도구 | 대상 |
+|---|---|---|
+| 코어 | `go build` / `go.mod` | `testkit` 단일 바이너리 |
+| native | `isolation/ctltool/Makefile` (기존 파일 그대로) | `qactl` / `qacsql` C 바이너리 |
+| 레거시 공존 | 기존 CTP `build.xml` (Ant) **그대로 유지** | 아직 대체하지 않은 모듈의 jar |
+| 확장 (§6a) | 각 도구의 표준 빌드 (Gradle/Maven·CMake·Cargo·lein) | SQLancer provider / SQLsmith / sqllogictest / Jepsen 테스트 |
+| 메타 | `Justfile` | 위 전부를 묶는 진입 (`just build` / `just test` / `just package`) |
+
+### 7-2. Why Justfile (Make 아님)
+
+- Make 는 *파일 의존 그래프* 도구인데 여기서 필요한 것은 *명령 런너* 다. 팬텀 타깃과 `.PHONY` 로 가득한 Makefile 이 된다.
+- Just 는 인자 전달·기본 셸 지정·`--list` 자체 문서화가 있어 1인 운영의 인지 비용이 낮다 (Driver #2).
+- 단일 파일 conf — Driver #2 의 *one-file-config* 조건 충족.
+- **대안 유지:** Just 설치가 부담이면 `make` 로 강등 가능. 이 결정은 되돌리기 비용이 거의 0 이라 ADR 재개정 없이 바꿀 수 있다.
+
+### 7-3. 재현성 / CI
+
+- `go.mod` + `go.sum` 이 lockfile 역할 (Driver #6). 외부 의존은 **의도적으로 최소**로 유지한다 (`north-star.md` M3).
+- CI 는 GitHub Actions 단일 워크플로 — `just build` → `just test` → (선택) 케이스 실행 lane.
+- **CI 에서의 케이스 실행 검증은 별도 ADR 로 이월** — CUBRID 인스턴스가 필요하고, 이는 빌드 도구 결정의 범위를 넘는다 (§6 Open Question 4 유지).
+
+### 7-4. 산출물 정책
+
+- 배포 단위 = **`testkit` 바이너리 + 셸 자산(`init_path/`, `common/script/`, `common/tpl/`) + `ctltool` 바이너리**.
+- `.jar` 는 산출하지 않는다 (NG5). 공존 기간의 기존 jar 는 *기존 build.xml 이 만든 것을 그대로 사용* 하며, 새 빌드가 그것을 재생산하지 않는다.
+
+## 8. Consequences
+
+1. **크로스 컴파일 정책 필요** — Linux/Windows(cygwin) 양쪽을 지원해야 하므로(`external-surface-freeze.md` §7-4) `GOOS`/`GOARCH` 매트릭스를 Justfile 에 명시. cygwin 환경에서 도는 것은 *셸 자산* 이고 `testkit` 자체는 native Windows 바이너리로 둘지 여부는 Phase 2 에서 확정.
+2. **ctltool 빌드는 대상 머신에서 수행** — C 바이너리이므로 배포 패키지에 미리 넣을지 원격에서 make 할지 결정 필요 (Phase 3, ADR-007 과 결합).
+3. **§6a 확장은 독립 빌드 산출물** — Justfile 이 오케스트레이션만 하고, 각 도구는 자기 빌드 체계를 유지한다 (ADR-001 Consequence 4 와 정합).
+4. **기존 `build.xml` 은 Phase 5 까지 살아 있다** — 삭제 시점은 `cleanup/legacy-archive-policy.md` 에서 결정.

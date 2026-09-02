@@ -6,13 +6,26 @@ CUBRID 의 기능 검증을 위한 테스트 툴킷.
 
 cubrid-testkit 는 CUBRID 의 기능 테스트 케이스를 실행하기 위한 도구를 제공한다. 테스트 케이스 레포(`cubrid-testcases`, `cubrid-testcases-private`, `cubrid-testcases-private-ex`)에 정의된 케이스들을 다양한 방식(SQL / Shell / JDBC / Isolation / Replication 등)으로 수행하고 결과를 보고한다.
 
+## 현재 위치
+
+**Phase 1 진행 중** (2026-09-02 게이트 통과). 구현 언어 **Go**, 1차 대체 대상 **shell 모듈**(+ rqg / unittest / jdbc).
+
+**프로젝트 방향성:** 테스트 실행 축(T)과 QA 운영 축(O)을 분리한다. 이번 마이그레이션은 축 T 만 옮기고, 축 O 는 제외 기록 후 나중에 새 층으로 세운다 → [migration-exclusions.md](concept/migration-exclusions.md)
+
 ## 문서
 
 - [Roadmap](ROADMAP.md) — 단계별 분석/설계/구현 계획
-- [ADRs](adr/) — 주요 의사결정 기록
-- [Analysis notes](analysis/) — 모듈별 요구사항·설계·구현 노트
-- [Concept](concept/) — 시스템 컨셉 및 외부 인터페이스 정의
-- [Design](design/) — 아키텍처 및 모듈 설계
+- [ADR 인덱스](adr/README.md) — 번호 배정의 단일 출처. 확정 5건 / 예약 7건
+- **Concept (Phase 1 산출물)**
+  - [North Star](concept/north-star.md) — 새 시스템의 정체성
+  - [External Surface Freeze](concept/external-surface-freeze.md) — 동결 명세 + 신↔구 1:1 매핑 표
+  - [Non-Goals](concept/non-goals.md) — 의도적으로 하지 않는 것 (NG1~NG11)
+  - [Migration Exclusions](concept/migration-exclusions.md) — **축 T/O 분리 원칙** + 마이그레이션 제외 목록
+  - [Phase 0 회고](concept/phase0-retrospective.md) — 게이트 통과 기록
+- [Analysis notes](analysis/) — Phase 0 산출물. 모듈별 요구사항·설계·io-contract
+- [Extensions](extensions/) — §6a 확장 영역 E1~E7 (incubating)
+- [Survey](survey/dbms-testing-ecosystem.md) — DBMS 테스팅 생태계 8축 분류
+- [Design](design/) — 아키텍처 및 모듈 설계 *(Phase 2, 미착수)*
 
 ## 디렉터리 구조
 

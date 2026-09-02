@@ -1,8 +1,12 @@
-# Phase 0 → Phase 1 전이 게이트
+# Phase 0 회고 — Phase 0 → Phase 1 전이 게이트 *(통과 기록)*
 
-**Date:** 2026-04-29  
-**Status:** READY (모든 Phase 0 산출물 완성, ADR 결정 대기)  
+**Date:** 2026-04-29 (게이트 작성) / 2026-09-02 (통과)
+**Status:** **PASSED** — Phase 1 진입 완료
 **Analysis baseline:** cubrid-testtools @ 86992c1b334d55800f2700d60f9809c2ceca268d
+
+> 본 문서는 `PHASE0_EXIT.md` 였다. ROADMAP §10 의 예정대로 Phase 1 진입 후
+> `concept/phase0-retrospective.md` 로 이름을 바꿔 *진행 기록* 으로 보존한다.
+> §9 의 "다음 액션" 과 §7 의 체크리스트는 **§11 에 기록된 실제 결정** 으로 대체되었다.
 
 ---
 
@@ -312,3 +316,68 @@ Phase 0 → Phase 1 게이트 = 사용자 결정 대기
 ```
 
 본 게이트 문서는 Phase 1 시작 후 `concept/phase0-retrospective.md` 로 이름 변경 + Status 업데이트하여 *진행 기록* 으로 보존.
+
+
+---
+
+## 11. 게이트 통과 기록 *(2026-09-02)*
+
+### 11-1. 선택된 시나리오
+
+**시나리오 A — 큰 결정 먼저, 빠른 진입.** inventory 5 stubs(§2-4)와 정밀 후속(§8)은 채우지 않고 Phase 1 에 즉시 진입.
+
+### 11-2. §7 체크리스트에 대한 실제 답변
+
+| Q | 답변 |
+|---|---|
+| Q2. ADR-001 선호 | **Go** — ADR 권고 1순위 그대로. 근거는 ADR-001 §7-1 |
+| Q3. ADR-004 선호 | **Option C' (shell 단독)** — 균형형 추천 그대로. 근거는 ADR-004 §7-2 |
+| Q4. `cubridqa-common.jar` 호환 산출 의무 | **아니오.** "CLI/conf/출력만 동결" → ADR-003, NG5 |
+
+⚠️ ADR-003 이 확정한 동결 범위는 사용자 답변보다 넓다 — *CLI/conf/출력* 에 **종료 코드·원격 실행 컨트랙트**를 더했다. 이는 ADR-003 §1/§4 의 저자 판단이며 사용자가 명시적으로 답한 것이 아니다. 종료 코드와 `runone.sh`/`init.sh` 컨트랙트를 빼면 회귀 동등성 판정이 불가능해지기 때문이다.
+| Q5. ctltool 처리 | **미기록.** ADR-002 §7-1 이 `ctltool/Makefile` 유지(빌드 결정)를 확정했을 뿐이고, 흡수/subprocess/CUBRID-only 라는 *런타임 통합 형태*는 ADR-007 로 이월 |
+| Q7. inventory 필수 여부 | **아니오** (시나리오 A) |
+| Q8. prototype-first | **아니오** — Phase 3 자체를 언어 검증 슬라이스로 사용 (ADR-001 §7-3) |
+| Q1 / Q6 | 미기록. Q6(분기 게이트 첫 가동 시점)은 다음 분기 게이트에서 확정 |
+
+### 11-3. 결정된 ADR
+
+| ADR | 결정 | Status |
+|---|---|---|
+| ADR-001 | Go | Accepted |
+| ADR-002 | `go build` + `go.mod` + Justfile 메타 + `ctltool/Makefile` 유지 | Accepted |
+| ADR-003 | 동결 범위 = CLI/conf/출력/종료코드/원격컨트랙트. jar·Java API 제외. F1/F2/F3/NF 4등급 | Accepted (신규) |
+| ADR-004 | Option C' (shell 단독) — Phase 2 종료 트리거였으나 조기 결정 | Accepted |
+| ADR-005 ~ 009 | 미결 — Phase 1/2 진행 중 결정 (§4-2 유지) | — |
+
+### 11-4. Phase 1 산출물
+
+- `concept/north-star.md` — 정체성. M1~M5 / 확장점 1개 / 호환성 정의 / 성공 기준 3개
+- `concept/external-surface-freeze.md` — 동결 명세. §10 이 ROADMAP Phase 1 Exit 조건인 신↔구 1:1 매핑 표(22행)
+- `concept/non-goals.md` — NG1~NG11 (NG3 은 결번 확인 대기)
+- ADR-001/002/003/004 확정본
+
+### 11-5. Phase 1 에서 새로 발생한 미해결 항목
+
+`external-surface-freeze.md` §11 의 7건. 이 중 §11-1·§11-2 는 **Phase 2 진입 전**, §11-5·§11-6 은 **Phase 3 착수 전** 해소가 필수로 승격되었다 (ADR-003 Consequence 4, ADR-004 Consequence 4).
+
+또한 **NG3 결번 확인** — ROADMAP·extensions 문서가 NG1·NG2·NG4 를 참조하지만 NG3 은 어디에서도 참조되지 않는다. 원 명세 확인 또는 결번 확정이 다음 분기 게이트 안건.
+
+
+### 11-6. 후속 정정 *(2026-09-02, 같은 날 이후)*
+
+Phase 1 산출물에 대한 별도 검토 패스(critic)와 `§11-1` 확인 작업에서 다음이 드러나 문서를 개정했다:
+
+| 발견 | 영향 |
+|---|---|
+| **`cli-tree.md` 가 `ctp.sh` 한 갈래만 추적** — 실제 java launcher 는 15개 | `cli-tree.md` 부록 A 신설 (진입점 전수) |
+| `jdbc/bin/run.sh` 가 **`shell.main.JdbcLocalTest`** 호출 | ADR-004 Phase 3 범위에 `jdbc` 추가 |
+| `shell/init_path/run_shell.sh` = **두 번째 CLI 트리** (옵션 13개, 가이드 3곳에 문서화) | freeze §1-4 신설 |
+| isolation `.ctl` 은 `cases/`·`answers/` 자매 디렉터리가 **없다** | freeze §3-1 정정 (치명) |
+| `.ctl` DSL 은 4토큰이 아니라 **8토큰** | freeze §3-3 정정 (치명) |
+| **`runone.sh` 의 sed normalization** 이 명세에서 통째로 누락 — 모든 isolation 판정이 여기 의존 | freeze §7-6 신설 (치명) |
+| `conf/shell_agent.conf` 누락 | freeze §2-1 |
+| answer variant 패턴 오기 + `.diff_1` / `.answer_WIN` 누락 | freeze §3-2 |
+| **축 T / 축 O 분리** (사용자 결정) | `migration-exclusions.md` 신설, north-star §1a, freeze 전면 개정 |
+
+**교훈:** Phase 0 의 "완료" 판정이 이르렀다. `cli-tree.md` 가 단일 진입점만 추적했다는 사실을 게이트 체크리스트가 잡지 못했다. 향후 Phase Exit 판정에는 *"이 분석이 커버하지 않은 영역을 한 문장으로 적으라"* 는 항목을 넣는다.

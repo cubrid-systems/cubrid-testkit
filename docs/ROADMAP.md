@@ -1,9 +1,10 @@
 # ROADMAP — CUBRID Test Kit
 
-- **날짜**: 2026-05-06 (2026-04-28 초안에서 §6a 확장 영역 추가)
+- **날짜**: 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
+- **현재 위치**: **Phase 1 진행 중** — Phase 0 완료(2026-04-29), 게이트 통과(2026-09-02, `concept/phase0-retrospective.md` §11)
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)
   + 확장 영역(외부 테스트 포맷 흡수, §6a)
-- **제약 요약**: 기존 testcases 레포 수정 불가 / 외부 인터페이스 동결 / 빌드 도구 미확정(ADR-002)
+- **제약 요약**: 기존 testcases 레포 수정 불가(NG1) / 외부 인터페이스 동결(NG2, 범위는 ADR-003) / 구현 언어 = Go(ADR-001) / 빌드 = `go build` + Justfile(ADR-002)
 - **Analysis baseline**: cubrid-testtools @ 86992c1b334d55800f2700d60f9809c2ceca268d
 
 ---
@@ -16,17 +17,19 @@ cubrid-testtools/         (기존, 동결 대상)
 └── ROADMAP.md             고수준 의도만 유지, 상세는 새 레포로
 
 cubrid-testkit/            (신규, 이번 작업의 결과물)
-├── README.md              "CTP의 후계 — strangler-fig 진행 중" 명시
-├── ROADMAP.md             이 명세에서 추출한 상세 로드맵
-├── analysis/              Phase 0 산출물 (브라운필드 분석)
-│   ├── _overview/         CLI 트리, conf 매트릭스, case 포맷 분포
-│   ├── medium/  sql/  shell/  isolation/  common/   (심도 5종)
-│   └── inventory/         jdbc/sql_by_cci/ha_repl/cdc_repl/cci_compat
-├── concept/               Phase 1 — 컨셉/외부 표면 동결
-├── design/                Phase 2 — 아키텍처/모듈 설계
-├── impl/                  Phase 3+ — 모듈별 구현
-├── adr/                   ADR-001 .. ADR-NNN
-└── docs/                  최종 사용자 문서 (기존 doc/의 후계)
+├── docs/                  모든 문서
+│   ├── README.md          "CTP의 후계 — strangler-fig 진행 중" 명시
+│   ├── ROADMAP.md         이 명세에서 추출한 상세 로드맵
+│   ├── adr/               ADR-000 .. ADR-NNN + README (번호 단일 출처)
+│   ├── analysis/          Phase 0 산출물 (브라운필드 분석)
+│   │   ├── _overview/     CLI 트리(+진입점 전수 부록 A), conf 매트릭스, case 포맷
+│   │   ├── medium/ sql/ shell/ isolation/ common/   (심도 5종)
+│   │   └── inventory/     jdbc/sql_by_cci/ha_repl/cdc_repl/cci_compat (0/5 미착수)
+│   ├── concept/           Phase 1 — north-star / 동결 명세 / non-goals / 마이그레이션 제외
+│   ├── design/            Phase 2 — 아키텍처/모듈 설계 (미착수)
+│   ├── extensions/        §6a 확장 E1~E7
+│   └── survey/            DBMS 테스팅 생태계 조사
+└── impl/                  Phase 3+ — 모듈별 구현
 ```
 
 **레포 이름 결정 근거 (ADR-000 자리)**:
@@ -91,9 +94,9 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 5. testcases 레포의 케이스 디렉터리 구조 → 케이스 파일 포맷의 *현존 분포* → `analysis/_overview/case-formats.md`
 
 **Phase 0의 진단적 ADR 자리표시자**:
-- ADR-001 *(트리거: M0 종료)* — 새 시스템의 구현 언어
-- ADR-002 *(트리거: M0 종료)* — 빌드 도구 (Ant 유지 / Maven / Gradle / 비-JVM)
-- ADR-003 *(트리거: 분석 종료)* — 외부 표면 동결 시점
+- ADR-001 — 새 시스템의 구현 언어 → **Accepted: Go** (2026-09-02)
+- ADR-002 — 빌드 도구 → **Accepted: `go build` + `go.mod` + Justfile 메타 + `ctltool/Makefile` 유지**
+- ADR-003 — 외부 표면 동결 범위 → **Accepted: CLI/conf/출력/종료코드/원격컨트랙트만. jar·Java API 제외. F1/F2/F3/NF 4등급**
 
 ---
 
@@ -101,11 +104,14 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 
 **Exit 조건**: 새 시스템이 *어떤 입력*을 받아 *어떤 출력*을 내야 하는지가 기존 CTP와 1:1 매핑된 표가 존재.
 
-**산출물**:
-- `concept/north-star.md` — 한 페이지로 새 시스템의 정체성 (모던 설계 / 확장성 / 호환성의 구체적 의미)
-- `concept/external-surface-freeze.md` — *동결되는* CLI 인자, conf 키, 출력 파일, 종료 코드 명세
-- `concept/non-goals.md` — 의도적으로 *재현하지 않는* 동작 목록 (이전엔 가능했지만 새 시스템에선 의도적으로 다르게 처리)
-- ADR-001 / ADR-002 / ADR-003 확정본
+**산출물** *(2026-09-02 완료)*:
+- [x] `concept/north-star.md` — 정체성. M1~M5 재설계 목표 / 확장점 1개 / 호환성 정의 / 성공 기준 3개
+- [x] `concept/external-surface-freeze.md` — 동결 명세. **§10 이 본 Phase 의 Exit 조건인 신↔구 1:1 매핑 표(22행)**
+- [x] `concept/non-goals.md` — NG1~NG11
+- [x] ADR-001 / ADR-002 / ADR-003 확정본
+- [x] `concept/phase0-retrospective.md` — 게이트 통과 기록 (구 `PHASE0_EXIT.md`)
+
+**잔여 (Phase 2 진입 전 해소)**: `external-surface-freeze.md` §11-1(ext/script 외부 호출자 전수 확인) · §11-2(CI grep 대상 확인) · ADR-005(orphan task 폐기 정책) · NG3 결번 확인
 
 ---
 
@@ -117,19 +123,19 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 - `design/architecture.md` — 모듈 경계, 공통 레이어, 실행 모델(분산 실행/SSH 호환), 결과 처리 파이프라인
 - `design/module-{module}.md` × 4 — 신구 매핑 표 포함 (구 클래스/스크립트 → 신 컴포넌트)
 - `design/contracts.md` — 모듈 간 in-process 인터페이스 (이후 strangler-fig 대체의 경계)
-- ADR-004 — 신시스템 골격이 적용될 *첫 번째 대체 대상 모듈* 선정 (1차 후보: isolation 또는 medium 중 의존이 적은 쪽)
+- ~~ADR-004 — 첫 번째 대체 대상 모듈 선정~~ → **Phase 0→1 게이트에서 조기 결정 완료. Accepted: Option C' (shell 단독)**. 사유는 ADR-004 §7-1
 
 ---
 
 ## 4. Phase 3 — 1차 strangler-fig 대체 (2~3개월)
 
-**Exit 조건**: 선정된 모듈이 새 시스템에서 동작하며, `bin/ctp.sh` 호환 진입점에서 기존 결과와 **회귀 동등성** 확인.
+**Exit 조건**: 선정된 모듈(**shell / rqg / unittest**, ADR-004)이 새 시스템에서 동작하며, `bin/ctp.sh` 호환 진입점에서 기존 결과와 **회귀 동등성** 확인. 판정 기준은 `external-surface-freeze.md` 의 등급별 — F1 은 diff 0, F2 는 필드 단위 비교, F3 는 수용 여부 (ADR-003 Consequence 3).
 
 **산출물**:
 - `impl/m1/` — 첫 모듈 구현 코드
 - `impl/m1/migration-bridge.md` — 기존 ctp.sh가 새 구현으로 라우팅되는 방식
 - `impl/m1/regression-evidence.md` — 동일 testcases 입력에 대한 신/구 출력 동등성 보고서
-- ADR-005 — 신/구 공존 기간 동안의 *유지보수 정책*
+- ADR-010 — 신/구 공존 기간 동안의 *유지보수 정책* *(구 초안의 ADR-005 — 번호 충돌로 재배정, `adr/README.md` 참조)*
 
 ---
 
@@ -140,7 +146,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 **산출물**:
 - `impl/m2/`, `impl/m3/`, `impl/m4/` — 모듈 단위 구현
 - `impl/adapters/{inventory_module}.md` × N — 인벤토리 모듈에 대한 *호환 어댑터* 명세 (재작성 아님)
-- ADR-006 — 인벤토리 모듈 중 *재작성 대상*과 *어댑터 유지 대상* 분류
+- ADR-011 — 인벤토리 모듈 중 *재작성 대상*과 *어댑터 유지 대상* 분류 *(구 초안의 ADR-006 — 번호 충돌로 재배정)*
 
 ---
 

@@ -1,6 +1,6 @@
 # ADR-004: First Replacement Module (Strangler-Fig 1차 대체 단위)
 
-- **Status:** Proposed (Phase 0 M0 출력. Phase 2 (아키텍처/모듈 설계) 완료 시점에 결정)
+- **Status:** **Accepted** (2026-09-02, Phase 0→1 게이트에서 조기 결정 — 원래 트리거는 Phase 2 종료였음)
 - **Date:** 2026-04-29
 - **Trigger:** Phase 2 종료
 - **Depends on:** ADR-001 (언어), ADR-002 (빌드)
@@ -219,11 +219,52 @@ M0 분석을 통해 *4개의 자연스러운 후보*가 식별되었다 (case-fo
 
 ## 7. Decision
 
-(미정. Phase 2 (아키텍처 + 모듈 설계) 의 종료 시점에 결정. 그 시점엔 ADR-001/002 가 결정되어 있어야 한다.)
+**Option C' — `shell` 모듈 단독을 1차 strangler-fig 대체 대상으로 한다.**
 
-## 8. Consequences (결정 후 채움)
+### 7-1. 결정 시점에 대한 주석
 
-- Phase 3 의 작업 범위 확정
-- 어댑터 layer 필요성 / 설계
-- 신/구 공존 기간의 운영 정책
-- 후속 모듈 대체 순서 (Phase 4 의 입력)
+본 ADR 의 원래 트리거는 *Phase 2 (아키텍처 + 모듈 설계) 종료* 였다. Phase 0→1 게이트에서 조기 결정한 이유:
+
+- ADR-001(언어)의 **검증 슬라이스가 곧 1차 대체 모듈**이다 (ROADMAP §8 risk 5). 두 결정을 분리하면 Phase 2 내내 "무엇을 검증할지 모르는 채로" 아키텍처를 설계하게 된다.
+- Phase 2 의 `design/module-*.md` 4종 중 어느 것을 먼저·깊게 쓸지가 이 결정에 종속된다.
+- 조기 결정의 위험은 낮다 — Phase 2 에서 뒤집히면 아직 코드가 없으므로 문서만 재작성하면 된다.
+
+### 7-2. Why C'
+
+1. **모듈 경계가 명확하다** — 주 진입점은 `shell.main.Main.exec(conf)` 이고, 같은 jar 를 공유하는 부수 진입점이 `GeneralLocalTest`(unittest) · `JdbcLocalTest`(jdbc) · `RunShellMain`(run_shell.sh) 3개다 (`cli-tree.md` 부록 A). 외부 표면은 `external-surface-freeze.md` 가 캡처한다.
+2. **`shell.common.*` 를 자동으로 흡수한다** — M0 이 발견한 *4 모듈(shell + isolation + ha_repl + cdc_repl)의 진짜 공통 인프라*. shell 을 옮기면 원격 실행 레이어가 Go 로 넘어오고, 후속 3 모듈의 대체 비용이 크게 떨어진다.
+3. **영향 범위가 가장 넓다** — shell-format 케이스가 가장 광범위(shell + HA + RQG + shell_ext + shell_heavy + longcase, `case-formats.md`). `manually` 는 *자동화 대상이 아닌 인간 케이스*라 제외.
+4. **분량이 적정하다** — ≈5000 LoC. 1인 6-12개월 안에서 Phase 3 Exit 도달 가능.
+5. **`unittest` 와 `jdbc` 가 같은 jar 를 공유한다** — `GeneralLocalTest`(unittest) 와 `JdbcLocalTest`(jdbc) 가 함께 넘어오므로 task 3개를 한 번에 얻는다. ⚠️ `jdbc` 는 **의도한 이득이자 예상 못한 범위 증가** — `cli-tree.md` 부록 A T4 에서 뒤늦게 식별되었다.
+6. **축 분리의 이득이 여기서 가장 크다** — `run_shell.sh` 의 축 O 옵션 5개를 제외하면 `cubridqa-scheduler.jar` 의존이 끊긴다 (`migration-exclusions.md` §1-2).
+
+### 7-3. 기각한 대안
+
+| 대안 | 기각 사유 |
+|---|---|
+| **D (webconsole 먼저)** | 0.5개월 학습 슬라이스로는 매력적이나, **Phase 3 자체를 언어 검증으로 쓰기로 했으므로**(ADR-001 §7-3) 중복. 축 분리 관점에서도 webconsole 은 축 O 라 1차 대상으로 부적합 — NG8(제안)과도 정합 |
+| **B (sql 단독)** | 자율성·회귀 검증 명료성은 최고이나 분량이 가장 크다(9-phase 파이프라인 + 35 클래스). CCI 모드(`ccqt` C 바이너리)까지 즉시 떠안게 된다 |
+| **A (shell.common.\* 추출)** | 작동 단위가 없어 strangler-fig 가 아니라 internal refactor. Phase 3 Exit 의 *회귀 동등성* 정의를 훼손한다. **C' 를 하면 A 는 사실상 함께 달성된다** |
+| **E (RQG 래퍼)** | RQG 는 shell 경로 위의 카테고리일 뿐 — C' 에 포함된다 |
+| **E1 sqllogictest (§6a)** | CTP 의존 0 이라 "가장 의존 적은 모듈" 자격은 있으나, *대체* 가 아니라 *추가* 라 strangler-fig 진척에 기여하지 않는다. ROADMAP §8 우선순위 규칙에 따라 기각 |
+
+### 7-4. 수용한 비용 — 중복 보유 기간 (어댑터 없음)
+
+`isolation` / `ha_repl` / `cdc_repl` 이 여전히 `shell.common.*` (기존 jar)에 의존한다. C' 는 **신 Go 구현과 구 jar 가 같은 역할을 중복 보유하는 기간**을 만든다.
+
+- **정책:** 구 3모듈은 **기존 jar 를 그대로 subprocess 호출**한다 (`external-surface-freeze.md` §10 공존 원칙, 표 10행). 구 `cubridqa-shell.jar` 는 그들을 위해 **계속 빌드된다**.
+- 즉 신 Go shell 과 구 shell.jar 가 **공존하되 서로를 호출하지 않는다**. 브리지를 만들지 않는 것이 핵심 — 브리지는 NG5(jar 호환 layer 금지) 위반이다.
+- 이 중복은 Phase 4 에서 3모듈이 순차 대체되며 해소된다.
+
+> **§3 의 Option C' 정의는 본 §7-4 로 대체된다.** §3 은 C' 를 *"구 모듈이 thin shim 으로 새 동등물을 호출"* 로 기술했으나, 그 방향(구→신 라이브러리 호출)은 NG5 위반이다. 채택된 정책은 **양쪽이 각자 자기 구현을 쓰고 서로를 호출하지 않는 것**이다.
+
+## 8. Consequences
+
+1. **Phase 2 산출물의 우선순위 확정** — `design/module-shell.md` 를 가장 먼저·가장 깊게 작성. 나머지 3종은 매핑 표 수준으로 유지.
+2. **Phase 3 범위 확정** — `ctp.sh shell` / `ctp.sh rqg` / `ctp.sh unittest` 3개 task. `impl/m1/` 이 이들을 담는다.
+3. **회귀 동등성 증거의 대상 코퍼스** — shell-format 케이스 (`cubrid-testcases` 의 shell + HA + shell_ext + shell_heavy + longcase). 정확한 부분집합 선정은 Phase 3 착수 시.
+4. **선결 확인 항목 승격** — `external-surface-freeze.md` §11-6(ShellService RMI 인터페이스 + RMI 모드 존치 판단)과 §11-14(shell fail-backup 의 Windows 동작)가 **Phase 3 착수 전 필수 해소**. §11-8 중 `jdbc` 부분도 Phase 3 으로 당겨진다.
+   ~~Feedback DB 스키마~~ 는 `FeedbackDB` 가 축 O 로 제외되면서 **해제**되었다 (`migration-exclusions.md` §1-5).
+5. **ADR-007(ctltool) 은 Phase 4 로 이월** — isolation 을 1차에서 다루지 않으므로 급하지 않다. 단 §7-4 의 공존 정책상 구 isolation.jar 가 ctltool 을 계속 호출하므로 `ctltool/Makefile` 은 유지된다(ADR-002 §7-1).
+6. **`shell_ci.conf` 42 키가 1차 범위에 포함된다** — CI 오버레이 키를 Phase 3 에서 바로 다뤄야 한다. exclusive 키 수는 `conf-matrix.md` 가 14개로 적었으나 42−26=**16**이라 불일치가 있다 (freeze §11-11).
+7. ⚠️ **§7-2 의 "≈5000 LoC" 추정은 재산정 필요** — 초안은 `Main.exec` 한 갈래만 가정했다. 실제 범위에는 `RunShellMain`(축 T 8옵션) · `JdbcLocalTest` · `GeneralLocalTest` 가 추가된다. 반면 축 O 제외로 scheduler·mail·issue 경로가 빠진다. **Phase 2 에서 순증감을 다시 계산할 것.**

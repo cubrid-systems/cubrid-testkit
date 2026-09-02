@@ -167,3 +167,136 @@ cli-tree 분석 과정에서 식별된 backend 진입점 (M0 #4 시퀀스 분석
 - jdbc: 마찬가지로 `CTP/jdbc/bin/run.sh` (8KB) 가 진입.
 
 이 비대칭(일부는 Java 엔트리, 일부는 셸 엔트리)은 모듈별 분석에서 design.md 산출 시 다루어져야 한다.
+
+---
+
+# 부록 A — 진입점 전수 재조사 *(2026-09-02)*
+
+**계기:** Phase 1 의 `concept/external-surface-freeze.md` §11-1 확인 작업 중, 본 문서가 **`ctp.sh` → `CTP.java` 한 갈래만 추적했다**는 사실이 드러났다. 실제로는 java 를 직접 실행하는 launcher 가 **15개** 있고 그중 **9개가 본문에 없다**.
+
+**조사 방법:**
+```
+grep -rln 'java .*-cp|java .*-classpath|$JAVA_HOME/bin/java' --include=*.sh --include=*.bat CTP/
+grep -rln "public static void main" --include=*.java CTP/     # 58 클래스
+```
+
+---
+
+## A-1. 축 분리
+
+사용자 결정(2026-09-02): **테스트 실행**과 **QA 시스템 운영**은 다른 축이며, 현재 CTP 는 이 둘이 한 덩어리로 뭉쳐 있다. 마이그레이션 대상은 축 T 만이고, 축 O 는 *나중에 새로운 층* 으로 다시 세운다.
+
+- **축 T (테스트 실행)** — 케이스를 고르고 돌리고 판정하고 결과를 파일로 남기는 것
+- **축 O (QA 운영)** — 스케줄링·큐·메일·이슈 등록·빌드 업그레이드·저장소 서비스
+
+---
+
+## A-2. 축 T — 테스트 실행 진입점 (6)
+
+| # | 진입 스크립트 | main 클래스 | classpath jar | 본문 커버 |
+|---|---|---|---|---|
+| T1 | `bin/ctp.sh` | `ctp.CTP` | common | ✅ 본문 전체 |
+| T2 | `sql/bin/run.sh` | `cqt.console.ConsoleAgent runCQT` | cqt | ✅ (shell-out 끝단으로만) |
+| T3 | `sql/bin/interactive.sh` | `cqt.console.ConsoleAgent runCQT` | cqt | ❌ **누락** |
+| T4 | `jdbc/bin/run.sh` | **`shell.main.JdbcLocalTest`** | **shell** + common | ❌ **클래스 미식별** |
+| T5 | `shell/init_path/run_shell.sh` | **`shell.main.RunShellMain`** | **shell + scheduler** | ❌ **누락** |
+| T6 | `bin/ini.sh` | `ctp.IniCommand` | common | ❌ **누락** |
+
+### T3 — `sql/bin/interactive.sh`
+
+`ctp.sh --interactive` 와 **별개의 직접 진입점**. JVM 옵션까지 다르다:
+```
+java -Xms1024m -Xmx2048m -XX:MaxPermSize=512m -XX:+UseParallelGC \
+     -classpath "$CLASSPATH" cqt.console.ConsoleAgent runCQT \
+     $sceanrio_type_in_interactive $scenario_alias_in_interactive \
+     $bits_in_interactive $client_charset $javaArgs | tee $log_file_in_interactive
+```
+(`-XX:MaxPermSize` 는 Java 8 에서 제거된 옵션 — 이 스크립트가 Java 7 시대 자산임을 시사)
+
+### T4 — `jdbc/bin/run.sh` 가 **shell 모듈 클래스**를 호출한다
+
+```
+java -cp ".:$CUBRID/jdbc/cubrid_jdbc.jar:./src:common/lib/cubridqa-common.jar:\
+shell/lib/cubridqa-shell.jar:..." com.navercorp.cubridqa.shell.main.JdbcLocalTest ${config_file}
+```
+
+본문 dispatch 표는 JDBC 를 *"shell-out → jdbc/bin/run.sh"* 로만 적었으나, **그 끝단이 `cubridqa-shell.jar` 의 클래스**다.
+
+⚠️ **ADR-004(1차 대체 = shell) 범위에 직접 영향** — shell 모듈을 옮기면 `jdbc` task 도 함께 끊긴다. `unittest`(`GeneralLocalTest`)에 이어 **shell.jar 를 공유하는 두 번째 task**.
+
+### T5 — `shell/init_path/run_shell.sh` — 두 번째 CLI 트리
+
+`common/ext/run_shell.sh` 와 **이름만 같고 실체가 다르다**. `RunShellMain` 의 옵션 13개:
+
+| 옵션 | arg | 축 |
+|---|---|---|
+| `--loop` | no | T |
+| `--maxloop` | yes | T |
+| `--maxtime` | yes | T |
+| `--update-build` | no | T |
+| `--next-build-url` | yes | T |
+| `--extend-script` | yes | T |
+| `--prompt-continue` | yes | T |
+| `-h` / `--help` | no | T |
+| `--enable-report` | no | **O** |
+| `--report-cron` | yes | **O** |
+| `--mailto` | yes | **O** |
+| `--mailcc` | yes | **O** |
+| `--issue` | yes | **O** |
+| ~~`--config`~~ | — | 주석 처리됨 (line 795) |
+
+**축 T 와 축 O 가 한 CLI 안에 섞여 있는 정확한 사례.** classpath 에 `cubridqa-scheduler.jar` 가 실려 있는 이유가 `--report-cron`(Quartz) 이다.
+
+**문서화 상태:** `doc/rqg_guide.md` §2.7, `doc/cci_guide.md`, `doc/shell_heavy_guide.md` 에 **실제 호출 예시와 함께 공식 문서화**되어 있다 → 사용자 가시 표면.
+
+### T6 — `bin/ini.sh`
+
+`ctp.IniCommand` — conf 파일을 CLI 로 편집하는 유틸리티. 외부 자동화가 conf 를 프로그램적으로 고칠 때 쓰였을 가능성.
+
+---
+
+## A-3. 축 O — QA 운영 진입점 (9)
+
+| # | 진입 스크립트 | main 클래스 | jar |
+|---|---|---|---|
+| O1 | `common/script/start_producer.sh` | `scheduler.producer.Main` | scheduler |
+| O2 | `common/script/start_consumer.sh` | `scheduler.consumer.ConsumerAgent` / `ConsumerTimer` | scheduler |
+| O3 | `common/script/sender.sh` | `scheduler.producer.ManualSender` | scheduler |
+| O4 | `common/script/generate_build_test.sh` | `scheduler.producer.crontab.BuildMain` | scheduler |
+| O5 | `common/script/start_grepo_server.sh` | `common.grepo.service.RepoServiceImpl` | common |
+| O6 | `common/script/upgrade.sh` | `common.grepo.UpgradeMain` | common |
+| O7 | `common/script/issue.sh` | `common.coreanalyzer.IssueMain` | common |
+| O8 | `common/script/analyze_failure.sh` | `common.MergeTemplate` (×2 — `issue_create_desc.tpl` / `issue_create.tpl`) | common |
+| O9 | `common/script/sender.sh` 외 메일 경로 | `common.MailSender` | common |
+
+**축 O 는 ActiveMQ 큐 + Quartz cron + JIRA 이슈 등록 + 메일 + git 저장소 서비스** 로 구성된 *별개의 시스템* 이다. 테스트 러너가 아니라 **QA 자동화 파이프라인**이다.
+
+### 축 경계의 예외 — `analyzer.sh`
+
+`common/script/analyzer.sh` → `common.coreanalyzer.AnalyzerMain` 은 **축 T**다. core dump 분석은 테스트 판정의 일부이며, `CORE_FILE:` 마커가 동결 표면(F1)이다. 같은 `coreanalyzer` 패키지 안에서도 `IssueMain`(O7)은 축 O — **패키지가 축을 가르지 않는다.**
+
+---
+
+## A-4. main() 58개에 대한 주의
+
+`main()` 보유 클래스 58개 중 상당수는 *진입점이 아니라* 개발자용 임시 하네스다 (`FeedbackNull`, `Constants`, `CommonUtils`, `LocalInvoker`, `SFTPUpload`, `Convert` 등). launcher 스크립트가 실제로 부르는 것만 위 15개다.
+
+- `shell/service/Server.java` — RMI 서비스 데몬 (별도 launcher 없이 `Test.java` 가 in-process 로 registry 생성)
+- `sql/webconsole/WebServer.java` — webconsole (ctp.sh WEBCONSOLE 분기가 `Starter` 를 부르는 것과 별개 경로 가능성 — 후속 확인)
+- `common/CommitConfigFileIntoDB.java` — `script/commit_config_file` 의 실체로 추정 (축 O)
+
+---
+
+## A-5. 본문 §"새 시스템 설계 시 주목할 점" 에 대한 정정
+
+본문 1번의 *"CLI 표면은 21개 enum 중 14개만 살아 있음"* 은 **`ctp.sh` 한정** 진술이다. 시스템 전체의 CLI 표면은:
+
+```
+ctp.sh 의 14 task
++ RunShellMain 의 13 옵션          (T5)
++ IniCommand 의 conf 편집 CLI       (T6)
++ interactive.sh                    (T3)
++ 축 O 의 9 launcher
+```
+
+**설계 시사점:** 새 시스템의 진입점 설계는 `ctp.sh` 호환만으로 끝나지 않는다. 축 T 의 6개 진입점을 하나의 `testkit` 바이너리 서브커맨드로 수렴시키되, **각 진입 스크립트는 호환 shim 으로 남겨** 기존 문서·자동화가 계속 동작하게 한다. 축 O 는 이번 마이그레이션에서 제외한다 (`concept/migration-exclusions.md`).

@@ -25,9 +25,21 @@ type Result struct {
 	ExitCode int
 }
 
-// Combined returns stdout followed by stderr, which is what CTP looked at when it
-// ran a script with 2>&1.
-func (r Result) Combined() string { return r.Stdout + r.Stderr }
+// Output is what CTP's callers saw, and it is standard output alone.
+//
+// Both of CTP's channels discard standard error. The remote one never reads it:
+// SSHConnect takes exec.getInputStream() and nothing else. The local one appears
+// to keep it -- it concatenates stdout and stderr -- and then truncates the
+// result at the completion marker, which sits at the end of stdout, so everything
+// stderr contributed is cut away again.
+//
+// The effect is visible in a worker log: a script whose commands write to stderr
+// leaves no trace of them unless the script redirects internally, which is why a
+// case is run as "sh <case>.sh 2>&1" and the reset script is not.
+//
+// Stderr is still captured, because a channel that throws away the explanation of
+// its own failure is no use. It is just not what the frozen logs contain.
+func (r Result) Output() string { return r.Stdout }
 
 // Channel runs commands and moves files.
 type Channel interface {
@@ -53,6 +65,11 @@ type Local struct {
 	Dir string
 	// Env replaces the environment when non-nil, and extends it otherwise.
 	Env []string
+	// SourceProfile prepends Profile, as CTP's remote path always did and its
+	// local paths did not agree about: the shell task reached even a local machine
+	// through SSHConnect and got the profile, while unittest called LocalInvoker
+	// directly and did not. Both are reproduced rather than unified.
+	SourceProfile bool
 }
 
 // NewLocal returns a channel that runs here.
@@ -79,6 +96,21 @@ func (l *Local) Describe() string { return "local" }
 // works where /bin/sh is dash, which is where CTP fails with "source: not found".
 // No frozen output changes; a deviation from the literal command line is recorded
 // in the freeze spec.
+// Profile is what runs before anything else, on both channels.
+//
+// An ssh exec session is neither a login nor an interactive shell, so it reads
+// no profile: none of $CUBRID, $JAVA_HOME, $CTP_HOME or the PATH a QA machine is
+// set up with would be there. CTP put this line in front of every script it
+// sent, and it is the reason a case can assume any of them.
+//
+// The dance around CTP_HOME is deliberate. The profile on a QA machine usually
+// sets it too, and the caller's value has to win -- so it is saved first and put
+// back afterwards, but only when the caller actually had one.
+//
+// It runs *before* the frame opens, so whatever a profile prints on the way past
+// is discarded rather than mixed into a case's output.
+const Profile = `pri_ctp_home=$CTP_HOME; if  [ -f ~/.bash_profile ]; then . ~/.bash_profile; fi; if [ "$pri_ctp_home" != "" ];then export CTP_HOME=${pri_ctp_home}; fi; `
+
 const Shell = "bash"
 
 func (l *Local) Run(ctx context.Context, script string) (Result, error) {
@@ -88,7 +120,11 @@ func (l *Local) Run(ctx context.Context, script string) (Result, error) {
 	}
 	name := f.Name()
 	defer os.Remove(name)
-	if _, err := f.WriteString(script + "\n"); err != nil {
+	body := script + "\n"
+	if l.SourceProfile {
+		body = Profile + "\n" + body
+	}
+	if _, err := f.WriteString(body); err != nil {
 		f.Close()
 		return Result{}, fmt.Errorf("script file: %w", err)
 	}

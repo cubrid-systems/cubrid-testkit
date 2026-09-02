@@ -134,7 +134,7 @@ func (s *SSH) Run(ctx context.Context, script string) (Result, error) {
 	sess.Stdout = &stdout
 	sess.Stderr = &stderr
 
-	framed := strings.Join([]string{startFlagEcho, script, compFlagEcho}, "\n")
+	framed := strings.Join([]string{Profile, startFlagEcho, script, compFlagEcho}, "\n")
 
 	done := make(chan error, 1)
 	go func() { done <- sess.Run(framed) }()

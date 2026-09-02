@@ -67,12 +67,12 @@ func (m *Monitor) check(ctx context.Context) {
 	// arrived afterwards the case could be recorded as a pass on its way out.
 	m.Worker.markTimedOut()
 
-	res, err := m.Channel.Run(ctx, KillScript(m.Local))
+	res, err := runIn(ctx, m.Channel, KillScript(m.Local))
 	cleaned := ""
 	if err != nil {
 		cleaned = "fail to reset processes: " + err.Error()
 	} else {
-		cleaned = res.Combined()
+		cleaned = res.Output()
 	}
 
 	action := fmt.Sprintf("[RESOLVE] %d + timeout (actual: %d seconds)\nCLEAN PROCESSES: \n%s",

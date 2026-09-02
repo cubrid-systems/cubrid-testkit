@@ -54,7 +54,7 @@ func (p *plugin) invoke(ctx context.Context, command string, keys ...string) (st
 	if err != nil {
 		return "", nil, err
 	}
-	combined := res.Combined()
+	combined := res.Output()
 
 	output := combined
 	if at := strings.Index(combined, propStart); at != -1 {

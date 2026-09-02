@@ -285,3 +285,64 @@ func countUnderCases(t *testing.T, scenario string) int {
 	})
 	return n
 }
+
+// Discovery over a real connection, against the real corpus. It is the one
+// correction everything else rests on -- 3,452 cases rather than 3,722 -- and
+// this is the only place it is checked through the channel that will carry it.
+//
+// Needs TESTKIT_SSH_HOST and TESTKIT_SHELL_CORPUS.
+func TestDiscoverOverSSHFindsTheRealCorpus(t *testing.T) {
+	host := os.Getenv("TESTKIT_SSH_HOST")
+	root := os.Getenv("TESTKIT_SHELL_CORPUS")
+	if host == "" || root == "" {
+		t.Skip("set TESTKIT_SSH_HOST and TESTKIT_SHELL_CORPUS")
+	}
+	scenario := filepath.Join(root, "shell")
+	if _, err := os.Stat(scenario); err != nil {
+		t.Skipf("no shell tree under %s", root)
+	}
+
+	ch := exec.NewSSH(exec.SSHConfig{
+		Host:     host,
+		Port:     envOr("TESTKIT_SSH_PORT", "22"),
+		User:     envOr("TESTKIT_SSH_USER", os.Getenv("USER")),
+		Password: os.Getenv("TESTKIT_SSH_PASSWORD"),
+	})
+	defer ch.Close()
+
+	got, err := Discover(t.Context(), ch, scenario)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var want []string
+	err = filepath.WalkDir(scenario, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".sh") {
+			return err
+		}
+		if IsCase(p) {
+			want = append(want, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(want)
+
+	if !slices.Equal(got, want) {
+		t.Fatalf("discovery over ssh found %d cases, walking the tree found %d", len(got), len(want))
+	}
+	t.Logf("%d cases discovered over ssh, byte for byte the same list as the local walk", len(got))
+
+	if !slices.IsSorted(got) {
+		t.Error("the list came back unsorted, so two runs would dispatch differently")
+	}
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

@@ -46,6 +46,7 @@ type Sink struct {
 	mu      sync.Mutex
 	workers map[string]*os.File // test_<envId>.log
 	monitor map[string]*os.File // monitor_<envId>.log
+	checks  map[string]*os.File // check_<envId>.log
 	fin     map[string]*os.File // dispatch_tc_FIN_<envId>.txt
 	append  bool                // continue mode reopens rather than truncates
 }
@@ -63,6 +64,7 @@ func Open(home *conf.Home, category string, continueMode bool) (*Sink, error) {
 		stdout:  os.Stdout,
 		workers: map[string]*os.File{},
 		monitor: map[string]*os.File{},
+		checks:  map[string]*os.File{},
 		fin:     map[string]*os.File{},
 		append:  continueMode,
 	}, nil
@@ -110,6 +112,11 @@ func (s *Sink) Worker(envID, line string) error {
 	}
 	_, err = fmt.Fprintln(f, line)
 	return err
+}
+
+// Check returns the writer for check_<envId>.log.
+func (s *Sink) Check(envID string) (io.Writer, error) {
+	return s.file(s.checks, "check_"+envID+".log", s.append)
 }
 
 // Monitor appends to monitor_<envId>.log.
@@ -275,7 +282,7 @@ func (s *Sink) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var firstErr error
-	for _, cache := range []map[string]*os.File{s.workers, s.monitor, s.fin} {
+	for _, cache := range []map[string]*os.File{s.workers, s.monitor, s.checks, s.fin} {
 		for _, f := range cache {
 			if err := f.Close(); err != nil && firstErr == nil {
 				firstErr = err
@@ -284,6 +291,7 @@ func (s *Sink) Close() error {
 	}
 	s.workers = map[string]*os.File{}
 	s.monitor = map[string]*os.File{}
+	s.checks = map[string]*os.File{}
 	s.fin = map[string]*os.File{}
 	return firstErr
 }

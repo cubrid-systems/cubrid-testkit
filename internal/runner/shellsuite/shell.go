@@ -129,15 +129,15 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	}()
 
 	first := channels[instances[0].EnvID()]
-	buildInfo, err := first.Run(ctx, versionScript)
+	buildInfo, err := runIn(ctx, first, versionScript)
 	if err != nil {
 		return quit("Please confirm your build installation for local test! (%v)", err)
 	}
-	buildID := BuildID(buildInfo.Combined())
+	buildID := BuildID(buildInfo.Output())
 	if buildID == "" {
 		return quit("Please confirm your build installation for local test!")
 	}
-	bits := BuildBits(buildInfo.Combined())
+	bits := BuildBits(buildInfo.Output())
 	fmt.Printf("Build Number: %s\n", buildID)
 
 	if err := sink.Snapshot(cfg, map[string]string{
@@ -151,6 +151,39 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		report.TaskContinue()
 	} else {
 		report.TaskStart(cfg.GetOr("cubrid_download_url", ""))
+	}
+
+	// ---- requirements ----------------------------------------------------
+	// A machine that cannot run cases should say so once, here, rather than
+	// through 3,452 identical failures.
+	for _, inst := range instances {
+		envID := inst.EnvID()
+		logFile, err := sink.Check(envID)
+		if err != nil {
+			return err
+		}
+		title := envID
+		if !inst.IsLocal() {
+			title = inst.SSH().User + "@" + inst.SSH().Host + ":" + inst.SSH().Port
+		}
+		check := &CheckRequirement{
+			EnvID:       envID,
+			Title:       title,
+			Protocol:    cfg.GetOr("service_protocol_type", "ssh"),
+			Channel:     channels[envID],
+			Scenario:    strings.TrimSpace(cfg.GetOr("scenario", "")),
+			ExcludeFile: strings.TrimSpace(cfg.GetOr("testcase_exclude_from_file", "")),
+			Out:         os.Stdout,
+			Log:         logFile,
+		}
+		check.Check(ctx)
+
+		// CTP's Log constructor creates its file whether or not anything is ever
+		// written to it, so every run leaves a monitor_<envId>.log behind -- usually
+		// empty, always present.
+		if err := sink.Monitor(envID, ""); err != nil {
+			return err
+		}
 	}
 
 	// ---- workspace -------------------------------------------------------
@@ -211,8 +244,10 @@ func openChannels(instances []*topology.Instance) (workers, monitors map[string]
 
 	for _, inst := range instances {
 		if inst.IsLocal() {
-			workers[inst.EnvID()] = exec.NewLocal("")
-			monitors[inst.EnvID()] = exec.NewLocal("")
+			// CTP reached even the local machine through SSHConnect, so a local run
+			// gets the profile just as a remote one does.
+			workers[inst.EnvID()] = &exec.Local{SourceProfile: true}
+			monitors[inst.EnvID()] = &exec.Local{SourceProfile: true}
 			continue
 		}
 		ssh := inst.SSH()
@@ -241,12 +276,12 @@ func (s *Shell) prepareWorkspace(ctx context.Context, channels map[string]exec.C
 	workspace := strings.TrimSpace(cfg.GetOr("testcase_workspace_dir", ""))
 	if workspace == "" || workspace == scenario {
 		for envID, ch := range channels {
-			out, err := ch.Run(ctx, KillScript(local))
+			out, err := runIn(ctx, ch, KillScript(local))
 			if err != nil {
 				return "", fmt.Errorf("%s: %w", envID, err)
 			}
 			fmt.Println("CLEAN PROCESSES:")
-			fmt.Println(out.Combined())
+			fmt.Println(out.Output())
 		}
 		fmt.Println("SKIP TEST CASES UPDATE")
 		return scenario, nil
@@ -265,13 +300,13 @@ func (s *Shell) prepareWorkspace(ctx context.Context, channels map[string]exec.C
 		wg.Add(1)
 		go func(envID string, ch exec.Channel) {
 			defer wg.Done()
-			if _, err := ch.Run(ctx, KillScript(local)); err != nil {
+			if _, err := runIn(ctx, ch, KillScript(local)); err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("%s: %w", envID, err))
 				mu.Unlock()
 				return
 			}
-			if _, err := ch.Run(ctx, script); err != nil {
+			if _, err := runIn(ctx, ch, script); err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("%s: %w", envID, err))
 				mu.Unlock()
@@ -299,22 +334,22 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 	}
 
 	if key := strings.TrimSpace(cfg.GetOr("testcase_exclude_by_macro", "")); key != "" {
-		out, runErr := ch.Run(ctx, fmt.Sprintf("grep %q `%s`", key, findAll(workspace)))
+		out, runErr := runIn(ctx, ch, fmt.Sprintf("grep %q `%s`", key, findAll(workspace)))
 		if runErr != nil {
 			return nil, nil, nil, runErr
 		}
-		cases, macroSkipped = Remove(cases, ParseSkipped(out.Combined(), key))
+		cases, macroSkipped = Remove(cases, ParseSkipped(out.Output(), key))
 		for _, c := range macroSkipped {
 			fmt.Println("Skipped File(macro): " + c)
 		}
 	}
 
 	if file := strings.TrimSpace(cfg.GetOr("testcase_exclude_from_file", "")); file != "" {
-		out, runErr := ch.Run(ctx, "cat "+file)
+		out, runErr := runIn(ctx, ch, "cat "+file)
 		if runErr != nil {
 			return nil, nil, nil, runErr
 		}
-		patterns := ParseExcluded(out.Combined())
+		patterns := ParseExcluded(out.Output())
 		fmt.Println("****************************************")
 		fmt.Printf("# OF EXCLUDED = %d\n", len(patterns))
 		fmt.Println("****************************************")
@@ -352,23 +387,23 @@ func (s *Shell) deploy(ctx context.Context, instances []*topology.Instance,
 			log := func(line string) { sink.Worker(inst.EnvID(), line) }
 
 			if script := ConfigureScript(inst); script != "" {
-				out, err := ch.Run(ctx, script)
+				out, err := runIn(ctx, ch, script)
 				if err != nil {
 					mu.Lock()
 					errs = append(errs, fmt.Errorf("%s: configure: %w", inst.EnvID(), err))
 					mu.Unlock()
 					return
 				}
-				log(out.Combined())
+				log(out.Output())
 			}
-			out, err := ch.Run(ctx, SnapshotScript())
+			out, err := runIn(ctx, ch, SnapshotScript())
 			if err != nil {
 				mu.Lock()
 				errs = append(errs, fmt.Errorf("%s: snapshot: %w", inst.EnvID(), err))
 				mu.Unlock()
 				return
 			}
-			log(out.Combined())
+			log(out.Output())
 		}(inst)
 	}
 	wg.Wait()

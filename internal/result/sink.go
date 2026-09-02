@@ -44,6 +44,7 @@ type Sink struct {
 
 	mu      sync.Mutex
 	workers map[string]*os.File // test_<envId>.log
+	monitor map[string]*os.File // monitor_<envId>.log
 	fin     map[string]*os.File // dispatch_tc_FIN_<envId>.txt
 	append  bool                // continue mode reopens rather than truncates
 }
@@ -60,6 +61,7 @@ func Open(home *conf.Home, category string, continueMode bool) (*Sink, error) {
 		dir:     dir,
 		stdout:  os.Stdout,
 		workers: map[string]*os.File{},
+		monitor: map[string]*os.File{},
 		fin:     map[string]*os.File{},
 		append:  continueMode,
 	}, nil
@@ -104,6 +106,24 @@ func (s *Sink) Worker(envID, line string) error {
 	f, err := s.file(s.workers, "test_"+envID+".log", true)
 	if err != nil {
 		return err
+	}
+	_, err = fmt.Fprintln(f, line)
+	return err
+}
+
+// Monitor appends to monitor_<envId>.log.
+//
+// The file is usually empty. CTP created it whether or not anything was written,
+// because its Log constructor creates the file eagerly, so an empty
+// monitor_<envId>.log is part of every result directory -- a frozen result file
+// the specification's list did not have.
+func (s *Sink) Monitor(envID, line string) error {
+	f, err := s.file(s.monitor, "monitor_"+envID+".log", s.append)
+	if err != nil {
+		return err
+	}
+	if line == "" {
+		return nil
 	}
 	_, err = fmt.Fprintln(f, line)
 	return err
@@ -199,7 +219,7 @@ func (s *Sink) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var firstErr error
-	for _, cache := range []map[string]*os.File{s.workers, s.fin} {
+	for _, cache := range []map[string]*os.File{s.workers, s.monitor, s.fin} {
 		for _, f := range cache {
 			if err := f.Close(); err != nil && firstErr == nil {
 				firstErr = err
@@ -207,6 +227,7 @@ func (s *Sink) Close() error {
 		}
 	}
 	s.workers = map[string]*os.File{}
+	s.monitor = map[string]*os.File{}
 	s.fin = map[string]*os.File{}
 	return firstErr
 }

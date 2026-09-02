@@ -52,7 +52,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 
 | 구 클래스 | 축 | 신 컴포넌트 |
 |---|---|---|
-| `Deploy` · `DeployOneNode` | T | `runner/shellsuite/deploy` — `init_path/` 복사, `$init_path` 셋업 |
+| `Deploy` · `DeployOneNode` | T/O 혼재 | `runner/shellsuite/deploy` — 인스턴스 파라미터를 `ini.sh` 로 conf 에 반영, `~/.CUBRID_SHELL_FM` 스냅샷. **`deploy_ctp`(CTP 자기 업그레이드)와 `deploy_build`(`run_cubrid_install`)는 축 O — 제외** (2026-09-02). 어떤 빌드를 언제 설치할지는 운영 결정이고, 러너는 이미 설치된 빌드를 시험한다 |
 | `DeployHA` | T | 동상. ⚠️ **이식하되 미검증** — HA 트리 162 케이스는 master/slave 토폴로지가 없어 회귀 증거에서 제외된다 (ADR-013). `evidence/regression-shell.md` 에 미검증으로 명시할 것 |
 | **`TestCaseGithub` · `TestCaseSVN`** | **O — 제외 (2026-09-02)** | 케이스 코퍼스를 언제 갱신할지는 운영 결정이다. 단 `testcase_update_yn=yes` 는 **실패**시킨다 — 갱신을 요청했는데 조용히 안 되면 낡은 케이스로 통과했다는 거짓 신호가 난다 (`migration-exclusions.md` §2a) |
 
@@ -64,7 +64,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | `Main` | T | `runner/shellsuite` 의 `Run` |
 | `Test` | T | 워커 루프. `extractItems` 의 *"마지막 flag 가 이긴다"* 규칙 보존 |
 | `TestFactory` | T | 워커 생성 · 결과 백업 |
-| `TestMonitor` | T | per-case 타임아웃 감시 → `context.WithTimeout` |
+| `TestMonitor` | T | `monitor` — per-case 타임아웃 감시. **`context.WithTimeout` 이 아니다** (2026-09-02 정정): 타임아웃은 케이스 명령을 취소하지 않고 **케이스가 기다리는 원격 프로세스를 죽인다**. 취소하면 채널만 닫히고 원격 프로세스는 살아남아 다음 케이스가 포트/락을 못 잡는다. 그래서 모니터는 **자기 SSH 세션**을 따로 가진다 |
 | `Context` | T | `conf.Config` + `topology` 로 대체. **암묵적 전역 제거 = M4** |
 | `CheckRequirement` | T | `Runner.Validate` (C1) |
 | `ShellHelper` | T | 헬퍼 — 흩어짐 |
@@ -99,7 +99,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | 케이스 prologue | `. $init_path/init.sh` → `init test` → `set -x` |
 | unittest plug-in | `shell/local/<TEST_TYPE>.sh` 의 `init`/`list`/`execute`/`finish` + **`EEOOKK`** 마커 |
 | stdout | `[ENV START/STOP]` · `[TESTCASE] <case> EnvId=<env> [OK\|NOK][, TRY-><N>]`. **`CORE_FILE:` 는 이 모듈 표면이 아니다** — sql/medium 의 `run_sql.sh` 소유 (2026-09-02 정정) |
-| 결과 파일 | `main_snapshot.properties` · `dispatch_tc_{ALL,FIN_*}.txt` · `test_<env>.log` · `main.info` |
+| 결과 파일 | `main_snapshot.properties` · `dispatch_tc_{ALL,FIN_*}.txt` · `test_<env>.log` · **`monitor_<env>.log`** (2026-09-02 추가 — `Log` 생성자가 파일을 즉시 만들기 때문에 리눅스에서는 보통 빈 파일로 남지만 매 실행마다 존재한다). `main.info` 는 이 모듈 것이 아니다 |
 | 원격 자산 | `init_path/` 통째 복사. `commonforjdbc.jar` 포함 (배포 자산이지 빌드 산출물 아님) |
 | 종료 코드 | 0 / 255 |
 

@@ -1,34 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" width="880" height="200" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="cubrid-testkit — a test runner that only runs tests: find the cases, run them, judge them, write down what happened. Scheduling, notifying and issue filing belong somewhere else.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 200" width="880" height="200" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="cubrid-testkit — a test runner that only runs tests: find the cases, run them, judge them, record what happened. Every task it takes over keeps the same commands, the same output and the same exit codes.">
 <style>
   .name{font-size:36px;font-weight:700;fill:#f8fafc;letter-spacing:-0.5px}
   .tag{font-size:13.5px;fill:#94a3b8}
   .meta{font-size:11px;fill:#64748b;letter-spacing:1.2px}
-  .lbl{font-size:8.5px;font-weight:700;letter-spacing:1px}
-  .does{font-size:10.5px;font-weight:700;fill:#e2e8f0}
-  .nots{font-size:10.5px;fill:#475569}
-  .step{fill:#14532d;stroke:#22c55e;stroke-width:1.3}
-  .skip{fill:none;stroke:#334155;stroke-width:1;stroke-dasharray:3 3}
-  .flow{stroke:#22c55e;stroke-width:1.4;fill:none}
+  .lbl{font-size:8.5px;font-weight:700;fill:#22c55e;letter-spacing:1.2px}
+  .step{font-size:11.5px;font-weight:700;fill:#e2e8f0}
+  .sd{font-size:8.5px;fill:#64748b}
+  .box{fill:#14532d;stroke:#22c55e;stroke-width:1.3}
+  .flow{stroke:#22c55e;stroke-width:1.5;fill:none;marker-end:url(#g)}
 </style>
+<defs><marker id="g" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto">
+  <path d="M0 0 L10 5 L0 10 z" fill="#22c55e"/></marker></defs>
 <rect x="0" y="0" width="880" height="200" fill="#0f172a"/>
 <rect x="0" y="0" width="6" height="200" fill="#2563eb"/>
 
 <text class="name" x="40" y="76">cubrid-testkit</text>
 <text class="tag"  x="41" y="104">A test runner that only runs tests — find the cases, run them, judge them, record what happened.</text>
-<text class="tag"  x="41" y="123">Deciding when to run and who to tell is a different job, and it lives somewhere else.</text>
+<text class="tag"  x="41" y="123">Every task it takes over keeps the same commands, the same output, the same exit codes.</text>
 <text class="meta" x="41" y="158">FOR ENGINE DEVELOPERS AND QA · CUBRID SYSTEMS RESEARCH</text>
 
-<text class="lbl" x="530" y="34" fill="#22c55e">WHAT IT DOES</text>
-<rect class="step" x="526" y="42" width="74" height="26" rx="4"/><text class="does" x="540" y="59">discover</text>
-<rect class="step" x="612" y="42" width="62" height="26" rx="4"/><text class="does" x="628" y="59">run</text>
-<rect class="step" x="686" y="42" width="66" height="26" rx="4"/><text class="does" x="700" y="59">judge</text>
-<rect class="step" x="764" y="42" width="78" height="26" rx="4"/><text class="does" x="778" y="59">record</text>
-<path class="flow" d="M600 55 L612 55 M674 55 L686 55 M752 55 L764 55"/>
+<text class="lbl" x="510" y="68">THE WHOLE JOB</text>
 
-<text class="lbl" x="530" y="106" fill="#475569">WHAT IT DELIBERATELY DOES NOT</text>
-<rect class="skip" x="526" y="114" width="88" height="26" rx="4"/><text class="nots" x="540" y="131">schedule</text>
-<rect class="skip" x="626" y="114" width="76" height="26" rx="4"/><text class="nots" x="640" y="131">notify</text>
-<rect class="skip" x="714" y="114" width="128" height="26" rx="4"/><text class="nots" x="728" y="131">file the issue</text>
-<text class="nots" x="526" y="164">CTP did all seven in one program.</text>
-<text class="nots" x="526" y="180">This is the first four, pulled out.</text>
+<rect class="box" x="508" y="80" width="76" height="34" rx="5"/>
+<text class="step" x="521" y="101">discover</text>
+<text class="sd" x="513" y="128">cases on disk</text>
+
+<rect class="box" x="596" y="80" width="76" height="34" rx="5"/>
+<text class="step" x="623" y="101">run</text>
+<text class="sd" x="605" y="128">against an engine</text>
+
+<rect class="box" x="684" y="80" width="76" height="34" rx="5"/>
+<text class="step" x="702" y="101">judge</text>
+<text class="sd" x="695" y="128">pass or fail</text>
+
+<rect class="box" x="772" y="80" width="76" height="34" rx="5"/>
+<text class="step" x="789" y="101">record</text>
+<text class="sd" x="777" y="128">markers, files</text>
+
+<path class="flow" d="M584 97 L594 97"/>
+<path class="flow" d="M672 97 L682 97"/>
+<path class="flow" d="M760 97 L770 97"/>
 </svg>

@@ -58,11 +58,11 @@ Excluded from the evidence, each with a reason:
 
 ## Consequences
 
-1. `impl/m1/normalization.md` (or its executable equivalent) becomes a Phase 3 deliverable, and
+1. `docs/evidence/normalization.md` (or its executable equivalent) becomes a Phase 3 deliverable, and
    changing it is a change to the freeze.
 2. Phase 3 exit needs two runs over 3,722 cases, old and new. That cost is the point: a smaller
    corpus would make "equivalent" mean less.
 3. `_25_unstable` produces a second, separate report. A difference there is a finding to look at,
    not a failure.
-4. `DeployHA` ships unverified. It must be listed as such in `impl/m1/regression-evidence.md`, not
+4. `DeployHA` ships unverified. It must be listed as such in `docs/evidence/regression-shell.md`, not
    left for someone to discover.

@@ -56,7 +56,7 @@ ROADMAP §6a "확장 영역(Beyond Strangler-fig)"의 카탈로그는 현재 **E
 
 **비-목표 (Non-Goal):**
 - 본 survey가 직접 §6a 항목을 *추가*하지 않는다. ROADMAP.md §6a 갱신은 별도 ADR-EXT-NNN의 결정 결과.
-- 도구별 통합 PoC는 본 survey의 범위 밖. PoC는 incubating 진입 후 `impl/` 산출물.
+- 도구별 통합 PoC는 본 survey의 범위 밖. PoC는 incubating 진입 후 구현 산출물.
 - 비-CUBRID DBMS 호환 (ROADMAP NG4)은 건드리지 않음 — 본 survey의 모든 항목은 *CUBRID를 SUT로* 검증하는 도구만 다룬다.
 
 ---

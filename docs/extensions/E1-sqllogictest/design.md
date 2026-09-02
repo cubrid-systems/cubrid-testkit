@@ -9,7 +9,7 @@
 ## 1. 모듈 위치 (의제)
 
 ```
-impl/sqllogictest/        # 신 모듈 — case-format ingestion 인터페이스 통해 testkit 골격에 결합
+internal/runner/sqllogictest/        # 신 모듈 — case-format ingestion 인터페이스 통해 testkit 골격에 결합
    ├── parser/            # .slt record 파서 (statement / query)
    ├── runner/            # SUT 구동 (JDBC | CCI | cubrid-cli)
    ├── compare/           # hash 비교 + values 비교 + sort 옵션 처리

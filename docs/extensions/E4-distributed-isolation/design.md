@@ -9,7 +9,7 @@
 ## 1. 모듈 위치 (의제)
 
 ```
-impl/isolation-dist/
+internal/runner/isolationdist/
    ├── topology/         # HA / streaming-replication 자동 deploy (shell.DeployHA 재사용)
    ├── workload/         # randomized tx generator (KV-style 또는 SQL-style)
    ├── fault/            # network partition (iptables) / process kill / clock skew

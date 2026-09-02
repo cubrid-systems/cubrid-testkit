@@ -22,7 +22,7 @@ testkit 단독으로는 시작 불가. *C-015 cross-cutting* (roadmap repo) 후�
 ## 2. 모듈 위치 (의제)
 
 ```
-impl/fuzz-harness/
+internal/runner/fuzzharness/
    ├── runner/           # libFuzzer / AFL / honggfuzz 호출
    ├── corpus/           # seed + crash 보관
    ├── triage/           # stack hash dedup + sanitizer 분류

@@ -81,7 +81,7 @@ Runner plug-in  ──┬── 형식 파서 (.sql / .ctl / .sh / 외부 포맷
 - **동결한다** — `ctp.sh` CLI 문법과 task 이름, conf 81 키와 dot-notation 의미, stdout 마커, 결과 파일 포맷(`main.info` / `summary_info` / `dispatch_tc_*.txt`), 종료 코드, 원격 실행 컨트랙트(`runone.sh` 시그니처 / `init.sh` / UNITTEST 4함수), 케이스 디렉터리 규약(`cases/` + `answers/`).
 - **동결하지 않는다** — `cubridqa-*.jar` 7개의 **산출물 이름과 위치**, Java 클래스/메서드 API(`CommonUtils` 40+ / `IniData` 15), RMI·ActiveMQ·grepo 데몬의 wire 프로토콜, `#SCRIPTCONT` 전달 메커니즘, dispatch 내부 모델. (ADR-003 결정)
 
-호환성의 **판정 방법**도 함께 고정한다: 같은 testcases 입력에 대해 신/구 시스템의 동결 표면 출력이 일치하는지를 `impl/m1/regression-evidence.md`(Phase 3 Exit)로 증명한다. 코드 리뷰나 육안 확인은 증거로 인정하지 않는다.
+호환성의 **판정 방법**도 함께 고정한다: 같은 testcases 입력에 대해 신/구 시스템의 동결 표면 출력이 일치하는지를 `evidence/regression-shell.md`(Phase 3 Exit)로 증명한다. 코드 리뷰나 육안 확인은 증거로 인정하지 않는다.
 
 ---
 

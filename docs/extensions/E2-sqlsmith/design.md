@@ -9,7 +9,7 @@
 ## 1. 모듈 위치 (의제)
 
 ```
-impl/sqlsmith/
+internal/runner/sqlsmith/
    ├── introspect/        # CUBRID system catalog → schema model (db_class / db_attribute / db_serial / db_method)
    ├── ast/               # type-correct random AST generator (CUBRID dialect 가산 옵션)
    ├── runner/            # SUT 구동 (JDBC | CCI) + crash detection (signal / core / server log)

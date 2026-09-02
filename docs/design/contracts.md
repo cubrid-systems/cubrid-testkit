@@ -192,7 +192,7 @@ func (s *Sink) SummaryInfo(m SummaryInfo) error                        // '=' �
 
 ### 회귀 동등성의 검증 지점
 
-Phase 3 Exit 의 증거(`impl/m1/regression-evidence.md`)는 **`Sink` 의 출력만 비교**하면 된다.
+Phase 3 Exit 의 증거(`evidence/regression-shell.md`)는 **`Sink` 의 출력만 비교**하면 된다.
 그것이 `Sink` 를 인터페이스가 아니라 하나의 구조체로 둔 이유다.
 
 ---

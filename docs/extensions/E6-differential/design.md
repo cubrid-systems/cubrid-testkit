@@ -9,7 +9,7 @@
 ## 1. 모듈 위치 (의제)
 
 ```
-impl/differential/
+internal/runner/differential/
    ├── input/            # case corpus loader (E1 / E2 / 직접 작성)
    ├── runner/
    │     ├── cubrid/     # JDBC | CCI | pg-wire (N13 후)

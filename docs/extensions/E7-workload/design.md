@@ -21,7 +21,7 @@ C-004 cross-cutting 결론 *없이는 시작 불가*.
 ## 2. 모듈 위치 (의제)
 
 ```
-impl/workload/
+internal/runner/workload/
    ├── topology/         # cluster deploy (E4 와 공유)
    ├── workload/         # KV-style 또는 SQL-style stateful tx generator
    ├── fault/            # E4 와 공유 가능 — owner ADR 필요

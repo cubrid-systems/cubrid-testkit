@@ -261,7 +261,7 @@ M0 분석을 통해 *4개의 자연스러운 후보*가 식별되었다 (case-fo
 ## 8. Consequences
 
 1. **Phase 2 산출물의 우선순위 확정** — `design/module-shell.md` 를 가장 먼저·가장 깊게 작성. 나머지 3종은 매핑 표 수준으로 유지.
-2. **Phase 3 범위 확정** — `ctp.sh shell` / `ctp.sh rqg` / `ctp.sh unittest` 3개 task. `impl/m1/` 이 이들을 담는다.
+2. **Phase 3 범위 확정** — `ctp.sh shell` / `ctp.sh rqg` / `ctp.sh unittest` 3개 task. `internal/runner/shellsuite/` 가 이들을 담는다.
 3. **회귀 동등성 증거의 대상 코퍼스** — shell-format 케이스 (`cubrid-testcases` 의 shell + HA + shell_ext + shell_heavy + longcase). 정확한 부분집합 선정은 Phase 3 착수 시.
 4. **선결 확인 항목 승격** — `external-surface-freeze.md` §11-6(ShellService RMI 인터페이스 + RMI 모드 존치 판단)과 §11-14(shell fail-backup 의 Windows 동작)가 **Phase 3 착수 전 필수 해소**. §11-8 중 `jdbc` 부분도 Phase 3 으로 당겨진다.
    ~~Feedback DB 스키마~~ 는 `FeedbackDB` 가 축 O 로 제외되면서 **해제**되었다 (`migration-exclusions.md` §1-5).

@@ -72,7 +72,7 @@ ROADMAP 의 제약 3개 중 하나가 *"외부 인터페이스 동결"* 이다. 
 
 1. **NG5 발생** — Java API / jar 호환 제공은 non-goal (`concept/non-goals.md`). `analysis/common/io-contract.md` §7 Option A 는 **기각됨**으로 표시된다.
 2. **공존은 subprocess 로만** — 신 Go 바이너리가 미대체 task 를 처리할 때 기존 CTP 자산을 프로세스로 호출한다. 라이브러리 링크·JNI·RMI 우회는 없다.
-3. **Phase 3 회귀 동등성 게이트의 판정 기준 확정** — F1 항목은 diff 0, F2 는 필드 단위 비교, F3 는 수용 여부. `impl/m1/regression-evidence.md` 가 이 등급별로 증거를 낸다.
+3. **Phase 3 회귀 동등성 게이트의 판정 기준 확정** — F1 항목은 diff 0, F2 는 필드 단위 비교, F3 는 수용 여부. `docs/evidence/regression-shell.md` 가 이 등급별로 증거를 낸다.
 4. **§11 확인 작업 7건이 Phase 진입 조건으로 이월** — 특히 §11-1(ext/script 외부 호출자)과 §11-2(CI grep 대상)는 Phase 2 진입 전, §11-5·§11-6 은 Phase 3 착수 전(ADR-004 Consequence 4).
 5. **jar 참조 자산 발견 시의 정책** — 호환 layer 를 만들지 않고 **그 자산을 고친다**. 이는 NG5 의 명시적 귀결이다.
 6. **본 ADR 은 `concept/external-surface-freeze.md` 를 규범 문서로 위임한다** — 등급 부여의 변경은 그 문서 개정으로 이루어지며, *범위 자체*(무엇을 동결 대상 후보로 보는가)의 변경만 본 ADR 의 supersede 를 요구한다.

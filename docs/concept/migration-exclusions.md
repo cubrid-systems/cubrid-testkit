@@ -45,8 +45,14 @@
 | `common.MailSender` | `common/io-contract.md` §1-1 |
 | `RunShellMain --enable-report` / `--report-cron` / `--mailto` / `--mailcc` | cli-tree 부록 A T5 |
 | `shell.common.GeneralFeedback` 의 메일 경로 | — |
+| **`check_disk_space` 의 메일 인자 2개** (2026-09-02 추가) | `Test.checkDiskSpace` |
 
 **제외 사유:** 결과의 *전달*이지 *생성*이 아니다.
+
+⚠️ **디스크 체크는 남긴다.** `check_disk_space <fs> <size> "<to>" "<cc>"` 는 **케이스마다** 돌면서
+공간이 모자라면 메일을 보낸다 — 축 O 가 per-case 루프 한가운데까지 들어와 있는 자리다. 공간 부족은
+케이스를 엉뚱하게 실패시키므로 **검사 자체는 축 T** 이고, 통지만 뺀다. CTP 도 검사 실패로 실행을
+중단하지는 않았고(로그만 남긴다) 그 동작을 유지한다.
 ⚠️ `--report-cron` 이 `RunShellMain` 의 classpath 에 `cubridqa-scheduler.jar` 를 끌어들이는 유일한 이유다. 이 옵션을 제외하면 shell 모듈의 스케줄러 의존이 **함께 끊긴다** — ADR-004 Phase 3 범위가 그만큼 줄어든다.
 
 ### 1-3. 이슈 등록 (JIRA)
@@ -69,6 +75,26 @@
 | `common/script/run_grepo_fetch` · `run_git_update` | — | `common/io-contract.md` §2-1 |
 
 **제외 사유:** git 저장소 접근을 RMI 서비스로 감싼 2016년식 우회. 새 층에서는 git CLI 또는 CI 가 직접 한다.
+
+### 1-4a. 빌드 설치 (2026-09-02 추가)
+
+| 자산 | 진입 | 축 판정 |
+|---|---|---|
+| `DeployOneNode.deploy_ctp` | `common/script/upgrade.sh` | **축 O** — 1-4 의 자가 업그레이드 그 자체 |
+| `DeployOneNode.deploy_build_on_linux` | `run_cubrid_install <role> <url> <extra>` | **축 O — 제외** |
+| `cubrid_download_url` · `cubrid_additional_download_url` · `cubrid_install_role` | conf | 경고 후 진행 |
+
+**제외 사유:** *어떤 빌드를 언제 어디서 가져와 설치할지*는 QA 운영 결정이다. 테스트 실행기는
+**이미 설치되어 있는 빌드를 시험한다**. 실무적으로도 `run_cubrid_install` 은 CTP 가 원격에 배포한
+자기 환경 안에서만 존재하는 셸 함수라, 이걸 옮기면 "CTP 자산을 안 쓴다"는 전제가 깨진다.
+
+**남기는 것:** `updateCUBRIDConfigurations`(인스턴스 파라미터를 `ini.sh` 로 conf 에 반영)와
+`backup_linux`(`~/.CUBRID_SHELL_FM` 스냅샷)는 **축 T** 다. 전자는 인스턴스끼리 포트·공유메모리가
+겹치지 않게 하는 유일한 장치이고, 후자는 모든 케이스가 같은 설치 상태에서 시작하게 하는 장치다.
+
+**설정 키 정책 적용:** `cubrid_download_url` 이 설정됐는데 무시하면 *다른 빌드*를 시험하고 결과를
+믿게 된다 — 실패시켜야 할 것 같지만, 그 키가 있다는 사실만으로는 현재 설치된 빌드가 틀렸다고 말할 수
+없다. **경고하고, 설치된 빌드의 build id 를 출력해서** 사람이 대조할 수 있게 한다.
 
 ### 1-5. Feedback 의 DB 백엔드
 

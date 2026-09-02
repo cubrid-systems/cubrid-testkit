@@ -42,7 +42,7 @@ chase; it does not volunteer.
 
 ## 3. Found by writing the code
 
-Every literal was taken from CTP's source rather than from the notes. Four disagreed.
+Every literal was taken from CTP's source rather than from the notes. Ten disagreed.
 
 | Spec said | Actually | Source |
 |---|---|---|
@@ -51,9 +51,14 @@ Every literal was taken from CTP's source rather than from the notes. Four disag
 | results go to `result/<task>/<timestamp>/` | `result/<category>/current_runtime_logs` — **no timestamp**. ADR-013 had inherited the error and listed a timestamp among the values to mask | `Context.java:172` |
 | `main.info` is part of the shell layout | it belongs to sql/cqt; the shell family never writes one | `TestUtil.TOTAL_SUMMARY_FILE` |
 | the unittest plug-in returns values via an `EEOOKK` marker | **three** markers: `GPROPSTART` ends the plug-in's output, values sit between `G_PROPERTY_<K>=` and `EEOOKK` | `GeneralLocalTest.invoke` |
-
 | — | **Remote output is delimited by a frame.** `echo ALL_${NOTEXIST}STARTED` … `echo ALL_${NOTEXIST}COMPLETED`, and only what lies between `ALL_STARTED` and `ALL_COMPLETED` is kept. The unset variable is the mechanism: the script's own text never matches the marker, so a shell echoing its input cannot open the frame early | `ScriptInput`, `SSHConnect` |
 | a shell case is any `<…>/cases/*.sh` | a case is `<name>/cases/<name>.sh` — **the script must be named after the directory two levels up**. The rule is an awk predicate, `$(NF-2)".sh" == $NF`, and the `cases/` segment is never checked at all | `Dispatch.getAllTestCaseScripts` |
+| the per-case timeout cancels the case | it **kills the processes the case is waiting on**, from a second connection, and lets the case's own command return. Cancelling would close the channel and leave a `cub_server` holding the port for the next case. This is why the monitor has an SSH session of its own | `TestMonitor.resolveTimeout` |
+| — | **A role's parameters go to a section that is not named after it.** `broker1` is written to `%query_editor` and `broker2` to `%BROKER1`, because the roles are numbered by position and the sections are named in the shipped `cubrid_broker.conf` | `DeployOneNode.updateCUBRIDConfigurations` |
+| — | **The disk-space check takes two mail addresses.** `check_disk_space <fs> <size> "<to>" "<cc>"` runs before every case and notifies when space is short -- axis O reaching into the per-case loop. The check stays, the notification does not | `Test.checkDiskSpace` |
+| — | **Cases see `TEST_BUIILD_ID`**, with three i's. Nothing in the corpus reads it | `Test.addSshInfoScript` |
+| — | `getExportsOfMEKYParams` exports variables beginning **`MKEY`**. The method name has the two letters the other way round, and the name is what the analysis had copied | `CommonUtils` |
+| — | **The engine is not configured at all when only broker-wide parameters are set.** The emptiness test covers five roles and omits `brokercommon`, which is where `MASTER_SHM_ID` lives — so two installs on one machine end up sharing a shared-memory segment and interfering rather than failing | `DeployOneNode.updateCUBRIDConfigurations` |
 | the worker collects `<name>.result` and diffs it against `<name>.answer` | **there is no diff.** The case writes its own verdict into `<name>.result`; the worker `cat`s it and fails the case if any line contains the substring `NOK`. The entire shell source contains no reference to `answer` | `Test.collectGeneralResult`, `grep -rn answer shell/src` |
 
 **What this method catches:** anything where the spec paraphrased instead of quoting. Writing a
@@ -134,6 +139,26 @@ Two things fell out of chasing it:
 **What this method catches:** nothing on its own. It is what happens when a corrected rule is
 carried back through everything that had quietly depended on it. The cost of *not* doing it is that
 the numbers keep looking authoritative.
+
+## 6. Found in code that has never run
+
+Two of these were found the way the others were, but they belong together, because
+what they have in common is that nothing depended on them and so nothing complained.
+
+| | |
+|---|---|
+| **The kill script's JVM sweep has never killed a JVM.** `if [ $isExistPid -eq 0]` has no space before the bracket, so the test is a shell syntax error, the branch is never taken, and the list it builds is always empty. Every CTP run prints two `[: missing ']'` lines into the worker log and moves on | `Constants.createLinKillScripts` |
+| **`TEST_BUIILD_ID` has no readers.** Every case runs with it exported, and `grep` across both case repositories finds no use of either spelling | `Test.addSshInfoScript` |
+
+Both are kept exactly as they are. Repairing the first would start killing JVMs on
+machines where nothing has killed one in years -- a behaviour change disguised as a
+typo fix -- and removing the second changes what cases can see for no gain. They are
+recorded so that the next person to notice them does not have to work out, again,
+whether they matter.
+
+**What this method catches:** nothing anyone was looking for. It is the residue of
+porting line by line: code that runs but does not work, and code that works but does
+nothing, are both invisible until someone has to decide whether to carry them over.
 
 ## What this says about the freeze
 

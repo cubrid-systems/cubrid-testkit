@@ -48,6 +48,11 @@ type Feedback interface {
 	CaseStart(name, envID string)
 	CaseStop(ev CaseStop)
 	CaseStopRetry(ev CaseStop) // shell only
+
+	// CaseMonitor records something that happened to a case while it was still
+	// running -- in practice, a timeout being resolved out from under it.
+	CaseMonitor(name, action, envID string)
+
 	EnvStop(envID string)
 }
 
@@ -55,14 +60,15 @@ type Feedback interface {
 // selected.
 type Null struct{}
 
-func (Null) TaskStart(string)            {}
-func (Null) TaskContinue()               {}
-func (Null) TaskStop()                   {}
-func (Null) TotalTestCase(int, int, int) {}
-func (Null) CaseStart(string, string)    {}
-func (Null) CaseStop(CaseStop)           {}
-func (Null) CaseStopRetry(CaseStop)      {}
-func (Null) EnvStop(string)              {}
+func (Null) TaskStart(string)                   {}
+func (Null) TaskContinue()                      {}
+func (Null) TaskStop()                          {}
+func (Null) TotalTestCase(int, int, int)        {}
+func (Null) CaseStart(string, string)           {}
+func (Null) CaseStop(CaseStop)                  {}
+func (Null) CaseStopRetry(CaseStop)             {}
+func (Null) CaseMonitor(string, string, string) {}
+func (Null) EnvStop(string)                     {}
 
 // File is feedback_type=file.
 //
@@ -98,4 +104,12 @@ func (f *File) TotalTestCase(total, macroSkipped, tempSkipped int) {
 func (f *File) CaseStart(string, string) {}
 func (f *File) CaseStop(CaseStop)        {}
 func (f *File) CaseStopRetry(CaseStop)   {}
-func (f *File) EnvStop(string)           {}
+
+// CaseMonitor writes one line to the feedback file and nowhere else.
+func (f *File) CaseMonitor(name, action, envID string) {
+	if f.Log != nil {
+		fmt.Fprintf(f.Log, "%s %s %s\n", action, name, envID)
+	}
+}
+
+func (f *File) EnvStop(string) {}

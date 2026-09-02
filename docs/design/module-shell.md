@@ -102,6 +102,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | 결과 파일 | `main_snapshot.properties` · `dispatch_tc_{ALL,FIN_*}.txt` · `test_<env>.log` · **`monitor_<env>.log`** · **`feedback.log`** · **`test_status.data`** · **`current_task_id`** · **`test-<category>.xml`** (2026-09-02 추가 — 뒤 넷은 기본 백엔드인 `FeedbackFile` 이 쓴다. `monitor_*` 는 `Log` 생성자가 파일을 즉시 만들어 리눅스에서는 보통 빈 파일). `main.info` 는 이 모듈 것이 아니다 |
 | 원격 자산 | `init_path/` 통째 복사. `commonforjdbc.jar` 포함 (배포 자산이지 빌드 산출물 아님) |
 | 종료 코드 | 0 / 255 |
+| **로컬 모드** | `env.instanceN.*` 키가 하나도 없으면 **에러가 아니라 로컬 실행**이다 (2026-09-02 정정). env id 는 `local`, 채널은 `exec.Local`, kill 스크립트는 `*.sh` 쓸어담기를 뺀 로컬 형태. `Main.exec` 의 `Not found any environment instance` 는 **도달 불가능한 분기**다 — `Context` 생성자가 이미 `local` 을 넣어 놨다 |
 
 ---
 

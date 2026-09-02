@@ -44,13 +44,42 @@ var instancePattern = regexp.MustCompile(`^env\.instance([0-9]+)\.`)
 type Instance struct {
 	ID int
 
+	// name overrides the generated id. It is set only for the local instance,
+	// which CTP calls "local" rather than "envN".
+	name string
+
 	// roles holds the merged property maps: defaults first, then the instance's
 	// own keys on top.
 	roles map[string]map[string]string
 }
 
 // EnvID is what appears in the frozen markers, as in "[ENV START] env1".
-func (i *Instance) EnvID() string { return fmt.Sprintf("env%d", i.ID) }
+func (i *Instance) EnvID() string {
+	if i.name != "" {
+		return i.name
+	}
+	return fmt.Sprintf("env%d", i.ID)
+}
+
+// IsLocal reports whether this is the machine the runner is on.
+func (i *Instance) IsLocal() bool { return i.name == LocalName }
+
+// LocalName is the environment id CTP gives a run with no configured machines.
+const LocalName = "local"
+
+// Local returns the single instance a configuration with no env.instanceN keys
+// describes: this machine, carrying whatever default.* roles were set.
+//
+// CTP built this in the Context constructor and never wrote it down. A run that
+// names no machines is not a misconfiguration -- it is how the shell suite is
+// driven against the engine on the machine you are sitting at.
+func Local(cfg *conf.Config) *Instance {
+	inst := &Instance{name: LocalName, roles: map[string]map[string]string{}}
+	for _, role := range Roles {
+		inst.roles[role] = cfg.Prefixed("default." + role)
+	}
+	return inst
+}
 
 // Role returns the merged properties for a role. The map is a copy.
 func (i *Instance) Role(role string) map[string]string {

@@ -140,6 +140,11 @@ func TestResultItemFlagging(t *testing.T) {
 type guardedChannel struct {
 	inner *exec.Local
 
+	// version is what the build-identity probe answers. A test machine has no
+	// CUBRID on it, and refusing to run without one is the runner behaving
+	// correctly, so the answer is supplied rather than the check removed.
+	version string
+
 	mu  sync.Mutex
 	ran []string
 }
@@ -150,6 +155,12 @@ func (g *guardedChannel) Run(ctx context.Context, script string) (exec.Result, e
 	g.mu.Unlock()
 
 	switch {
+	case script == versionScript:
+		v := g.version
+		if v == "" {
+			v = "CUBRID 11.4.5 (11.4.5.1875-74d17e9) (64bit release build for Linux) (Apr 29 2026 15:30:55)"
+		}
+		return exec.Result{Stdout: v}, nil
 	case strings.Contains(script, "cubrid service stop"):
 		return exec.Result{Stdout: "(kill skipped by the test)"}, nil
 	case strings.Contains(script, ".CUBRID_SHELL_FM"):

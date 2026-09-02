@@ -1,7 +1,7 @@
 # ROADMAP — CUBRID Test Kit
 
 - **날짜**: 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
-- **현재 위치**: **Phase 1 진행 중** — Phase 0 완료(2026-04-29), 게이트 통과(2026-09-02)
+- **현재 위치**: **Phase 2 완료 (2026-09-02)** — Phase 0 완료(2026-04-29) · Phase 1 게이트 통과 및 산출 완료 · Phase 2 설계 5종 완료. 다음은 **Phase 3 (shell 1차 대체)**, 착수 전 해소 항목은 `design/module-shell.md` §7
 - **동시 트랙**: **§6a-E3 (SQLancer) 진행 중** — 사용자 결정으로 우선 승격 (ADR-EXT-003). 구현체는 별도 저장소 `cubrid-sqlancer`
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)
   + 확장 영역(외부 테스트 포맷 흡수, §6a)
@@ -124,11 +124,17 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 ## 3. Phase 2 — 아키텍처 + 모듈 설계 (1~2개월)
 
 **Exit 조건**: "의존이 가장 적은 모듈 1개"가 단독으로 빌드/실행 가능한 새 시스템 골격이 결정됨.
+→ **충족.** `design/architecture.md` §9 — `shellsuite` Runner 는 기존 CTP 자산을 컴파일 시점에 요구하지 않고,
+나머지 task 는 `legacy` Runner 가 subprocess 로 처리하므로 shell 하나만으로 빌드도 실행도 성립한다.
 
-**산출물**:
-- `design/architecture.md` — 모듈 경계, 공통 레이어, 실행 모델(분산 실행/SSH 호환), 결과 처리 파이프라인
-- `design/module-{module}.md` × 4 — 신구 매핑 표 포함 (구 클래스/스크립트 → 신 컴포넌트)
-- `design/contracts.md` — 모듈 간 in-process 인터페이스 (이후 strangler-fig 대체의 경계)
+**산출물** *(2026-09-02 완료)*:
+- [x] `design/architecture.md` — 패키지 구조, dispatcher→worker 실행 모델, 결과 파이프라인, M1~M5 대응, **Exit 조건 충족 근거(§9)**
+- [x] `design/module-shell.md` — 1차 대체 대상. **35 클래스 신구 매핑 + 축 T/O 판정**, 범위 재산정
+- [x] `design/module-{sql,isolation,medium}.md` — 매핑 표 수준 (ADR-004 Consequence 1)
+- [x] `design/contracts.md` — 계약 5개(`Runner` `Format` `Channel` `Sink` `Feedback`)와 **계약이 아닌 것**의 명시
+
+**Phase 2 진입 전 해소 항목** *(완료)*: freeze §11-1(ext/run_*.sh 외부 호출자 — testcases 3레포에서 0건) ·
+§11-2(마커 소비자 — `found core file` 은 케이스 2곳이 직접 grep, 확정 F1) · §11-9(baseline 스팟체크 — 변경 없음)
 - ~~ADR-004 — 첫 번째 대체 대상 모듈 선정~~ → **Phase 0→1 게이트에서 조기 결정 완료. Accepted: Option C' (shell 단독)**. 사유는 ADR-004 §7-1
 
 ---

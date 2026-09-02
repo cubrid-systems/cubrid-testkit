@@ -8,7 +8,7 @@ cubrid-testkit 는 CUBRID 의 기능 테스트 케이스를 실행하기 위한 
 
 ## 현재 위치
 
-**Phase 1 진행 중** (2026-09-02 게이트 통과). 구현 언어 **Go**, 1차 대체 대상 **shell 모듈**(+ rqg / unittest / jdbc).
+**Phase 2 완료** (2026-09-02). 구현 언어 **Go**, 1차 대체 대상 **shell 모듈**(+ rqg / unittest / jdbc). 다음은 Phase 3 착수.
 
 **프로젝트 방향성:** 테스트 실행 축(T)과 QA 운영 축(O)을 분리한다. 이번 마이그레이션은 축 T 만 옮기고, 축 O 는 제외 기록 후 나중에 새 층으로 세운다 → [migration-exclusions.md](concept/migration-exclusions.md)
 
@@ -25,7 +25,11 @@ cubrid-testkit 는 CUBRID 의 기능 테스트 케이스를 실행하기 위한 
 - [Analysis notes](analysis/) — Phase 0 산출물. 모듈별 요구사항·설계·io-contract
 - [Extensions](extensions/) — §6a 확장 영역 E1~E7 (incubating)
 - [Survey](survey/dbms-testing-ecosystem.md) — DBMS 테스팅 생태계 8축 분류
-- [Design](design/) — 아키텍처 및 모듈 설계 *(Phase 2, 미착수)*
+- **Design (Phase 2 산출물)**
+  - [Architecture](design/architecture.md) — 패키지 구조 · 실행 모델 · 결과 파이프라인
+  - [Contracts](design/contracts.md) — 계약 5개와 그 경계
+  - [module-shell](design/module-shell.md) — 1차 대체 대상, 35 클래스 매핑
+  - [module-sql](design/module-sql.md) · [module-isolation](design/module-isolation.md) · [module-medium](design/module-medium.md)
 
 ## 디렉터리 구조
 

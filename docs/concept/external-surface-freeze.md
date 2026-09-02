@@ -530,15 +530,15 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 
 | # | 항목 | 왜 필요한가 | 해소 시점 |
 |---|---|---|---|
-| 11-1 | `common/ext/run_*.sh` · `common/script/*` 의 **실제 외부 호출자** | F1 → F2/NF 하향 가능 여부 | **Phase 2 진입 전** |
-| 11-2 | 외부 CI 가 grep 하는 stdout 라인의 실제 목록 | §4 전체 F1 가정을 좁힘 | **Phase 2 진입 전** |
+| 11-1 | ~~`common/ext/run_*.sh` 의 외부 호출자~~ | **해소 (2026-09-02)** — testcases 3개 레포에서 호출자 **0건**. CTP 의 CI 워크플로(`.github/workflows/check.yml`)도 code-style 만 돌린다. 남은 가능성은 QA 조직 내부 자동화뿐이며 이 레포들에는 없다 → **F1 유지하되 근거는 "미확인"이 아니라 "이 범위에서는 호출자 없음"** | 완료 |
+| 11-2 | 외부 CI 가 grep 하는 stdout 라인 | **부분 해소 (2026-09-02)** — 아래 표 참조 | 완료 |
 | 11-3 | `.sql` pragma 전수 목록 + `--@<connId>` 확인 | 케이스 파서 범위 | Phase 4 (sql 대체 전) |
 | 11-4 | 백업 tar.gz 파일명 정확한 구분자 | F2 → F1 승격 여부 | Phase 4 |
 | 11-5 | ~~Feedback DB 스키마~~ | **해제됨** — `FeedbackDB` 는 축 O 제외 | — |
 | 11-6 | `ShellService` RMI 인터페이스 + **RMI 모드 존치/폐기 판단** | §7-7·§10 행 15 의 등급 확정 | **Phase 3 착수 전** |
 | 11-7 | answer variant 선택의 **`runMode` 값 출처** | 알고리즘은 확인됨. 값이 어디서 오는지가 미상 | Phase 4 |
 | 11-8 | **jdbc / ha_repl / cdc_repl 출력 표면 미분석** — inventory stubs 0/5 | §10 행 10·12 와 §6-1 의 `-1` 이 유추 | Phase 4 (jdbc 는 **Phase 3**, §1-3 T4 때문) |
-| 11-9 | 로컬 체크아웃(`8fb0925`)과 baseline(`86992c1b`) 차이 스팟체크 | 본 명세의 근거 유효성 | **Phase 2 진입 전** |
+| 11-9 | ~~로컬 체크아웃과 baseline 차이~~ | **해소 (2026-09-02)** — `ComponentEnum.java` · `Test.java` · `bin/ctp.sh` 모두 **변경 없음**. 본 명세의 근거는 유효하다 | 완료 |
 | 11-10 | `bin/ini.sh` / `IniCommand` 의 CLI 표면 + 외부 사용자 | 등급 부여 | Phase 2 |
 | 11-11 | `shell_ci` exclusive 키 14 vs 16 불일치 | Phase 3 범위 산정 | Phase 2 |
 | 11-12 | `.diff_1` 이 입력인가 산출물인가 | §3-2 vs §5 배치 | Phase 4 |
@@ -547,5 +547,18 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 11-15 | **`runone.sh` sed 정규화 패턴 전수 목록** | §7-6 — 모든 isolation 판정이 여기 의존 | Phase 4 (ADR-009) |
 | 11-16 | `jdbc_config_file` charset XML 스키마 | §8-5 | Phase 4 |
 | 11-17 | `ErrorInterrupt` cascade-abort 정책 | 실행 중단 동작이 관측 가능 | Phase 4 |
+
+### 11-2 상세 — 마커별 실제 소비자 *(2026-09-02 조사)*
+
+| 마커 | CTP 밖에서 참조하는 곳 | 판정 |
+|---|---|---|
+| **`found core file`** | **`cubrid-testcases-private-ex` 의 케이스 2곳** — `shell/_06_issues/_18_2h/bug_bts_22449/cases/bug_bts_22449.sh`, `shell_heavy/cbrd_21070/cases/cbrd_21070.sh` | **F1 확정. 완화 불가** — NG1 동결 자산이 직접 grep 한다 |
+| `Result Root Dir` | `cubrid-testcases` 의 `ConsoleBO.log` 3곳 — 실행이 남긴 *산출물*이지 소비자가 아니다 | F1 유지 (소비자 미발견, 보수적) |
+| `flag: OK` | `doc/isolation_guide.md` — 문서 | F1 유지 (소비자 미발견, 보수적) |
+| `Testing End!` · `TOTAL_ELAPSE_TIME` | 없음 | F1 유지 (소비자 미발견, 보수적) |
+
+**결론:** 하향 조정은 하지 않는다. 소비자를 하나라도 찾은 `found core file` 은 확정 F1 이고,
+나머지는 *조사 범위 안에서* 소비자가 없을 뿐 QA 조직 내부 자동화까지 확인한 것은 아니다.
+다만 이제 "확인하지 않아서 F1" 이 아니라 "이 범위에서는 소비자가 없지만 보수적으로 F1" 이다.
 
 > 이 17개는 **동결 명세의 구멍**이지 Phase 1 의 미완이 아니다. Phase 1 Exit 은 §10 으로 충족되며, 각 항목은 표기된 Phase 의 진입/착수 조건으로 이월한다.

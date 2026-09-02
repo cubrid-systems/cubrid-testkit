@@ -1,0 +1,43 @@
+# Builds the binary and runs the tests. The command line is a frozen surface, so
+# the tests under internal/cli are that surface written down: a failure there is a
+# contract change, not a broken refactor.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Formatting
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
+      - name: Build
+        run: go build -o bin/testkit ./cmd/testkit
+
+      - name: The binary answers
+        run: |
+          ./bin/testkit --version
+          ./bin/testkit --help | head -1

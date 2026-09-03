@@ -51,15 +51,31 @@ func TestBuildIDTakesTheLastVersionInTheString(t *testing.T) {
 	}
 }
 
-// A version with no suffix after it takes everything up to the next ")", which
-// on cubrid_rel's line is the end of the build description. CTP produced this and
-// wrote it into main_snapshot.properties and into every case's environment. It is
-// deterministic, so it still identifies the build, and it is reproduced rather
-// than tidied.
-func TestAVersionWithNoSuffixRunsOnToTheNextParenthesis(t *testing.T) {
+// A build with no commit suffix is just its version.
+//
+// CTP cut at the next "-", then ")", then "." after the version, which works when
+// a commit is there and runs away when it is not: this line produced
+// "11.2.0.0000) (64bit release build for linux_gnu" as a build id, and that went
+// into main_snapshot.properties and into every case's environment. Fixed in axis
+// T as a clear bug rather than reproduced.
+func TestAVersionWithNoCommitSuffixStopsAtTheVersion(t *testing.T) {
 	const rel = "CUBRID 11.2 (11.2.0.0000) (64bit release build for linux_gnu)"
-	if got := BuildID(rel); got != "11.2.0.0000) (64bit release build for linux_gnu" {
-		t.Errorf("BuildID(%q) = %q", rel, got)
+	if got := BuildID(rel); got != "11.2.0.0000" {
+		t.Errorf("BuildID(%q) = %q, want 11.2.0.0000", rel, got)
+	}
+}
+
+// And a commit suffix is still part of the identity, so it is not simply
+// truncated to the four-part number.
+func TestACommitSuffixIsKept(t *testing.T) {
+	for in, want := range map[string]string{
+		"CUBRID 11.4.5 (11.4.5.1875-74d17e9) (64bit)":             "11.4.5.1875-74d17e9",
+		"CUBRID-11.4.0.1234-6a1b2c3-Linux.x86_64.sh":              "11.4.0.1234-6a1b2c3",
+		"http://b/10.2.0.8797/CUBRID-10.2.0.8797-abcdef-Linux.sh": "10.2.0.8797-abcdef",
+	} {
+		if got := BuildID(in); got != want {
+			t.Errorf("BuildID(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

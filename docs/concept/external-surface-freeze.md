@@ -745,7 +745,7 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 11-9 | ~~로컬 체크아웃과 baseline 차이~~ | **해소 (2026-09-02)** — `ComponentEnum.java` · `Test.java` · `bin/ctp.sh` 모두 **변경 없음**. 본 명세의 근거는 유효하다 | 완료 |
 | 11-10 | `bin/ini.sh` / `IniCommand` 의 CLI 표면 + 외부 사용자 | 등급 부여 | Phase 2 |
 | 11-11 | ~~`shell_ci` exclusive 키 14 vs 16 불일치~~ | **해소 (2026-09-03)** — **16 이 맞다.** `conf-matrix.md` §1-3 이 `testcase_exclude_from_file` 과 `test_category` 를 빠뜨렸다. 둘 다 구현되어 있어 범위에는 영향 없음 | 완료 |
-| 11-12 | `.diff_1` 이 입력인가 산출물인가 | §3-2 vs §5 배치 | Phase 4 |
+| 11-12 | ~~`.diff_1` 이 입력인가 산출물인가~~ | **부분 해소 (2026-09-03)** — `queryPlan`·`excluded_list`·`patch` 는 **전부 입력**. `analysis/sql/io-contract.md` 에 기전 기록. `.diff_1` 자체는 Phase 4 로 남는다 | 부분 |
 | 11-13 | `.ctl` grammar 정형화 | ADR-008 | Phase 2 |
 | 11-14 | ~~shell fail-backup 의 Windows 동작~~ | **소멸 (2026-09-02)** — Windows 가 범위 밖이 되어 질문 자체가 사라졌다 | 완료 |
 | 11-15 | **`runone.sh` sed 정규화 패턴 전수 목록** | §7-6 — 모든 isolation 판정이 여기 의존 | Phase 4 (ADR-009) |

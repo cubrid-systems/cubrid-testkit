@@ -238,8 +238,11 @@ java cqt.webconsole.Starter <webconsole.conf> <webRoot> <start|stop>
 ├── local.properties (cqt working dir, isdebug/qaview)
 ├── jdbc_config_file (charset XML, default test_default.xml)
 ├── testcases/<...>/cases/*.sql + answers/*.answer{,_cci,_win,_<DB>_<C>[_coll]}
-├── testcases/<...>/answers/*.queryPlan
-├── testcases/<...>/answers/*.<ver>_<S64|D>_patch / _excluded_list
+├── testcases/<...>/cases/*.queryPlan          ← cases/ 다. answers/ 아니다 (2026-09-03 정정)
+│                                             sql/medium 합쳐 940개. answers/ 에 3개 있지만 죽었다
+├── <module>/config/daily_regression_test_exclude_list_compatibility/
+│       <ver>_<S64|D>_excluded_list           ← 22개. sql/medium 이 아니라 **호환성 스위트**의 입력
+│       patch_files/<ver>_<S64|D>_patch       ← 40개. 위와 동상
 ├── URL-style scenario specifier <repo>?db=<dbname>_qa[&filter=...]
 ├── --+ pragma 주석 지시어
 └── webconsole.conf (web_port, sql_result_root)
@@ -257,3 +260,42 @@ java cqt.webconsole.Starter <webconsole.conf> <webRoot> <start|stop>
 ├── 0  (정상; 케이스 실패 포함)
 └── 1  ($CUBRID 부재 / conf 부재)
 ```
+
+## queryPlan · excluded_list · patch — 전부 입력이다 (2026-09-03 해소, freeze §11-12)
+
+### queryPlan — 스위치이자 비교 대상
+
+`TestUtil.isPrintQueryPlan(caseFile)` 이 켜는 방법이 **두 가지**다 (`ConsoleBO.java:1037` 주석):
+
+1. `.sql` 안의 **`--@queryplan`** 프라그마 (`SQLParser.java:76`, 줄 전체가 정확히 그것)
+2. **`<case>.queryPlan` 파일이 `.sql` 옆에 존재** — `caseFile` 의 확장자를 갈아끼운 경로다.
+   그래서 `cases/` 에 있어야 하고 `answers/` 가 아니다
+3. 그리고 `sql/configuration/System.xml` 의 전역 `queryPlan` 이 참이면 **모든 케이스가** 켜진다
+
+**숫자 마스킹은 전역 스위치를 본다.** `StringUtil.replaceQureyPlan` (메서드 이름의 오타도 CTP 것):
+
+| 전역 `System.xml` | 출력 |
+|---|---|
+| **참** | 그대로. 숫자 마스킹 없음 |
+| **거짓** | `[0-9]+` → `?` 전체 치환. 그리고 `Query plan:` 구간은 전부, `Query stmt:` 구간은 첫 줄과 `/` 로 시작하는 줄만 남기고 나머지(`msg`)는 **버린다** |
+
+⚠️ **켜는 판단(per-case)과 마스킹 판단(전역)이 서로 다른 스위치다.** 이름이 비슷해서 하나로 읽기 쉽다.
+per-case `.queryPlan` 파일로 켠 경우, 전역은 거짓이므로 **숫자가 마스킹된 채 비교된다.**
+
+`replaceJoingraph` 는 `Join graph` 구간만 남기고 `sel <숫자>.<숫자>` → `sel ?` 로 선택도를 지운다.
+
+### excluded_list — sql/medium 것이 아니다
+
+`cqt` 도 제외 목록을 읽지만 그건 **`testcase_exclude_from_file`** 이고, 두 conf 모두
+`${CTP_HOME}/conf/exclusions.txt` 를 가리킨다 (`TestUtil.filterExcludedCaseFile` → 상대경로 부분일치).
+
+`<ver>_<S64|D>_excluded_list` 22개와 `<ver>_<S64|D>_patch` 40개는 전부
+`<module>/config/daily_regression_test_exclude_list_compatibility/` 아래에 있고, 읽는 곳은
+`common/ext/run_compat_jdbc.sh` · `run_compat_cci.sh` — **호환성 스위트**다. `cases/` 나 `answers/` 에는
+하나도 없다. 이 문서가 answer variant 로 분류했던 것은 오분류다.
+
+### 죽은 파일 3개
+
+`answers/*.queryPlan` 3개 (`where_clause` · `_08_enum_index` · `_016_insert_index`) 는 전부
+`cases/` 에 살아 있는 쌍둥이가 있고, `isPrintQueryPlan` 은 `cases/` 만 본다. **읽히지 않는다.**
+

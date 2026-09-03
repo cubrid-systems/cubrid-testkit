@@ -226,6 +226,14 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	err = s.test(ctx, machine, worker, monitor, queue, sink, report, cfg, buildID, bits, local)
 
 	report.TaskStop()
+
+	// CTP packs the run directory unconditionally, at the end, whatever the
+	// verdicts were. Failing to pack it does not fail the run: the results are
+	// already on disk, and the archive is a convenience for carrying them off.
+	if _, backupErr := sink.Backup(buildID, bits, 0, time.Now()); backupErr != nil {
+		fmt.Printf("[ERROR] cannot pack the run directory: %v\n", backupErr)
+	}
+
 	fmt.Println("TEST COMPLETE")
 	return err
 }

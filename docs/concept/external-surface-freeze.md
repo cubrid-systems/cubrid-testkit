@@ -143,7 +143,9 @@ env.instance<N>.<role>.<property>  → instance<N> 오버라이드 (default 를 
 
 ### 2-4. CI 오버레이 — **F3**
 
-`shell_ci.conf` 는 `shell.conf` 42−26 = **16 키**가 더 많다. `conf-matrix.md` §1-3 은 그중 **14개**만 열거했고, `env.instance2.broker{1,2}.BROKER_PORT` / `env.instance2.cubrid.cubrid_port_id` 가 목록에서 빠져 있다 (§11-11). 전부 F3 로 수용한다.
+`shell_ci.conf` 는 `shell.conf` 42−26 = **16 키**가 더 많다. `conf-matrix.md` §1-3 은 그중 **14개**만 열거했다 (§11-11). 전부 F3 로 수용한다.
+
+**2026-09-03 해소: 16 이 맞다.** 파일에서 직접 세면 shell.conf 는 live 3 키, shell_ci.conf 는 live 19 키이고 차집합이 16 이다. 누락된 둘은 `testcase_exclude_from_file` 과 `test_category`. 둘 다 이미 구현되어 있으므로 범위 산정에는 영향이 없다.
 
 ---
 
@@ -695,7 +697,7 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 11-8 | **jdbc / ha_repl / cdc_repl 출력 표면 미분석** — inventory stubs 0/5 | §10 행 10·12 와 §6-1 의 `-1` 이 유추 | **Phase 4** — jdbc 가 Phase 3 범위에서 빠져(`module-shell.md` §7-5) 더 이상 Phase 3 블로커가 아니다 |
 | 11-9 | ~~로컬 체크아웃과 baseline 차이~~ | **해소 (2026-09-02)** — `ComponentEnum.java` · `Test.java` · `bin/ctp.sh` 모두 **변경 없음**. 본 명세의 근거는 유효하다 | 완료 |
 | 11-10 | `bin/ini.sh` / `IniCommand` 의 CLI 표면 + 외부 사용자 | 등급 부여 | Phase 2 |
-| 11-11 | `shell_ci` exclusive 키 14 vs 16 불일치 | Phase 3 범위 산정 | Phase 2 |
+| 11-11 | ~~`shell_ci` exclusive 키 14 vs 16 불일치~~ | **해소 (2026-09-03)** — **16 이 맞다.** `conf-matrix.md` §1-3 이 `testcase_exclude_from_file` 과 `test_category` 를 빠뜨렸다. 둘 다 구현되어 있어 범위에는 영향 없음 | 완료 |
 | 11-12 | `.diff_1` 이 입력인가 산출물인가 | §3-2 vs §5 배치 | Phase 4 |
 | 11-13 | `.ctl` grammar 정형화 | ADR-008 | Phase 2 |
 | 11-14 | ~~shell fail-backup 의 Windows 동작~~ | **소멸 (2026-09-02)** — Windows 가 범위 밖이 되어 질문 자체가 사라졌다 | 완료 |

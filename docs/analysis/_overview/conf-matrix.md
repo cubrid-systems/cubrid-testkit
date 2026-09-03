@@ -42,7 +42,13 @@
 
 ### 1-3. shell_ci.conf 가 명백히 CI 전용 슈퍼셋
 
-shell_ci는 shell의 모든 키 + **14개 CI 전용 키**(test_platform, test_continue_yn, testcase_git_branch, testcase_update_yn, testcase_exclude_by_macro, feedback_type, default.broker*.{APPL_SERVER_SHM_ID,BROKER_PORT}, default.cubrid.cubrid_port_id, default.ha.ha_port_id, delete_testcase_after_each_execution_yn, enable_check_disk_space_yn). CI 환경(자동화/포트 충돌 회피/슬랙 피드백)에 필요한 추가 설정.
+shell_ci는 shell의 모든 키 + **16개 CI 전용 키**(test_platform, test_continue_yn, testcase_git_branch, testcase_update_yn, testcase_exclude_by_macro, feedback_type, default.broker*.{APPL_SERVER_SHM_ID,BROKER_PORT}, default.cubrid.cubrid_port_id, default.ha.ha_port_id, delete_testcase_after_each_execution_yn, enable_check_disk_space_yn). CI 환경(자동화/포트 충돌 회피/슬랙 피드백)에 필요한 추가 설정.
+
+
+**2026-09-03 정정 — 14 가 아니라 16.** 위 열거는 두 개를 빠뜨렸다:
+`testcase_exclude_from_file` 과 `test_category`. 앞의 것은 *어떤 케이스가 돌지 않는지*를
+정하는 키이므로 빠뜨리기에 나쁜 쪽이었다. 실제 개수는 파일에서 직접 센 값이다
+(shell.conf live 3 키, shell_ci.conf live 19 키, 차집합 16). freeze §11-11 해소.
 
 ### 1-4. medium 의 위치가 conf 레벨에서는 sql 의 자매 파일
 

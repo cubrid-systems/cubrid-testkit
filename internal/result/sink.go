@@ -41,6 +41,7 @@ const CurrentRuntimeLogs = "current_runtime_logs"
 // Sink owns the output of one run.
 type Sink struct {
 	dir    string
+	root   string // result/<category>, the directory that holds dir
 	stdout io.Writer
 
 	mu      sync.Mutex
@@ -61,6 +62,7 @@ func Open(home *conf.Home, category string, continueMode bool) (*Sink, error) {
 	}
 	return &Sink{
 		dir:     dir,
+		root:    filepath.Dir(dir),
 		stdout:  os.Stdout,
 		workers: map[string]*os.File{},
 		monitor: map[string]*os.File{},

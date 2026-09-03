@@ -178,7 +178,7 @@ report     실패 케이스 백업 tar.gz                             종료 코
 | 7-1 | RMI 워커 모드 | **폐기.** 배포 자산만으로 도달 불가능(freeze §7-7). `service/` 3클래스 미이식. `agent_protocol=rmi` 는 경고 후 ssh |
 | 7-2 | `TestCaseGithub` / `TestCaseSVN` | **축 O — 제외.** 단 `testcase_update_yn=yes` 는 실패시킨다 (`migration-exclusions.md` §2a) |
 | 7-3 | shell fail-backup 의 Windows 동작 | **질문 소멸.** Windows 가 공식 stale 이라 범위 밖 |
-| 7-4 | `shell_ci` exclusive 키 14 vs 16 | **미해소 — Phase 3 착수 시 확인** (freeze §11-11). 범위 산정에만 영향 |
+| 7-4 | `shell_ci` exclusive 키 14 vs 16 | **해소 (2026-09-03) — 16.** `conf-matrix.md` 가 `testcase_exclude_from_file`·`test_category` 를 빠뜨렸다. 둘 다 구현됨 |
 | **7-5** | **`jdbc` 를 범위에 넣는가** | **제외.** `jdbc/bin/run.sh` 는 `shell.main.JdbcLocalTest` 를 **jar 에서 직접** 띄우고 testkit 을 경유하지 않는다. 구 `cubridqa-shell.jar` 는 다른 3모듈 때문에 어차피 계속 빌드되므로 jdbc 는 손대지 않아도 그대로 돈다. **초안이 "딸려 온다"고 단정한 것은 근거가 없었다** |
 | **7-6** | **Windows** | **범위 밖.** 공식 stale. native runner 는 명시적으로 거부한다 |
 | **7-7** | **회귀 동등성의 정의** | **정규화 후 diff 0.** 코퍼스·마스킹 목록·제외 항목은 **ADR-013** |

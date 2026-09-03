@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 320" width="880" height="320" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Animated: a shell run checks the machine, finds the cases, runs each one after a process reset, judges the result file, and writes the verdicts down. Four real cases: three OK and one NOK. Every stage leaves a file that is part of the frozen surface.">
+<style>
+  .ttl{font-size:15px;font-weight:700;fill:#1f2937}
+  .sub{font-size:11px;fill:#6b7280}
+  .band{font-size:9px;font-weight:700;fill:#9ca3af;letter-spacing:1.1px}
+  .h{font-size:11.5px;font-weight:700;fill:#1f2937}
+  .d{font-size:9.5px;fill:#6b7280}
+  .m{font-size:9.5px;fill:#2563eb;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mg{font-size:9px;fill:#6b7280;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .box{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+  .track{stroke:#e5e7eb;stroke-width:2.5;fill:none}
+  .prog{stroke:#2563eb;stroke-width:2.5;fill:none;stroke-linecap:round}
+  .note{font-size:9px;fill:#9ca3af}
+  .stoplbl{font-size:10px;fill:#9ca3af;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+</style>
+<rect x="0" y="0" width="880" height="320" fill="#ffffff"/>
+
+<text class="ttl" x="10" y="20">A shell run: check the machine, find the cases, run them, judge them, write it down</text>
+<text class="sub" x="10" y="36">One machine — local by default, and a remote machine over SSH is still one machine. Every stage leaves a file that is part of the frozen surface.</text>
+
+<line class="track" x1="80" y1="64" x2="800" y2="64"/>
+<line class="prog" x1="80" y1="64" x2="80" y2="64">
+  <animate attributeName="x2" values="80;80;260;260;440;440;620;620;800;800" keyTimes="0;0.02;0.16;0.18;0.30;0.62;0.78;0.80;0.96;1" dur="12s" repeatCount="indefinite"/>
+</line>
+<circle cx="80"  cy="64" r="5" fill="#2563eb" stroke="#ffffff" stroke-width="2"/>
+<circle cx="260" cy="64" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#2563eb" keyTimes="0;0.16" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<circle cx="440" cy="64" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#2563eb" keyTimes="0;0.30" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<circle cx="620" cy="64" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#2563eb" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<circle cx="800" cy="64" r="5" fill="#ffffff" stroke="#9ca3af" stroke-width="1.6"><animate attributeName="fill" values="#ffffff;#1a7f37" keyTimes="0;0.78" dur="12s" calcMode="discrete" repeatCount="indefinite"/></circle>
+<text class="stoplbl" x="80"  y="82" text-anchor="middle" fill="#1f2937">check</text>
+<text class="stoplbl" x="260" y="82" text-anchor="middle">discover<animate attributeName="fill" values="#9ca3af;#1f2937" keyTimes="0;0.16" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="stoplbl" x="440" y="82" text-anchor="middle">run<animate attributeName="fill" values="#9ca3af;#1f2937" keyTimes="0;0.30" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="stoplbl" x="620" y="82" text-anchor="middle">judge<animate attributeName="fill" values="#9ca3af;#1f2937" keyTimes="0;0.62" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="stoplbl" x="800" y="82" text-anchor="middle">record<animate attributeName="fill" values="#9ca3af;#1a7f37" keyTimes="0;0.78" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+
+<rect class="box" x="10" y="96" width="470" height="132" rx="5"/>
+<text class="band" x="24" y="114">CASE</text>
+<text class="band" x="466" y="114" text-anchor="end">VERDICT</text>
+
+<text class="mg" x="24" y="142">_23_optimizedb/itrack_10001</text>
+<circle cx="424" cy="139" r="3.5" fill="#2563eb" opacity="0"><animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.30;0.38;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="r" values="3.5;2;3.5" dur="0.9s" repeatCount="indefinite"/></circle>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.38;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <rect x="414" y="131" width="52" height="16" rx="8" fill="#f0fdf4" stroke="#1a7f37"/><text x="440" y="143" text-anchor="middle" font-size="9" font-weight="700" fill="#1a7f37">OK</text></g>
+
+<text class="mg" x="24" y="166">_38_csql/csql1</text>
+<circle cx="424" cy="163" r="3.5" fill="#2563eb" opacity="0"><animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.38;0.48;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="r" values="3.5;2;3.5" dur="0.9s" repeatCount="indefinite"/></circle>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.48;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <rect x="414" y="155" width="52" height="16" rx="8" fill="#fdecea" stroke="#c0392b"/><text x="440" y="167" text-anchor="middle" font-size="9" font-weight="700" fill="#c0392b">NOK</text></g>
+
+<text class="mg" x="24" y="190">_38_csql/csql_help</text>
+<circle cx="424" cy="187" r="3.5" fill="#2563eb" opacity="0"><animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.48;0.56;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="r" values="3.5;2;3.5" dur="0.9s" repeatCount="indefinite"/></circle>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.56;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <rect x="414" y="179" width="52" height="16" rx="8" fill="#f0fdf4" stroke="#1a7f37"/><text x="440" y="191" text-anchor="middle" font-size="9" font-weight="700" fill="#1a7f37">OK</text></g>
+
+<text class="mg" x="24" y="214">_12_spacedb/itrack_10002</text>
+<circle cx="424" cy="211" r="3.5" fill="#2563eb" opacity="0"><animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.56;0.62;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><animate attributeName="r" values="3.5;2;3.5" dur="0.9s" repeatCount="indefinite"/></circle>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.62;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <rect x="414" y="203" width="52" height="16" rx="8" fill="#f0fdf4" stroke="#1a7f37"/><text x="440" y="215" text-anchor="middle" font-size="9" font-weight="700" fill="#1a7f37">OK</text></g>
+
+<rect class="box" x="490" y="96" width="380" height="132" rx="5"/>
+<text class="band" x="504" y="114">STAGE</text>
+
+<g><animate attributeName="opacity" values="1;0;0" keyTimes="0;0.16;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="h" x="504" y="140">check — is this machine able to run a case</text>
+  <text class="mg" x="504" y="160">HOME USER JAVA_HOME CTP_HOME init_path CUBRID</text>
+  <text class="d" x="504" y="180">Executable, and it says which one failed. A missing</text>
+  <text class="d" x="504" y="196">command now fails here; CTP&#39;s check reported PASS.</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.16;0.30;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="h" x="504" y="140">discover — walk the scenario tree</text>
+  <text class="mg" x="504" y="160">scenario = the root directory, not one case</text>
+  <text class="d" x="504" y="180">The order is CTP&#39;s. Correcting the discovery rule</text>
+  <text class="d" x="504" y="196">moved the corpus count from 3,722 to 3,452.</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.30;0.62;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="h" x="504" y="140">run — reset, then the case</text>
+  <text class="mg" x="504" y="160">a monitor polls every 3 s</text>
+  <text class="d" x="504" y="180">A case that runs too long has the processes it is</text>
+  <text class="d" x="504" y="196">waiting on killed — cancelling would orphan them.</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.62;0.78;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="h" x="504" y="140">judge — read the result file</text>
+  <text class="mg" x="504" y="160">any line containing NOK fails the case</text>
+  <text class="d" x="504" y="180">NOK found core file and NOK found fatal error mean</text>
+  <text class="d" x="504" y="196">the failure left evidence. A blank result is NOK.</text>
+</g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.78;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>
+  <text class="h" x="504" y="140">record — 3 OK · 1 NOK</text>
+  <text class="mg" x="504" y="160" fill="#1a7f37">exit 0 — a failed case is a result, not an error</text>
+  <text class="d" x="504" y="180">The two files that carry the verdicts are the two</text>
+  <text class="d" x="504" y="196">that have to be byte-identical to CTP&#39;s.</text>
+</g>
+
+<text class="band" x="10" y="252">FILES LEFT BEHIND</text>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.16;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><rect class="box" x="10" y="260" width="132" height="22" rx="4"/><text class="mg" x="20" y="275">check_local.log</text></g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.30;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><rect class="box" x="150" y="260" width="150" height="22" rx="4"/><text class="mg" x="160" y="275">dispatch_tc_ALL.txt</text></g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.80;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><rect x="308" y="260" width="132" height="22" rx="4" fill="#f0fdf4" stroke="#1a7f37"/><text class="mg" x="318" y="275" fill="#1a7f37">test_status.data</text></g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.84;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><rect x="448" y="260" width="182" height="22" rx="4" fill="#f0fdf4" stroke="#1a7f37"/><text class="mg" x="458" y="275" fill="#1a7f37">dispatch_tc_FIN_local.txt</text></g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.88;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><rect class="box" x="638" y="260" width="102" height="22" rx="4"/><text class="mg" x="648" y="275">feedback.log</text></g>
+<g opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.92;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/><rect class="box" x="748" y="260" width="122" height="22" rx="4"/><text class="mg" x="758" y="275">test-shell.xml</text></g>
+
+<text class="note" x="10" y="304">The four cases and their verdicts are the ones in docs/evidence/regression-shell.md, where CTP and testkit were run on them side by side.  docs/design/module-shell.md</text>
+</svg>

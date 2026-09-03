@@ -97,9 +97,13 @@ them: `dispatch_tc_ALL.txt` and `dispatch_tc_FIN_local.txt` (the cases found and
 `main_snapshot.properties`, `feedback.log`, `test-shell.xml`, `test_local.log`, plus `main.info`
 and `summary_info`.
 
+![Animated: a shell run checks the machine, finds the cases, runs each one after a process reset, judges the result file, and writes the verdicts down. Four real cases: three OK and one NOK. Every stage leaves a file that is part of the frozen surface.](docs/assets/anim-shell-run.svg)
+
 ## What it does
 
 ![Architecture: frozen entry scripts call one Go binary, which routes each task either to a native runner or to the old CTP as a subprocess; both produce the same frozen output, and QA operations are excluded](docs/assets/architecture.svg)
+
+![Animated: one binary and one registry lookup. unittest goes to the native runner; shell goes to CTP as a subprocess while TESTKIT_NATIVE_SHELL is unset and to the native runner when it is set to 1. Both paths write the same frozen output, so from outside there is no way to tell which ran.](docs/assets/anim-dispatch.svg)
 
 One binary. Every entry script becomes a shim that hands its arguments over unchanged, and a single
 registry turns a task name into either a native runner or the legacy runner, which reproduces CTP's
@@ -145,11 +149,14 @@ version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
 | 4 — the rest | — | `sql` family, `isolation`, `ha_repl`, `cdc_repl`, `jdbc` |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
+![Animated: CTP and testkit run on the same four cases on the same machine in the same minute. Both report three passed and one failed, the same case failing on both, and exit 0. Of the ten files a run leaves behind, six are byte-identical after normalisation, one is identical once the JVM's own properties are removed, and three differ by a named number of lines.](docs/assets/anim-equivalence.svg)
+
 **What is proven.** CTP and testkit, run on the same four cases on the same machine in the same
 minute: both **3 passed, 1 failed**, the same case failing on both, the same summary counters, exit
-code 0. Of the ten files a run leaves behind, five are byte-identical after normalisation — including
-the two that carry the verdicts — and every remaining difference has a named reason
-([`evidence/regression-shell.md`](docs/evidence/regression-shell.md)).
+code 0. Of the ten files a run leaves behind, **six are byte-identical** after normalisation —
+including the two that carry the verdicts — one more is identical once the JVM's own system
+properties are removed, and the remaining three differ by a named number of lines, each with a
+reason ([`evidence/regression-shell.md`](docs/evidence/regression-shell.md)).
 
 **The gate.** Equivalence is proven by comparing normalised output over the whole shell corpus —
 3,452 cases, with the 195 in `_25_unstable` counted separately because their own readme says they

@@ -14,8 +14,13 @@ import (
 // order, and it is a better answer than a deployment guide: it is executable, it
 // runs on the machine in question, and it says which one failed.
 var (
-	checkedVariables   = []string{"HOME", "USER", "JAVA_HOME", "CTP_HOME", "init_path", "CUBRID"}
-	checkedCommands    = []string{"java", "javac", "diff", "wget", "find", "cat", "kill", "dos2unix", "tar"}
+	checkedVariables = []string{"HOME", "USER", "JAVA_HOME", "CTP_HOME", "init_path", "CUBRID"}
+	// dos2unix is CTP's and is not here. init.sh strips CRLF from the two files it
+	// is about to diff, which matters when an answer file was edited on Windows --
+	// and Windows is out of scope (ADR-003 revision). Of the 51 answer files in the
+	// shell corpus, none has CRLF, so on Linux the command is dead weight and
+	// requiring it fails a machine for a reason that cannot arise.
+	checkedCommands    = []string{"java", "javac", "diff", "wget", "find", "cat", "kill", "tar"}
 	checkedDirectories = []string{"${CTP_HOME}/bin", "${CTP_HOME}/common/script"}
 )
 
@@ -92,6 +97,36 @@ func (c *CheckRequirement) Check(ctx context.Context) bool {
 
 	c.line("")
 	return !c.failed
+}
+
+// checkCommand asks the machine whether it has a command.
+//
+// CTP asked by running "which <cmd>" and looking for the string "no <cmd>" in
+// the output. That is csh's wording. On a bash machine `which` prints nothing
+// and returns non-zero, the string is absent, and **every missing command
+// reports PASS** -- so the check that exists to catch a misconfigured machine
+// could not catch the one thing it was most likely to find. It was watched
+// happening: check_local.log said "Check command 'dos2unix' ...... PASS" on a
+// machine without dos2unix, and the run then failed four times on
+// "dos2unix: command not found" (docs/evidence/regression-shell.md).
+//
+// The verdict is computed on the far side rather than from the channel's exit
+// code, because the exit code is not available: the SSH channel closes its frame
+// with an echo, so a remote script's status is always the echo's. The same shape
+// is what checkDirectory and checkFile already use.
+func (c *CheckRequirement) checkCommand(ctx context.Context, cmd string) {
+	c.print("==> Check command '%s' ", cmd)
+	out, err := runIn(ctx, c.Channel,
+		fmt.Sprintf("if which %s >/dev/null 2>&1; then echo PASS; else echo FAIL; fi", cmd))
+	switch {
+	case err != nil:
+		c.fail("...... FAIL: %v", err)
+	case strings.Contains(out.Output(), "PASS"):
+		c.print("...... PASS")
+	default:
+		c.fail("...... Result: FAIL. Not found executable %s", cmd)
+	}
+	c.line("")
 }
 
 func (c *CheckRequirement) checkPath(ctx context.Context, kind, test, path string) {

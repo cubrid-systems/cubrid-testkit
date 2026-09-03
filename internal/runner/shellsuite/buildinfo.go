@@ -34,21 +34,27 @@ func BuildID(s string) string {
 	}
 
 	start := strings.LastIndex(s, simple)
-	rest := start + len(simple) + 1
-	if rest > len(s) {
-		return s[start:]
-	}
-	end := -1
-	for _, sep := range []string{"-", ")", "."} {
-		if i := strings.Index(s[rest:], sep); i != -1 {
-			end = rest + i
-			break
+	rest := start + len(simple)
+
+	// From 10.1.0.6858 the four-part number is followed by a commit, as in
+	// 11.4.5.1875-74d17e9, and the commit is part of the identity. It is a dash
+	// and then letters and digits, and nothing else.
+	//
+	// CTP looked for the next "-", then ")", then "." after the version and cut
+	// there -- which works when a commit is present and runs away when one is not.
+	// A cubrid_rel line for a build without a commit gave
+	// "11.2.0.0000) (64bit release build for linux_gnu" as the build id, and that
+	// went into main_snapshot.properties and into every case's environment.
+	if rest < len(s) && s[rest] == '-' {
+		i := rest + 1
+		for i < len(s) && isBuildSuffixByte(s[i]) {
+			i++
+		}
+		if i > rest+1 {
+			return s[start:i]
 		}
 	}
-	if end == -1 {
-		return s[start:]
-	}
-	return s[start:end]
+	return simple
 }
 
 // BuildBits reports "64bits" or "32bits". It is not a fact about the machine but
@@ -61,6 +67,10 @@ func BuildBits(s string) string {
 		}
 	}
 	return "32bits"
+}
+
+func isBuildSuffixByte(b byte) bool {
+	return b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
 // newNumbering compares two four-part versions componentwise.

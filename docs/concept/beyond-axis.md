@@ -68,6 +68,51 @@ written, which is the cheapest a correction ever gets.
 | Evidence | wall-clock for `_01_utility` at N=1 against N=4 and N=8, with verdicts identical to the serial run — **identical, not merely similar**: a case that passes only when it has the machine to itself is a finding, not an acceptable cost |
 | Risk | this is where the parallel-run bugs live. It must not ship before the serial version is proven, or a difference has two possible causes |
 
+### B-T7. Compare a query plan as data, not as prose — **blocked**
+
+| | |
+|---|---|
+| Blocked on | T: the sql module (Phase 4) |
+| Improves on | T: `StringUtil.replaceQureyPlan` |
+| Kind | **capability** — it makes the suite able to see something it currently cannot |
+
+**Today the masking blinds the test to what it was written to catch.** A plan is
+compared as rendered text, and normalisation is one blind regex over the whole thing:
+
+```java
+queryPlan = queryPlan.replaceAll("[0-9]+", "?");
+```
+
+Cost and cardinality *should* be masked — they move with the statistics. But the regex cannot tell
+a cost from an identifier, and the committed answer files show what that costs:
+
+```
+class: t?              (30 occurrences)   ← t1, t2 and t3 are the same string now
+index: i_t?_j?_j?
+index: i_t?_i?_i?_i?
+```
+
+So a plan that scans `t1` and a plan that scans `t2` compare equal. A plan that switched from
+`i_t1_i1_i2` to `i_t1_i1_i3` compares equal. **These are plan tests, and a changed index is exactly
+the regression they exist to detect.** The masking does not merely blur the answer; it removes the
+signal and leaves the test passing.
+
+**The engine already emits the plan as JSON.** `qo_plan_print_json` in
+`src/optimizer/query_planner.c` builds it, and the identifiers are their own fields:
+
+```c
+json_object_set_new (scan, "table", json_string (class_name));
+json_object_set_new (scan, "index", json_string (...->constraints->name));
+```
+
+and the switch is a system parameter that exists — `query_trace_format`, whose keywords are
+`text` and `json` (`system_parameter.c:5694`).
+
+| Beyond | ask for `query_trace_format=json`, compare field by field: mask `cost` and `cardinality`, keep `table`, `index` and the plan shape |
+| Evidence | a case whose plan changes index from `i_a` to `i_b` fails, where today it passes. That is one case to write, and it is the whole argument |
+| Constraint | the text form stays. The `.answer` files are frozen (NG1) and hold rendered plans; JSON is a **second** comparison an operator turns on, not a replacement |
+| Note | this is the clearest instance of criterion 1 in ADR-015: it names what it beats and what today is measured, and the measurement is a count from the corpus rather than an opinion |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

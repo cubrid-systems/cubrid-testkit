@@ -261,6 +261,40 @@ java cqt.webconsole.Starter <webconsole.conf> <webRoot> <start|stop>
 └── 1  ($CUBRID 부재 / conf 부재)
 ```
 
+## answer 선택 — cqt 는 `.answer` 하나만 읽는다 (2026-09-03)
+
+`TestUtil.getAnswerFile(caseFile)` 이 만드는 경로는 하나다:
+
+```
+<케이스 경로의 /cases 를 /answers 로 치환>/<name>.answer
+```
+
+**변형 접미사를 조립하는 코드가 cqt 에 없다.** `.answer_cci`(2,119개) 와 `.answer_win`(59개) 는
+코퍼스에 있지만 CTP 트리 전체의 `.java`·`.sh` 어디에서도 그 이름을 만들지 않는다. `sql_by_cci` 는
+`ComponentEnum` 에 없어 `ctp.sh` task 가 아니고 `common/ext/run_sql_by_cci.sh` 가 직접 몬다 —
+그쪽이 어떻게 답을 고르는지는 **Phase 4 에서 확인할 것** (§11-24).
+
+### `answers32` — 기전은 있고 대상이 없다
+
+디렉터리 이름을 고르는 경로가 둘 겹쳐 있다:
+
+1. `ConsoleDAO` 가 `<db>.xml` 의 `version` 을 보고 **전역 가변 static** `TestUtil.OTHER_ANSWERS_32` 를
+   `"answers32"`(32bits) 또는 `"answers"` 로 세팅한다
+2. `getAnswer4SQLAndOther` 가 그 이름의 디렉터리가 케이스 옆에 **있는지** 보고, 있으면 쓰고 없으면
+   `answers` 로 떨어진다
+
+**코퍼스에 `answers32/` 디렉터리가 0개다.** 즉 이 기전은 현재 고를 대상이 없다.
+
+⚠️ 그리고 그 static 은 **DB 마다 덮어써진다.** 한 실행에 DB 가 둘 이상이면 마지막 것이 이기고
+케이스별로 결정되지 않는다. 지금은 대상이 없어 드러나지 않는다.
+
+### charset 변형
+
+`answer_D_<db charset>_C_<client charset>[_<collation>]` 형태가 코퍼스에 있다
+(`answer_D_iso_C_iso_en_ci`, `answer_D_utf_C_utf_bin`, …). cqt 쪽에서 charset 을 다루는 것은
+`getCharsetFile` 인데 그건 **`$CTP_HOME/<config>/<test_config>/<name>`** 의 XML 을 가리킬 뿐
+answer 파일 이름과 무관하다 (기본값 `test_default.xml`). 이 변형들도 §11-24 대상이다.
+
 ## queryPlan · excluded_list · patch — 전부 입력이다 (2026-09-03 해소, freeze §11-12)
 
 ### queryPlan — 스위치이자 비교 대상

@@ -13,19 +13,24 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
+	"github.com/cubrid-systems/cubrid-testkit/internal/runshell"
 )
 
 // version is stamped at build time: -ldflags "-X main.version=..."
@@ -47,6 +52,15 @@ func main() {
 }
 
 func run(args []string) int {
+	// run-shell is the other CLI tree: one case, looped until it fails. CTP
+	// shipped it as shell/init_path/run_shell.sh rather than as a ctp.sh task, and
+	// keeping that separation is what stops "run the corpus" and "hound one case"
+	// from growing into each other's options
+	// (docs/concept/external-surface-freeze.md §1-4).
+	if len(args) > 0 && args[0] == "run-shell" {
+		return runShell(args[1:])
+	}
+
 	inv, err := cli.Parse(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "testkit: %v\n", err)
@@ -159,4 +173,124 @@ func report(err error, fallbackCode int) int {
 		return exitErr.Code
 	}
 	return fallbackCode
+}
+
+// runShellUsage is what -h prints. CTP used commons-cli's HelpFormatter under the
+// heading "run_shell [OPTION]"; the seven options it listed and this does not are
+// QA operations, and asking for one now says so rather than being ignored.
+const runShellUsage = `usage: run-shell [OPTION] [testcase]
+
+Run one test case, repeatedly, until it fails. The testcase argument may name the
+case directory, its cases/ subdirectory, or a file in either; it defaults to the
+working directory.
+
+    --loop                    keep running until a failure is checked
+    --maxloop <n>             stop after n loops
+    --maxtime <seconds>       stop after n seconds
+    --extend-script <file>    source it and call "verify <dir> <name>.result"
+                              instead of reading the result file
+    --prompt-continue <bool>  answer the continue prompt without a terminal
+ -h,--help                    this
+
+Touching a file named STOP in the case directory ends the loop after the attempt
+in flight.
+
+--update-build, --next-build-url, --enable-report, --report-cron, --mailto,
+--mailcc and --issue are QA operations and are not implemented here
+(docs/concept/migration-exclusions.md).
+`
+
+// runShell is the entry point for the looping single-case tool.
+func runShell(args []string) int {
+	fs := flag.NewFlagSet("run-shell", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var (
+		loop           = fs.Bool("loop", false, "")
+		maxLoop        = fs.Int("maxloop", 0, "")
+		maxTime        = fs.Int("maxtime", 0, "")
+		extendScript   = fs.String("extend-script", "", "")
+		promptContinue = fs.String("prompt-continue", "", "")
+		help           = fs.Bool("help", false, "")
+		helpShort      = fs.Bool("h", false, "")
+	)
+	// The excluded options are accepted and refused rather than rejected as
+	// unknown, so that an operator who used them gets told why instead of being
+	// told they made a typo.
+	excluded := map[string]*string{}
+	for _, name := range []string{"next-build-url", "report-cron", "mailto", "mailcc", "issue"} {
+		excluded[name] = fs.String(name, "", "")
+	}
+	excludedFlags := map[string]*bool{}
+	for _, name := range []string{"update-build", "enable-report"} {
+		excludedFlags[name] = fs.Bool(name, false, "")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprint(os.Stdout, runShellUsage)
+		return exitPreflight
+	}
+	if *help || *helpShort {
+		fmt.Fprint(os.Stdout, runShellUsage)
+		return exitOK
+	}
+	for name, v := range excluded {
+		if *v != "" {
+			fmt.Fprintf(os.Stderr, "run-shell: --%s is QA operations and is not implemented here "+
+				"(docs/concept/migration-exclusions.md)\n", name)
+			return exitPreflight
+		}
+	}
+	for name, v := range excludedFlags {
+		if *v {
+			fmt.Fprintf(os.Stderr, "run-shell: --%s is QA operations and is not implemented here "+
+				"(docs/concept/migration-exclusions.md)\n", name)
+			return exitPreflight
+		}
+	}
+
+	opts := runshell.Options{
+		Loop:         *loop,
+		MaxLoop:      *maxLoop,
+		MaxTime:      time.Duration(*maxTime) * time.Second,
+		ExtendScript: *extendScript,
+	}
+	if *promptContinue != "" {
+		yes := strings.EqualFold(*promptContinue, "true") || strings.EqualFold(*promptContinue, "y")
+		opts.PromptContinue = &yes
+	}
+
+	arg := ""
+	if fs.NArg() > 0 {
+		arg = fs.Arg(0)
+	}
+	c, err := runshell.Locate(arg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprint(os.Stdout, runShellUsage)
+		return exitPreflight
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ch := &exec.Local{SourceProfile: true}
+	defer ch.Close()
+
+	meta, err := runshell.ReadMeta(ctx, ch)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		return exitEnvironment
+	}
+
+	r := &runshell.Run{Case: c, Options: opts, Channel: ch, Meta: meta, Out: os.Stdout, In: os.Stdin}
+	res := r.Go(ctx)
+
+	// CTP ended with System.exit(0) unconditionally, so a run that printed
+	// QUIT(NOK) still reported success and "run_shell.sh ... && ..." passed.
+	// Fixed in axis T as a clear bug (docs/concept/external-surface-freeze.md).
+	if res.Failed() {
+		return exitPreflight
+	}
+	return exitOK
 }

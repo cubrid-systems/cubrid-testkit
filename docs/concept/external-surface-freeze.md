@@ -88,8 +88,8 @@ ctp.sh <task>... [-c <conf>] [--interactive] [-h] [-v]
 | `--loop` | no | T | F1 |
 | `--maxloop` | yes | T | F1 |
 | `--maxtime` | yes | T | F1 |
-| `--update-build` | no | T | F1 |
-| `--next-build-url` | yes | T | F1 |
+| `--update-build` | no | ~~T~~ **O** | **제외 (2026-09-03)** — 루프 사이에 새 빌드를 설치한다. §1-4a 가 빌드 설치를 제외했으므로 그 결정을 여기까지 끌고 온다 |
+| `--next-build-url` | yes | ~~T~~ **O** | **제외 (2026-09-03)** — 빌드 서버 HTML 을 긁어 다음 빌드를 찾는다. `RunShellMain` 의 메서드 9개가 여기 딸려 있다 |
 | `--extend-script` | yes | T | F1 |
 | `--prompt-continue` | yes | T | F1 |
 | `-h` / `--help` | no | T | F1 |
@@ -101,6 +101,23 @@ ctp.sh <task>... [-c <conf>] [--interactive] [-h] [-v]
 
 `--report-cron` 제외로 **`cubridqa-scheduler.jar` 의존이 끊긴다** — Phase 3 범위 축소.
 문서화 위치: `doc/rqg_guide.md` §2.7 · `doc/cci_guide.md` · `doc/shell_heavy_guide.md`.
+
+**2026-09-03 정정 — 축 T 는 8개가 아니라 6개다.** `loop` · `maxloop` · `maxtime` ·
+`extend-script` · `prompt-continue` · `help`. 위 표에서 두 개가 축 O 로 옮겨갔고, 그와 함께
+`RunShellMain` 의 절반이 범위 밖이 된다 — 메일/리포트 8개 메서드 + `CheckThread`(메일 상태 신호),
+그리고 빌드 탐색·설치 9개 메서드(HTML 스크래핑 포함).
+
+**같은 날 발견한 세 가지 (§11-20~22):**
+
+| | |
+|---|---|
+| **`--config` 는 14번째 옵션이고 죽어 있다** | `options.addOption` 이 **주석 처리**되어 있는데 `cmd.getOptionValue("config")` 는 그대로 호출된다. 등록 안 된 옵션이라 항상 `null` 이고, 파라미터 배너는 매 실행 `config : null` 을 찍는다 |
+| **`STOP` 파일이 제어 표면이다** | 케이스 디렉터리에 `STOP` 이라는 파일이 있으면 루프가 그 회차 끝에 멈춘다. 명세에 없다. 도는 루프를 밖에서 세우는 유일한 수단 |
+| **종료 코드가 항상 0 이다** | `run()` 끝의 `System.exit(0)` 은 무조건이다. `QUIT(NOK)` 를 찍고도 0 을 반환한다 |
+
+`run_shell.sh` 자체는 얇은 런처다 (`java -cp ... RunShellMain "$@"`). CTP 안에서 이걸 호출하며
+`$?` 를 보는 곳은 없다 — 사람이 직접 쓰는 도구다. ⚠️ `common/ext/run_shell.sh` 는 **이름만 같은
+다른 파일**이다 (스위트 러너 함수 3개). 혼동 주의.
 
 ### 1-5. `CTP_HOME` — **F3**
 
@@ -704,6 +721,9 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 11-15 | **`runone.sh` sed 정규화 패턴 전수 목록** | §7-6 — 모든 isolation 판정이 여기 의존 | Phase 4 (ADR-009) |
 | 11-16 | `jdbc_config_file` charset XML 스키마 | §8-5 | Phase 4 |
 | 11-17 | `ErrorInterrupt` cascade-abort 정책 | 실행 중단 동작이 관측 가능 | Phase 4 |
+| 11-20 | `run_shell.sh --config` 가 죽어 있다 | §1-4 — 재현할지 되살릴지 | Phase 3 |
+| 11-21 | `run_shell.sh` 의 `STOP` 파일 | §1-4 — 명세에 없던 제어 표면 | Phase 3 |
+| 11-22 | `run_shell.sh` 가 실패해도 0 을 반환한다 | §1-4 — 재현 vs 정정 | Phase 3 |
 
 ### 11-2 상세 — 마커별 실제 소비자 *(2026-09-02 조사)*
 

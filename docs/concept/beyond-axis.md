@@ -38,15 +38,24 @@ ceremony: equivalence cannot be proven against a system that has already been im
 | Evidence | two runs of the same suite produce the same file; `TestDiscoverIsIndependentOfFindOrder` |
 | Why it did not wait | **there was no parity to ship first.** CTP cannot reproduce this file against itself, so F1 was not a grade anything could earn. Recorded as a deviation in `evidence/spec-corrections.md` and masked in ADR-013 |
 
-### B-T2. A runner you can hand a container — **ready**
+### B-T2. A runner you can hand a container — **blocked**
 
 | | |
 |---|---|
+| Blocked on | T: the shell task passing the full-corpus gate (ADR-013) |
 | Improves on | T: `Constants.createLinKillScripts`, and the posture behind it |
 | Today | the reset before every case matches substrings across everything the user owns. On the machine used for `evidence/regression-shell.md` that was 63 processes and 13 shared-memory segments belonging to other work. **A CTP run and anything else the same user is doing cannot share a machine** |
 | Beyond | the runner runs inside a PID and IPC namespace it creates for itself, so the reset reaches its own work and nothing else |
 | Evidence | the full suite runs on a developer's machine while that developer keeps working; the reset script is unchanged, and `ps -u $USER` inside the namespace shows only the run |
 | Note | the wrapper already exists — `regression-shell.md` §1 had to build it before either runner could be measured. It is a script beside the evidence, not part of the runner. **This entry is about making it the runner's own behaviour**, which ADR-014 made possible by scoping the runner to one machine |
+| Also in scope | **fixing the JVM sweep** (freeze §11-23). `[ $isExistPid -eq 0]` has no space before the bracket, so the test is a shell syntax error, the branch is never taken, and CTP has never killed a stray JVM through it. Fixing it alone would widen what the runner kills, which is the direction ADR-014 moved away from; inside a namespace "every JVM the user owns" *is* "every JVM this run started", and the sweep does what it was written to do |
+| Why the coupling gets tighter | the sweep spares CTP's own JVM by matching `com.navercorp.cubridqa\|service.Server`. **When the migration finishes there is no CTP JVM to spare**, so that filter matches nothing and the fixed sweep becomes an unconditional "kill every JVM". The containment is not a nicety that could be added later -- it is what the fix depends on, and it depends on it more as the port progresses |
+
+**Status correction (2026-09-03).** This entry was first written as *ready*, and that was wrong
+under criterion 2 of ADR-015: the T item it improves on is the shell task, and the shell task has
+not passed its gate. The rule is not ceremony -- improving the reset before the reset is proven
+equivalent would leave any later difference with two possible causes. Corrected the day it was
+written, which is the cheapest a correction ever gets.
 
 ### B-T3. Cases that run at the same time — **blocked**
 

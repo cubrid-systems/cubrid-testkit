@@ -73,7 +73,7 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 | 2 | **Random SQL generation** | 스키마 introspect 후 valid AST 무작위 생성 | crash / assert / segfault |
 | 3 | **Logic-bug / semantic testing** | 의미 등가 query 쌍을 비교해 *결과가 다른* 버그 검출 | TLP / NoREC / PQS 판정 기법 |
 | 4 | **Isolation / transaction testing** | 트랜잭션 interleaving을 systematic하게 강제 후 anomaly 탐지 | anomaly 카탈로그·history graph |
-| 5 | **Parser / compiler fuzzing** | byte-level 또는 grammar-guided fuzzing으로 frontend 강건성 검증 | crash / UB |
+| 5 | **Parser / compiler fuzzing** | byte-level 또는 grammar-guided fuzzing으로 frontend 강건성 검증. *engine-internal structured 변종* 포함 (§7.4) | crash / UB |
 | 6 | **Differential testing** | 같은 입력을 여러 DBMS에 돌려 결과 비교 | 외부 DBMS = 판정 기준 |
 | 7 | **Stateful / workload testing** | schema mutation·node 재시작·partition을 randomize한 long-running 시나리오 | invariant violation·linearizability |
 | 8 | **Hybrid (modern composition)** | 위 축 다수를 같은 CI 안에 결합 | 축별 판정 기준 합집합 |
@@ -339,6 +339,62 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 
 ---
 
+### 7.4 축 5 확장 — engine-internal structured fuzzing (2026-09-03 추가)
+
+§7.1~7.3 은 *frontend byte 진입점* 을 다룬다. 같은 fuzzer(libFuzzer)를 쓰지만 **대상과
+입력 형태가 다른** 갈래가 하나 더 있다 — storage engine 내부 API 를 *구조화된 연산 열* 로
+때리는 방식.
+
+#### RocksDB `fuzz/` 패턴 (참조 구현)
+
+- RocksDB 는 fuzz 코드를 저장소 안에 `fuzz/` 로 유지하고, README 에서 **LLVM libFuzzer** 를
+  fuzz engine 으로 명시한다. structured fuzzing 에는 **protobuf + libprotobuf-mutator** 를 쓴다.
+- 입력이 random byte 가 아니라 *연산 메시지* 다:
+
+  ```protobuf
+  message DBOperation {
+    enum Type { PUT = 0; GET = 1; DELETE = 2; }
+    Type type = 1;
+    bytes key = 2;
+    bytes value = 3;
+  }
+  ```
+
+  libFuzzer 가 raw byte 를 만들면 libprotobuf-mutator 가 이를 *구조를 지키며* mutate 하고
+  (`oneof` 전환 / `repeated` 삽입·삭제 / field 교체), harness 가 `db->Put()` / `db->Get()` 을
+  **직접 호출** 한다. 결과적으로 `PUT / GET / DELETE / PUT / COMPACT / …` 같은 *유효한 연산
+  열 자체* 가 fuzz 대상이 된다.
+- 이 타깃들은 Google **OSS-Fuzz** 에서 지속 실행된다.
+
+#### protobuf 는 프로토콜이 아니다 (혼동 방지)
+
+여기서 protobuf 는 **fuzzer 내부의 입력 기술 언어(IR)** 이며 *wire format 이 아니다*.
+RocksDB 도 protobuf 를 저장 포맷이나 통신 프로토콜로 쓰지 않는다. 따라서 자체 바이너리
+프로토콜을 쓰는 DBMS(= CUBRID)에도 **호환성 문제 없이** 적용된다 — 엔진은 protobuf 바이트를
+한 번도 보지 않고, 의존은 fuzz 바이너리에만 링크된다. protobuf 를 아예 쓰지 않는 대안으로
+libFuzzer 의 `FuzzedDataProvider` 로 byte→op 디코더를 손으로 쓰는 방법도 있다(구조 인식
+mutation 품질은 떨어짐).
+
+#### CUBRID 적용성
+
+- CUBRID 등가물: `INSERT / UPDATE / DELETE / SCAN / IDX_INSERT / VACUUM / COMMIT` 열을
+  `heap_insert_logical` / `heap_update_logical` / `heap_get_visible_version` / `btree_insert`
+  (`src/storage/heap_file.h`, `src/storage/btree.h`) 로 직접 번역.
+- 잡는 버그: slotted page slot 재사용 × 가변길이 갱신, overflow record 승격/강등 경계,
+  unique 위반 롤백 후 재삽입, MVCC 가시성 × vacuum 간섭, heap best-space 불일치 —
+  *하나의 연산* 이 아니라 *연산 열이 만든 상태* 에서 터지는 결함들.
+- **결정적 난제: state reset.** libFuzzer 는 한 프로세스에서 입력을 수만 번 반복하므로
+  매 입력 경계마다 엔진 상태가 결정적으로 초기화돼야 한다. RocksDB 는 `DestroyDB` +
+  재오픈으로 푼다. CUBRID 는 서버 부팅·page buffer·log volume·transaction table·vacuum
+  워커가 얽혀 있어 그만큼 가볍지 않다. 이 문제가 풀리지 않으면 *접근 자체가 성립하지 않는다*.
+- 축 7 (stateful workload) 과 대상이 겹쳐 보이지만 층이 다르다 — 축 7 은 SQL·노드 레벨
+  long-running 시나리오, 본 갈래는 **단일 프로세스 내부 API 레벨**.
+- CUBRID 적용성: ★★★ (가치 큼) · 도입 비용 **높음** (§7.1~7.3 의 인프라 + reset 설계)
+- **결론:** §6a-**E9 (storage-engine structured fuzzing)** 후보로 등록. **E5 선행** 전제
+  (같은 `-DENABLE_FUZZING` 인프라를 공유). 착수 순서는 ROADMAP §6a 사다리가 정한다.
+
+---
+
 ## 8. 축 6 — Differential testing
 
 ### 8.1 핵심 패턴
@@ -359,7 +415,7 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 - N13 pg-wire-compat 이 진행되면 *CUBRID를 PostgreSQL driver로 접속* 가능 → PostgreSQL 과의 differential 비용이 급감
 - 즉, 축 6은 **N13의 검증 도구**로 자연스럽게 자리잡음
 - 단독 differential CI (`canonical subset` 모드) 는 N13 없이도 가능하지만 ROI 작음
-- **결론:** §6a-**E6 (differential testing)** 후보로 등록하되, *우선순위는 N13 selected 진입 이후*. roadmap repo cross-cutting **C-014** (testkit §6a-E6 × N13) 신설 추천.
+- **결론:** §6a-**E6 (differential testing)** 후보로 등록하되, *우선순위는 N13 selected 진입 이후*. roadmap repo cross-cutting 신설 추천 (testkit §6a-E6 × N13). **번호 미배정** — ~~C-014~~ 는 2026-05-13 에 다른 내용으로 등록되었다 (§13 번호 정정 참조).
 
 ---
 
@@ -415,7 +471,7 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 
 ## 11. CUBRID 적용성 종합 — §6a 카탈로그 확장 후보
 
-본 survey에서 도출한 §6a-E2~E7 후보 (E1은 기등록):
+본 survey에서 도출한 §6a-E2~E7 후보 (E1은 기등록) + E9 (2026-09-03 §7.4 추가분):
 
 | ID | 이름 | 근거 축 | 도입 비용 | 즉시 ROI | 의존·전제 |
 |---|---|---|---|---|---|
@@ -426,14 +482,16 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 | **E5** | **Parser/protocol fuzzing harness (libFuzzer)** | 5 | 중 | ★★★ | cubrid 본 repo fuzz target build option (선결) |
 | **E6** | **Differential testing (PostgreSQL pair)** | 6 | 중 | ★★★ | N13 pg-wire-compat selected 이상 |
 | **E7** | **Stateful/randomized workload** | 7 | 높음 | ★★ | engine-suite과 책임 경계 정의 (C-004) |
-| (E8) | (Hybrid CI 통합) | 8 | (메타) | – | E2~E7 중 둘 이상 채택 후 |
+| (E8) | (Hybrid CI 통합) | 8 | (메타) | – | E2~E7·E9 중 둘 이상 채택 후 |
+| **E9** | **Storage-engine structured fuzzing (libFuzzer + libprotobuf-mutator)** | 5 확장 (§7.4) | **높음** | ★★★ | **E5 선행** + in-process boot 진입점 + state reset 훅 |
 
 ### 우선순위 권고 (ROADMAP §7 분기 게이트 충돌 방지)
 
 1. **즉시 후보 (strangler-fig Phase 3·4 와 *병행* 가능):** E2 (SQLsmith), E3 (SQLancer NoREC+TLP)
    - 도입 비용 낮음, 의존 없음, *지금 testkit이 비어 있는 영역* 을 직접 채움
    - PostgreSQL ecosystem의 *de facto* 모범 (regress + isolation + SQLsmith + SQLancer)
-2. **조건부 후보 (선결 의존 충족 후):** E5 (cubrid 본 repo fuzz target 옵션), E6 (N13 selected), E4 (HA/streaming graduation), E7 (C-004 경계 정의)
+2. **조건부 후보 (선결 의존 충족 후):** E5 (cubrid 본 repo fuzz target 옵션), **E9 (E5 선행)**, E6 (N13 selected), E4 (HA/streaming graduation), E7 (C-004 경계 정의)
+   - fuzzing 계열(E3·E5·E9)과 미등록 후보 2건의 *착수 순서* 는 ROADMAP **§6a 사다리** 가 단일 출처
 3. **장기 추적:** SQLancer++ (adaptive grammar — niche DBMS에 의미), FoundationDB simulation 컨셉
 
 ### Strangler-fig Phase 4 우선원칙 충돌 점검
@@ -452,7 +510,9 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 5. **E5 fuzz target build option.** cubrid 본 repo 에 `-DENABLE_FUZZING` 옵션 추가가 선결. *cubrid 본 repo* 에 PR 필요 — testkit 단독 결정 불가.
 6. **E4·E6·E7 trigger 시점.** N24·N11·N13 selected/graduation 일정에 의존 — roadmap repo planning.md 와 동기화 필요.
 7. **hybrid CI 통합 (E8).** E2·E3 *모두 도입* 후 한 PR 에 두 축이 모두 돌도록 묶을지, 별 CI lane 으로 분리할지.
-8. **license / vendoring.** SQLancer (MIT), SQLsmith (custom), libFuzzer (Apache 2.0). 외부 코퍼스 ingestion 시 ROADMAP §8 risk 6 (sqllogictest 코퍼스 라이선스) 와 동일 패턴 적용.
+8. **E9 state reset 전략.** libFuzzer 의 in-process 반복 실행에서 CUBRID 엔진 상태를 어떻게 결정적으로 초기화할지. abort+drop / volume 재생성 / fork 격리 / 전용 reset 훅 — 측정으로만 답할 수 있으며, 답이 없으면 E9 는 성립하지 않는다.
+9. **E9 입력 IR.** libprotobuf-mutator (protobuf 신규 의존, fuzz 빌드 한정) vs libFuzzer `FuzzedDataProvider` (의존 0, mutation 품질 하락). cubrid 본 repo 3rdparty 정책과 함께 판단.
+10. **license / vendoring.** SQLancer (MIT), SQLsmith (custom), libFuzzer (Apache 2.0). 외부 코퍼스 ingestion 시 ROADMAP §8 risk 6 (sqllogictest 코퍼스 라이선스) 와 동일 패턴 적용.
 
 ---
 
@@ -468,6 +528,10 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 - SQLancer: <https://github.com/sqlancer/sqlancer>
 - CockroachDB roachtest: <https://github.com/cockroachdb/cockroach/tree/master/pkg/cmd/roachtest>
 - Jepsen: <https://jepsen.io/>
+- RocksDB fuzzing: <https://github.com/facebook/rocksdb/tree/main/fuzz>
+- libprotobuf-mutator: <https://github.com/google/libprotobuf-mutator>
+- libFuzzer: <https://llvm.org/docs/LibFuzzer.html>
+- OSS-Fuzz: <https://google.github.io/oss-fuzz/>
 
 ### Papers / 연구 (이름·아이디어 기반 — 정식 인용은 incubating 진입 시 보강)
 - Manuel Rigger 외, NoREC (PLDI'20) / TLP (OOPSLA'20) / PQS (ICSE'21)
@@ -483,10 +547,21 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 - analysis/isolation/ctl-grammar.md — 축 4 CTP `.ctl` 현행 분석 (PostgreSQL `.spec` 흡수 검토 시 baseline)
 - analysis/_overview/case-formats.md — 축 1·2 코퍼스 도입 시 referenced
 
-### roadmap repo cross-cutting (신설 추천)
-- **C-013** — testkit §6a-E3 (logic bug) × {N27 lock-manager, N28 mvcc, N29 page-buffer, N30 log-buffer} : 회귀가 아니라 *정합성 검증* 채널
-- **C-014** — testkit §6a-E6 (differential) × N13 pg-wire-compat : pg 의미 등가성 검증을 어디서 돌릴지
-- **C-015** — testkit §6a-E5 (parser fuzzing) × engine-suite (C-004 연속선) : fuzz target 빌드 책임 위치
+### roadmap repo cross-cutting
+
+> **번호 정정 (2026-09-03).** 본 절은 2026-05-08 작성 시점에 C-013·C-014·C-015 를 *신설 추천* 으로
+> 적었으나, roadmap repo 는 **5일 뒤인 2026-05-13 에 같은 번호를 lock-manager 계열로 등록** 했다
+> (C-013 = × wait-event-stats, C-014 = × maintenance-mode, C-015 = × shared-memory-arch).
+> 따라서 아래 세 항목의 *번호* 는 무효였다. fuzzing 경계만 실제 등록되었고, 나머지 둘은 미등록이다.
+
+- **C-055 (등록됨, 2026-09-03)** — testkit §6a-E5·E9 × **N66-fuzz-target-infrastructure** :
+  fuzz target·빌드·sanitizer·state reset 훅은 엔진, corpus·replay·triage 는 testkit.
+  엔진 쪽 작업은 roadmap repo 에 **N66 (00-pending-review)** 로 등록되어 있다 —
+  E5·E9 의 "cubrid 본 repo 선결" 이 가리키는 실체가 그것이다.
+- **(미등록)** — testkit §6a-E3 (logic bug) × {N27 lock-manager, N28 mvcc, N29 page-buffer, N30 log-buffer} :
+  회귀가 아니라 *정합성 검증* 채널. 번호 미배정 — E3 가 실제로 필요로 할 때 신청한다.
+- **(미등록)** — testkit §6a-E6 (differential) × N13 pg-wire-compat : pg 의미 등가성 검증을 어디서 돌릴지.
+  번호 미배정 — N13 이 selected 에 진입할 때 신청한다.
 
 ---
 
@@ -495,4 +570,6 @@ DBMS testing 에코시스템은 *목적·생성 방식·판정 기준 종류*가
 | Date | Author | 변경 |
 |---|---|---|
 | 2026-05-08 | Claude (외부 조사 작성) | 초기 작성 — 8축 분류, 도구·연구 catalog, §6a-E2~E7 후보 도출 |
+| 2026-09-03 | Claude (사용자 지시) | §7.4 추가 — 축 5 확장(engine-internal structured fuzzing, RocksDB `fuzz/` 참조). §11 에 E9 등록, §12 Open Question 8·9 추가 |
+| 2026-09-03 | Claude (roadmap repo 대조) | §13 cross-cutting 번호 정정 — 제안했던 C-013·C-014·C-015 는 2026-05-13 에 lock-manager 계열로 등록되어 무효였다. fuzzing 경계만 **C-055** 로 실제 등록하고 엔진 쪽 작업을 roadmap repo 에 **N66-fuzz-target-infrastructure** 로 신설. 나머지 둘은 *미등록* 으로 표기 |
 | TBD | hgryoo | 검토·확정 |

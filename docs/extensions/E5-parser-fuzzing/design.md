@@ -17,7 +17,7 @@ in-process harness 함수            →   crash triage (stack hash dedup)
                                        coverage 보고
 ```
 
-testkit 단독으로는 시작 불가. *C-015 cross-cutting* (roadmap repo) 후보.
+testkit 단독으로는 시작 불가. roadmap repo 의 **C-055** cross-cutting 으로 등록되어 있고, 엔진 쪽 작업은 **N66-fuzz-target-infrastructure** (00-pending-review) 다.
 
 ## 2. 모듈 위치 (의제)
 
@@ -39,8 +39,11 @@ internal/runner/fuzzharness/
 | planner | optimizer 입구 | ★★★ | 중 |
 | CCI protocol | binary message handler | ★★★★ | 중 (handler 분리 필요) |
 | JDBC protocol | wire protocol parser | ★★★★ | 중 |
+| record ser/unpack | `or_get_value` / `or_unpack_value` | ★★★ | 적음 (순수 함수) |
 
 ADR-EXT-005 에서 1차 layer 선정 (parser 권장 — 비용 ↓, 가치 ↑).
+착수 순서는 ROADMAP **§6a 사다리**: parser(1) → CCI/JDBC(3) → record ser/unpack(4).
+그 다음 순위 5(storage operation sequence)는 본 항목이 아니라 **E9** 다.
 
 ## 4. 데이터 흐름 (의제)
 
@@ -64,7 +67,7 @@ seed corpus → fuzzer (libFuzzer) → fuzz target (cubrid in-process)
 - fuzz target layer 1차 선정
 - fuzzer 본체 (libFuzzer in-process / AFL subprocess / honggfuzz)
 - corpus 위치 (NG1 점검)
-- C-015 책임 경계 ADR
+- C-055 책임 경계 ADR (엔진 쪽 = N66)
 
 ## 7. design 작성 트리거
 

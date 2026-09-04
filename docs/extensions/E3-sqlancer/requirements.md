@@ -104,5 +104,5 @@ SqlancerDriver.exec(config)
 - **NG2 충돌 없음** — 신규 진입점
 - **NG4 충돌 없음** — CUBRID 가 SUT
 - **§6a-E2 (SQLsmith) + E3 (SQLancer) 결합** — PostgreSQL ecosystem *de facto* 모범. 함께 도입이 정합적
-- **roadmap repo cross-cutting C-013 후보** — survey §13: testkit §6a-E3 × {N27 lock-manager, N28 mvcc, N29 page-buffer, N30 log-buffer} — 회귀가 아니라 *정합성 검증* 채널
+- **roadmap repo cross-cutting 후보 (번호 미배정)** — survey §13: testkit §6a-E3 × {N27 lock-manager, N28 mvcc, N29 page-buffer, N30 log-buffer} — 회귀가 아니라 *정합성 검증* 채널. ~~C-013~~ 은 2026-05-13 에 lock-manager × wait-event-stats 로 등록되어 쓸 수 없다
 - **SQLancer++ (adaptive grammar)** — niche DBMS 인 CUBRID 에 *장기적으로* 의미. 현재는 연구 단계 — 안정성 확인 후 별도 ADR

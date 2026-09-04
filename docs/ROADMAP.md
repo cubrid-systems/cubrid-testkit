@@ -1,6 +1,6 @@
 # ROADMAP — CUBRID Test Kit
 
-- **날짜**: 2026-09-03 (§6a 부록 — fuzzing 우선순위 사다리 + E9 신설; 저녁: 순위 4 완료 · E9 state reset 게이트 통과) / 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
+- **날짜**: 2026-09-04 (E9 Tier 1 오라클 완비 — 정합성 검사 3종 + TSan/UBSan 베이스라인) / 2026-09-03 (§6a 부록 — fuzzing 우선순위 사다리 + E9 신설; 저녁: 순위 4 완료 · E9 state reset 게이트 통과) / 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
 - **현재 위치**: **Phase 2 완료 (2026-09-02)** — Phase 0 완료(2026-04-29) · Phase 1 게이트 통과 및 산출 완료 · Phase 2 설계 5종 완료. 다음은 **Phase 3 (shell 1차 대체)**, 착수 전 해소 항목은 `design/module-shell.md` §7
 - **동시 트랙**: **§6a-E3 (SQLancer) 진행 중** — 사용자 결정으로 우선 승격 (ADR-EXT-003). 구현체는 별도 저장소 `cubrid-sqlancer`
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)
@@ -421,9 +421,18 @@ XASL 을 재생** 한다 — 질의 실행이 전제를 다 세우므로 모든 
 엔진 작업(`file_create_heap`) 유무와 무관하고 실제 작업 쪽이 오히려 더 균등하다 — "엔진
 latch 가 순서를 좁힌다" 는 가설은 틀렸다. 따라서 **스케줄 통제로 얻는 것은 탐색 커버리지가
 아니라 재현** 이고, Tier 2 는 탐색 도구가 아니라 **triage 도구** 로서 Tier 1 *뒤* 에 온다.
-libFuzzer 가 스케줄을 탐색한다는 구상은 폐기한다. 다음 개선은 스케줄이 아니라 **오라클**
-이다 — `xboot_check_db_consistency` 로 넓히고, race 자체를 보는 **TSan 빌드**(ASan 과 배타적)
-를 따로 두는 것. 근거: requirements §5.3a · roadmap `N66/10-design_fi-rendezvous.md` §7.2
+libFuzzer 가 스케줄을 탐색한다는 구상은 폐기한다. 근거: requirements §5.3a · roadmap
+`N66/10-design_fi-rendezvous.md` §7.2
+
+**그 다음 개선 — 오라클 — 은 같은 날 끝냈다 (requirements §5.3b).** 정합성 검사는 비용이
+위치를 정한다: `disk_check` 0.000 s 와 `file_tracker_check` 0.007 s 는 매 입력,
+`xboot_check_db_consistency` 는 **7.0 s** 이므로 세션 경계에만. TSan 빌드는 플래그
+하나(`-DFUZZ_SANITIZERS=thread`)였고, ASan/UBSan 과 **택일이 아니라 같은 하네스의 두 실행**
+이다. 다만 베이스라인 없이는 새니타이저가 오라클이 못 된다 — 깨끗한 실행이 TSan 222 건,
+UBSan 10 건을 매번 낸다. 억제 파일(42 + 3 규칙)로 **0 건** 이 되고, 그 침묵이 값을 했다:
+워크로드에 heap drop 을 넣자 `vacuum_add_dropped_file ()` 에 닿아 새 race 40 회가 나왔는데
+기존 179 건 사이였다면 안 보였을 것이다. **베이스라인은 판정이 아니다** — 적부는 하나도
+판정하지 않았고, 목적은 침묵이 의미를 갖게 하는 것뿐이다.
 
 **스코프 (incubating — Tier 2 기준, 보류 중)**:
 - 입력 IR — 연산이 아니라 **스케줄과 참가자 수** 를 기술한다. libprotobuf-mutator vs
@@ -496,7 +505,7 @@ fuzzing 계열 항목(E3·E5·E9)과 *아직 카탈로그에 없는* 후보를 �
 | 2 | 3 | SQL correctness | SQLancer | **E3** | **진행 중** (ADR-EXT-003 Accepted) |
 | 3 | 4 | network packet decoder | libFuzzer | **E5** (CCI/JDBC target) | 착수 가능 — 1 과 같은 선결이 해소됨 |
 | 4 | 5 | record serialize / unpack | libFuzzer | **E5** (target 추가 — `or_get_value`) | **완료 (2026-09-03)** — 빌드·실행되고 첫 실행에서 결함 검출 |
-| 5 | 6 | **storage concurrency** — Tier 1(반복 실행) / Tier 2(재생) | libFuzzer + schedule 주입(FI) | **E9** | **Tier 1 착수 가능** · Tier 2 는 **보류** (2026-09-04 포화 측정) |
+| 5 | 6 | **storage concurrency** — Tier 1(반복 실행) / Tier 2(재생) | libFuzzer + schedule 주입(FI) | **E9** | **Tier 1 가동 중 (2026-09-04)** — 오라클 완비 · Tier 2 는 **보류** (포화 측정) |
 | 6 | 7 | recovery / crash | 별도 crash·stress framework | *미등록* — E7 / `cluster-sandbox` 와 경계 정리 필요 | 사다리에만 기재 |
 | 7 | 8 | concurrency (SQL·isolation 레벨) | schedule / model-based fuzzing | *미등록* — 축 4 isolation 모듈과 경계 정리 필요 | **storage 내부 부분은 순위 5(E9)로 이관** (2026-09-03). 남은 것은 SQL 레벨 |
 

@@ -23,7 +23,7 @@ cubrid-testkit 는 CUBRID 의 기능 테스트 케이스를 실행하기 위한 
   - [Migration Exclusions](concept/migration-exclusions.md) — **축 T/O 분리 원칙** + 마이그레이션 제외 목록
   - [Phase 0 회고](concept/phase0-retrospective.md) — 게이트 통과 기록
 - [Analysis notes](analysis/) — Phase 0 산출물. 모듈별 요구사항·설계·io-contract
-- [Extensions](extensions/) — §6a 확장 영역 E1~E7 (incubating)
+- [Extensions](extensions/) — §6a 확장 영역 E1~E10 (incubating)
 - [Survey](survey/dbms-testing-ecosystem.md) — DBMS 테스팅 생태계 8축 분류
 - **Design (Phase 2 산출물)**
   - [Architecture](design/architecture.md) — 패키지 구조 · 실행 모델 · 결과 파이프라인

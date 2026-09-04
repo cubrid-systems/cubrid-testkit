@@ -20,9 +20,9 @@ testkit run sqllogictest [-c <conf>] [--variant sqlite|duckdb|cockroach] [--clie
 | 키 (의제) | 값 | 출처 |
 |---|---|---|
 | `corpus_root` | `<dir>` | 외부 코퍼스 위치 (test-corpus.md) |
-| `client` | `jdbc | cci | cli` | SUT 구동 채널 |
-| `variant` | `sqlite | duckdb | cockroach` | spec baseline |
-| `compare_mode` | `hash | values` | 결과 비교 모드 |
+| `client` | `jdbc \| cci \| cli` | SUT 구동 채널 |
+| `variant` | `sqlite \| duckdb \| cockroach` | spec baseline |
+| `compare_mode` | `hash \| values` | 결과 비교 모드 |
 
 ADR-EXT-001 합의 전에는 *제안 수준*. 키 이름/의미/디폴트 모두 동결되지 않음.
 

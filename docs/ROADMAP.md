@@ -1,6 +1,6 @@
 # ROADMAP — CUBRID Test Kit
 
-- **날짜**: 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
+- **날짜**: 2026-09-03 (§6a 부록 — fuzzing 우선순위 사다리 + E9 신설; 저녁: 순위 4 완료 · E9 state reset 게이트 통과) / 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
 - **현재 위치**: **Phase 2 완료 (2026-09-02)** — Phase 0 완료(2026-04-29) · Phase 1 게이트 통과 및 산출 완료 · Phase 2 설계 5종 완료. 다음은 **Phase 3 (shell 1차 대체)**, 착수 전 해소 항목은 `design/module-shell.md` §7
 - **동시 트랙**: **§6a-E3 (SQLancer) 진행 중** — 사용자 결정으로 우선 승격 (ADR-EXT-003). 구현체는 별도 저장소 `cubrid-sqlancer`
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)
@@ -31,7 +31,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 │   │   └── inventory/     jdbc/sql_by_cci/ha_repl/cdc_repl/cci_compat (0/5 미착수)
 │   ├── concept/           Phase 1 — north-star / 동결 명세 / non-goals / 마이그레이션 제외
 │   ├── design/            Phase 2 — 아키텍처/모듈 설계 (미착수)
-│   ├── extensions/        §6a 확장 E1~E7
+│   ├── extensions/        §6a 확장 E1~E10 (E8 은 Hybrid CI 메타 자리로 예약)
 │   └── survey/            DBMS 테스팅 생태계 조사
 ├── ext/
 │   └── cubrid-sqlancer/   submodule — §6a-E3 SQLancer provider (별도 private 저장소)
@@ -306,7 +306,7 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 
 **목표**: byte-level coverage-guided fuzzing 으로 SQL parser / CCI·JDBC binary protocol 강건성 검증.
 
-**왜 testkit인가**: testkit 은 corpus + replay + crash triage 책임. *fuzz target build option* 은 cubrid 본 repo 책임 — 본 항목은 *cross-repo 협업* 이 필수 (C-015 cross-cutting).
+**왜 testkit인가**: testkit 은 corpus + replay + crash triage 책임. *fuzz target build option* 은 cubrid 본 repo 책임 — 본 항목은 *cross-repo 협업* 이 필수 (**C-055** cross-cutting; 엔진 쪽 작업 = roadmap repo `N66-fuzz-target-infrastructure`).
 
 **Phase 정합 (조건부)**: cubrid 본 repo 의 `-DENABLE_FUZZING` 등 build option 추가 *선결*.
 
@@ -326,7 +326,7 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 
 **왜 testkit인가**: oracle 비용이 0 — peer DBMS 가 oracle. 단, dialect mismatch 노이즈 통제가 핵심.
 
-**Phase 정합 (조건부)**: N13 pg-wire-compat *selected 이상* — selected 이후 비용이 급감. C-014 cross-cutting.
+**Phase 정합 (조건부)**: N13 pg-wire-compat *selected 이상* — selected 이후 비용이 급감. cross-cutting 신설 필요 (번호 미배정 — ~~C-014~~ 는 이미 다른 내용으로 등록됨).
 
 **스코프 (incubating)**: canonical subset vs rewrite layer / dialect rewrite catalog / peer DBMS 범위 — 모두 미정.
 
@@ -356,6 +356,177 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 - FoundationDB simulation: <https://apple.github.io/foundationdb/testing.html>
 - Requirements: `extensions/E7-workload/requirements.md`
 
+### E9 — Storage-engine Concurrency Fuzzing (schedule × operation interleaving)
+
+> **재정의 (2026-09-03).** 본 항목은 처음에 *단일 스레드 operation sequence* fuzzing 으로
+> 적혔다. 그 형태는 값이 거의 없다는 것이 확인되어 재정의한다. 근거 두 가지.
+>
+> **(1) 찾으려는 결함이 거기 없다.** slot 재사용 × 동시 갱신, latch 획득 순서, vacuum 과
+> reader 의 간섭 — storage 결함은 *연산 열* 이 아니라 *인터리빙* 이 만드는 상태에 있다.
+> 한 스레드로는 도달하지 않는다.
+>
+> **(2) 단일 스레드로 잰 것은 목표 구성에 대해 말해주는 바가 없다.** 저장 계층은 모드별로
+> 갈라진 코드다 — `page_buffer.c` 에 `SERVER_MODE` 분기 **146** 개, `log_manager.c` **53** 개,
+> `vacuum.c` **26** 개. `vacuum_Master_daemon` 은 `cubthread::daemon` 이다. SA 모드(단일 스레드)
+> 에서의 관측은 SERVER_MODE 서버에 이어지지 않는다.
+
+**목표**: storage engine 내부 API (heap / B-tree / slotted page / MVCC) 를 **여러 스레드의
+연산 열과 그 인터리빙(schedule)** 으로 fuzzing — 동시성이 만든 상태에서 터지는 결함 검출.
+
+**왜 testkit인가**: E5 와 동일한 근거 (corpus + replay + triage 는 testkit, fuzz target
+build 는 cubrid 본 repo). 본 항목이 추가로 요구하는 것은 reset 훅이 아니라 **schedule 을
+제어할 지점** 이다 — 그리고 그것은 엔진에 이미 있다 (아래).
+
+**참조 구현**: RocksDB `fuzz/` 는 구조화 입력의 형태(libFuzzer + protobuf + libprotobuf-mutator)에
+대해서만 참조 가치가 있다. *대상* 은 다르다 — RocksDB 의 `PUT/GET/DELETE/COMPACT` 열은 단일
+스레드이고, 본 항목은 그 위에 **스케줄 축** 을 하나 더 얹는다. 입력은 연산 열이 아니라
+`(스레드별 연산 열 × 인터리빙)` 쌍이다.
+
+**엔진에 이미 있는 것 (절반) — 그리고 빠진 하나**: `src/base/fault_injection.c` 의
+`fi_handler_hold` 와 `fi_handler_hang` 은 지정된 지점에서 **창을 넓히거나 멈추는** 핸들러이고,
+FI 상태가 `thread_p->fi_test_array` 에 있어 **스레드별로 무장** 된다. 그러나 `hold` 는
+`sleep(seconds)` 로 시간 기반이고 `hang` 은 `while(true) sleep(1)` 로 해제 경로가 없다 —
+둘 다 대기 중 상태를 다시 보지 않으므로 **"A 는 B 가 Y 에 도달할 때까지 기다린다" 를 표현할 수
+없다.** 즉 창 넓히기(확률적 노출)까지가 오늘 가능한 전부이고, *결정적 재생* 에는 조건 변수에서
+대기하고 하네스가 깨우는 **rendezvous 핸들러 하나** 가 더 필요하다. 기존 네 핸들러 옆에 하나를
+더하는 규모이며 CBRD-27198 이 그 관례를 이미 보여준다. requirements §5.4.
+2026-09-02 머지된 CBRD-27198 이 `disk_reserve_sectors_in_volume` 에 `fi_handler_hold` 훅을
+추가한 목적이 정확히 그것이었다 — "The race lasts microseconds … a test can only hit that
+window by luck. Add a hold-style fault injection handler and a hook … to widen it on demand."
+즉 **스케줄 주입 원시 도구가 이미 있고 실제로 그 용도로 쓰이고 있다.** 본 항목은 그 위에
+스케줄 생성기와 불변식 검사를 얹는 일이지, 새로 만드는 일이 아니다.
+
+**protobuf 오해 해소 (선결 확인 완료 — 2026-09-03)**: CUBRID 는 자체 바이너리 프로토콜을 쓰고
+protobuf 를 쓰지 않는다. **그래도 무관하다** — 여기서 protobuf 는 *fuzzer 내부의 입력 기술
+언어(IR)* 일 뿐 wire format 이 아니다. harness 가 protobuf 메시지를 받아 `heap_insert_logical()`
+같은 **내부 C API 를 직접 호출** 하므로, CUBRID 는 protobuf 바이트를 한 번도 보지 않는다.
+의존은 `cubrid-fuzz-storage` **fuzz 바이너리에만** 링크되고 배포 산출물은 불변.
+protobuf 없이 가는 대안(`FuzzedDataProvider`)도 ADR-EXT-009 비교 대상.
+근거·비교표: `extensions/E9-storage-fuzzing/requirements.md` §2.
+
+**Phase 정합 (조건부)**: **E5 선행**. `-DENABLE_FUZZING` 인프라와 crash triage 위에 얹힌다.
+SERVER_MODE 엔진의 in-process 기동은 **2026-09-03 확인됨** — 리스너 없이 뜨고 데몬 15 스레드가
+살아 있으며 깨끗이 내려간다 (requirements §5.3).
+
+**무엇이 연산을 만드는가 (2026-09-04 확정)**: 합성하지 않는다. `heap_insert_logical` 등은
+호출자가 세워 준 전제 위에서 돌기 때문에, 임의로 조합하면 *실제 호출자가 만들지 않는 순서* 를
+만들고 거기서 나온 crash 는 전제 위반에 대한 정당한 반응일 수 있다. 대신 **미리 컴파일된
+XASL 을 재생** 한다 — 질의 실행이 전제를 다 세우므로 모든 경로가 구성상 도달 가능하고,
+퍼저는 **스케줄만** 탐색한다. 서버는 SQL 을 컴파일하지 않으므로(`parser_main` ·
+`xts_map_xasl_to_stream` 이 `libcubrid.so` 에 없음) 픽스처가 필요하고, 그 생산·보관 설비가
+**§6a-E10 (신설)** 이다. 내부 API 어휘 모델링은 *future work*.
+
+**2026-09-04 측정이 이 항목의 전제를 바꿨다 — Tier 1 이 주력이다.** 입력을 고정하고 반복하는
+것만으로 4 스레드 순열 24 가지가 **전부, 거의 균등하게** 나온다(최빈 5.2%, 균등 4.17%).
+엔진 작업(`file_create_heap`) 유무와 무관하고 실제 작업 쪽이 오히려 더 균등하다 — "엔진
+latch 가 순서를 좁힌다" 는 가설은 틀렸다. 따라서 **스케줄 통제로 얻는 것은 탐색 커버리지가
+아니라 재현** 이고, Tier 2 는 탐색 도구가 아니라 **triage 도구** 로서 Tier 1 *뒤* 에 온다.
+libFuzzer 가 스케줄을 탐색한다는 구상은 폐기한다. 다음 개선은 스케줄이 아니라 **오라클**
+이다 — `xboot_check_db_consistency` 로 넓히고, race 자체를 보는 **TSan 빌드**(ASan 과 배타적)
+를 따로 두는 것. 근거: requirements §5.3a · roadmap `N66/10-design_fi-rendezvous.md` §7.2
+
+**스코프 (incubating — Tier 2 기준, 보류 중)**:
+- 입력 IR — 연산이 아니라 **스케줄과 참가자 수** 를 기술한다. libprotobuf-mutator vs
+  `FuzzedDataProvider` vs 자체 — 미정
+- **재현성의 정의가 바뀐다.** 단일 스레드 전제에서는 "같은 입력 → 같은 상태" 였다. 멀티스레드에서
+  그것은 얻을 수도 없고 원할 것도 아니다 — 비결정성이 요점이기 때문이다. 필요한 것은
+  **스케줄을 입력에 포함시켜 `(연산, 스케줄)` 쌍이 재현되게** 하는 것이다. reset 은 게이트가
+  아니라 *알려진 시작 DB 를 만드는 준비 단계* 로 격하된다
+- **본 repo 에 요구하는 것은 rendezvous 핸들러 하나** (§5.4). 지점 확대가 아니다 — 기존
+  `hold`/`hang` 은 대기 중 상태를 보지 않아 깨울 수 없고, 그래서 재생이 안 된다
+- 불변식 카탈로그 — crash 없이도 위반을 잡을 검사점 — 미정
+- operation 어휘 1차 범위 (heap 단독 / +btree / +vacuum / +checkpoint) — 미정
+
+**측정 이력**:
+- 2026-09-03, SA 모드 reset 스파이크 — 전략 A 가 교차 실행 10,000 회에서 결정적(126 iter/sec).
+  단, SA 는 단일 스레드라 대상 구성이 아니므로 게이트가 아니다 (requirements §5.2)
+- 2026-09-03, SERVER_MODE in-process 기동 — 리스너 없이 뜨고 데몬 15 스레드 (requirements §5.3)
+- **2026-09-04, 순서 공간 포화** — 위 문단. 엔진 수정 0 줄짜리 하네스 실험 하나가 엔진 패치와
+  XASL 픽스처 설비를 *즉시 작업* 에서 내렸다 (requirements §5.3a)
+
+**Open Questions**: requirements §9 참조.
+
+**ADR 자리표시자**: ADR-EXT-009 *(트리거: incubating 정식 진입 시)*.
+> **번호 주의**: `E8` / `ADR-EXT-008` 은 축 8 *Hybrid CI 통합* 자리로 이미 예약됨. 본 항목이
+> `E9` 인 이유다. 사다리 순번(5)과 카탈로그 ID(9)는 별개 번호 공간.
+
+**참조**:
+- RocksDB fuzzing: <https://github.com/facebook/rocksdb/tree/main/fuzz>
+- libprotobuf-mutator: <https://github.com/google/libprotobuf-mutator>
+- Requirements: `extensions/E9-storage-fuzzing/requirements.md`
+
+### E10 — XASL Fixture 생산·보관 (보조 설비)
+
+**목표**: 질의로부터 XASL 픽스처를 만들어 보관하고, **버전을 식별하고**, 재생 가능한 형태로
+내주는 설비.
+
+**왜 필요한가**: **서버는 SQL 을 컴파일하지 않는다** — `libcubrid.so`(SERVER_MODE) 에
+`parser_main` · `pt_compile` · `do_prepare_select` · `xts_map_xasl_to_stream` 이 없다.
+컴파일과 직렬화는 클라이언트 몫이고 서버는 스트림을 받아 `stx_map_stream_to_xasl ()` 로
+되돌린다. 즉 **소비 절반은 엔진에 있고 생산·보관 절반은 트리 어디에도 없다.**
+
+**왜 독립 항목인가**: 소비자가 E9 하나가 아니다 — 플랜 회귀 비교, 플랜 안정성 검증이 같은
+자산을 원한다. E3 와는 **생산자–소비자** 관계다: E3 가 질의를 만들고, E10 이 픽스처로
+굳히고, E9 가 재생한다.
+
+**핵심 요구 — 버전 거부**: `stx_map_stream_to_xasl ()` 은 포인터 non-null 과
+`xasl_stream_size > 0` 만 확인하고 **포맷·버전을 전혀 검사하지 않는다.** 다른 빌드의
+스트림은 거부되지 않고 의미가 달라진 오프셋으로 역직렬화된다 — 실패가 아니라 *조용한
+오작동* 이다. 빌드 식별자를 픽스처에 기록하고 불일치 시 거부하는 것이 본 항목의 핵심이며,
+엔진이 아니라 **픽스처 계층에서** 막는다.
+
+**Phase 정합 (즉시 후보)**: 엔진 변경이 없고 선결 의존도 없다. E9 Tier 2 의 선결이면서
+독립 실행 가능.
+
+**스코프 (incubating)**: 생산 경로(csql / CCI / JDBC) · 픽스처 포맷 · 빌드 식별자 정의 ·
+보관 위치(NG1) · 질의 1차 목록 — 모두 미정.
+
+**ADR 자리표시자**: ADR-EXT-010.
+
+**참조**: `extensions/E10-xasl-fixtures/requirements.md`
+
+### §6a 부록 — 엔진 강건성 fuzzing 우선순위 사다리
+
+fuzzing 계열 항목(E3·E5·E9)과 *아직 카탈로그에 없는* 후보를 하나의 우선순위로 정렬한
+사다리. 카탈로그 ID 와 **별개 번호 공간** 이다 — 사다리는 *착수 순서*, 카탈로그는 *항목 식별*.
+
+| 순위 | 원안 | 대상 | 도구 | 카탈로그 매핑 | 상태 |
+|---|---|---|---|---|---|
+| 1 | 1 | SQL parser | libFuzzer + ASan/UBSan | **E5** | 착수 가능 — `-DENABLE_FUZZING` 이 2026-09-03 부터 존재 |
+| 2 | 3 | SQL correctness | SQLancer | **E3** | **진행 중** (ADR-EXT-003 Accepted) |
+| 3 | 4 | network packet decoder | libFuzzer | **E5** (CCI/JDBC target) | 착수 가능 — 1 과 같은 선결이 해소됨 |
+| 4 | 5 | record serialize / unpack | libFuzzer | **E5** (target 추가 — `or_get_value`) | **완료 (2026-09-03)** — 빌드·실행되고 첫 실행에서 결함 검출 |
+| 5 | 6 | **storage concurrency** — Tier 1(반복 실행) / Tier 2(재생) | libFuzzer + schedule 주입(FI) | **E9** | **Tier 1 착수 가능** · Tier 2 는 **보류** (2026-09-04 포화 측정) |
+| 6 | 7 | recovery / crash | 별도 crash·stress framework | *미등록* — E7 / `cluster-sandbox` 와 경계 정리 필요 | 사다리에만 기재 |
+| 7 | 8 | concurrency (SQL·isolation 레벨) | schedule / model-based fuzzing | *미등록* — 축 4 isolation 모듈과 경계 정리 필요 | **storage 내부 부분은 순위 5(E9)로 이관** (2026-09-03). 남은 것은 SQL 레벨 |
+
+**사다리의 의미**: **1·3·4 는 모두 E5** — *같은 선결 조건 하나*(`-DENABLE_FUZZING`)만
+풀리면 순차 착수 가능하고 인프라(corpus·triage·coverage)를 공유한다. **2 (E3) 는 계열이
+다르다** — SQLancer 는 Java 로직버그 도구라 `-DENABLE_FUZZING` 도 libFuzzer 인프라도
+필요 없고 이미 진행 중이다. 사다리에는 *상대적 우선순위를 기록하기 위해서만* 올린다.
+**5 (E9)** 는 1·3·4 의 인프라 위에 *스케줄 제어* 라는 다른 축이 얹히므로 그 다음이다. 6·7 은 도구 계열 자체가 달라 별도 판단이 필요하며, 지금은 *등록만* 하고 확장
+항목으로 신설하지 않는다.
+
+**제외 기록**: 원안 2행 *Spatial WKT/WKB (libFuzzer)* 는 **2026-09-03 사용자 결정으로
+사다리에서 제외** — 현재 대상이 아니다. spatial 축은 별도 트랙(`spatial-stack`,
+engine-suite `feat/spatial-probes` 브랜치)에 귀속되며, 그 트랙이 재개될 때 사다리에 다시
+올릴지 판단한다.
+
+**미등록 2건(순위 6·7)의 성격**:
+- *순위 6 (recovery/crash)* — coverage-guided fuzzing 이 아니라 **fault injection + 재기동
+  검증**. `cluster-sandbox` 가 이미 노드 재기동·split-brain·lag 주입을 다루고, E7 이
+  long-running invariant 를 다룬다. 신설 전에 **C-004 책임 경계** 결론이 필요하다.
+  **다만 그린필드가 아니다 (2026-09-03 확인)** — 엔진에 `src/base/fault_injection.c` 가
+  51 개 호출 지점(btree · disk_manager · file_io · log_manager)과 함께 이미 있고,
+  `#if !defined (NDEBUG)` 게이트 + 시스템 파라미터(`fault_injection_ids` /
+  `fault_injection_test`)로 동작하며, CTP 의 `rqg_init.sh` 가 이미
+  `fault_injection_test=recovery` 를 설정한다. 즉 이 항목은 "만든다" 가 아니라 "기존 FI 에
+  하네스를 붙인다" 이고, 기록해 둔 것보다 싸다.
+- *순위 7 (concurrency)* — schedule/model-based (systematic interleaving 탐색). **2026-09-03
+  재분할**: storage 엔진 내부의 인터리빙은 순위 5(E9)가 가져갔고, 여기 남은 것은 **SQL·
+  isolation 레벨** 이다. 축 4 (isolation) 의 *단일노드 다중 클라이언트* 와 대상이 겹치지만
+  *탐색 방식* 이 다르다. 현행 isolation 모듈 대체(Phase 3·4)가 끝나기 전에는 착수 근거가 약하다.
+
 ### §6a 카탈로그 출처 / 인덱스
 
 | ID | 진입성 | 선결 | requirements |
@@ -367,8 +538,13 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 | E5 | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | extensions/E5-parser-fuzzing/ |
 | E6 | 조건부 | N13 pg-wire-compat selected 이상 | extensions/E6-differential/ |
 | E7 | 조건부 | C-004 책임 경계 정의 | extensions/E7-workload/ |
+| E9 | 조건부 | **E5 선행** + SERVER_MODE in-process 기동(확인됨) + **E10** | extensions/E9-storage-fuzzing/ |
+| E10 | 즉시 후보 | — (엔진 변경 없음) | extensions/E10-xasl-fixtures/ |
 
 근거: `survey/dbms-testing-ecosystem.md` (8축 분류, §11 카탈로그 확장 후보).
+
+> `E8` 은 축 8 *Hybrid CI 통합* 의 메타 자리로 예약되어 있어 비어 있다 (`extensions/README.md` 카탈로그 참조). E9 가 E8 을 건너뛴 이유다.
+> 착수 순서는 위 표가 아니라 **§6a 사다리** 가 정한다.
 
 ---
 
@@ -394,9 +570,13 @@ fig 외부이며, NG1·NG2와 충돌하지 않음 (CUBRID가 SUT라는 점은 NG
 | Java 외 언어 선택 시 학습 곡선 | ADR-001 결정 시점 | 1차 대체 모듈은 *언어 결정의 검증 슬라이스*로 활용 |
 | §6a-E1 외부 sqllogictest 코퍼스 라이선스·동기화 부채 | E1 incubating 정식 진입 | ADR-EXT-001로 import 정책 명시; full mirror 대신 의미 있는 부분집합만 vendor in 또는 자동 동기화 스크립트로 운영 |
 | §6a-E2/E3 fuzz·logic-bug corpus 의 testcases 레포 동결(NG1) 위반 | E2·E3 incubating 정식 진입 | 외부 storage 또는 testkit 내부 별 트리에 보관; ADR-EXT-002·003에서 corpus 위치 명시 |
-| §6a-E5 cubrid 본 repo 의 fuzz target build option 미진척 | E5 incubating 정식 진입 시도 | testkit 단독 시작 금지; cubrid 본 repo PR (`-DENABLE_FUZZING` 등) 선결, C-015 cross-cutting 트래킹 |
+| §6a-E5 cubrid 본 repo 의 fuzz target build option 미진척 | E5 incubating 정식 진입 시도 | testkit 단독 시작 금지; cubrid 본 repo PR (`-DENABLE_FUZZING` 등) 선결. **2026-09-03: 엔진 쪽 작업이 roadmap repo 에 `N66-fuzz-target-infrastructure` (00-pending-review) 로 등록되고 경계는 C-055 로 기록됨** — 이 행의 위험은 N66 의 status 결정까지 열려 있다 |
 | §6a-E4/E6 선결 의존 (N24·N11·N13) 미진척 | E4·E6 incubating 진입 검토 시 | roadmap repo planning 과 동기화; 선결 graduation 전에 진입 시도 금지 |
-| §6a 확장 영역이 strangler-fig 진척을 잠식 | 분기 게이트에서 Phase 4·5 지연 vs E1~E7 진척이 역전 | 분기 게이트 답변에 §6a 진척을 별 행으로 분리 기재; 우선순위 충돌 시 strangler-fig 우선. **E3 는 2026-09-02 사용자 결정으로 동시 트랙이며, 이 규칙은 자원 충돌이 실제 발생할 때 적용된다** |
+| §6a 확장 영역이 strangler-fig 진척을 잠식 | 분기 게이트에서 Phase 4·5 지연 vs E1~E10 진척이 역전 | 분기 게이트 답변에 §6a 진척을 별 행으로 분리 기재; 우선순위 충돌 시 strangler-fig 우선. **E3 는 2026-09-02 사용자 결정으로 동시 트랙이며, 이 규칙은 자원 충돌이 실제 발생할 때 적용된다** |
+| §6a-E9 의 재현성을 SERVER_MODE 에서 확보하지 못한다 | E9 incubating 진입 시 | **2026-09-03 정정**: SA 모드 스파이크로 "해소"라 적었던 것은 범위를 넘은 주장이었다. SA 는 단일 스레드이고 저장 계층은 모드별로 갈라진 코드다(`page_buffer.c` SERVER_MODE 분기 146 개). 멀티스레드에서 재현성은 상태를 되돌려서가 아니라 **스케줄을 입력에 포함시켜 재생** 함으로써 얻어야 한다 — 그 형태가 성립하는지는 미측정 |
+| §6a-E9 의 protobuf 신규 의존이 cubrid 본 repo 3rdparty 정책에 막힘 | ADR-EXT-009 결정 시 | fuzz 빌드 전용 링크임을 명시(배포 산출물 불변). 거부 시 `FuzzedDataProvider` 경로로 fallback — 의존 0, mutation 품질 하락 감수 (E9 requirements §2.1) |
+| §6a 사다리 순위 5(E9)를 순위 1·3·4(E5) 보다 먼저 시도 | 착수 순서 역전 | 인프라(corpus·triage·coverage) 중복 구축이 된다. E5 선행 원칙을 사다리에 명시 |
+| §6a 사다리 순위 6·7 (recovery / concurrency) 이 경계 정리 없이 신설됨 | 확장 항목 신설 시도 | 순위 6 은 `cluster-sandbox`·E7 과, 순위 7 은 축 4 isolation 모듈과 겹친다. C-004 결론 전 신설 금지 — 사다리에 *등록만* |
 | CUBRID 서버 코어(10~20GB)로 인한 디스크 고갈 | E3 실행 중 서버 크래시 반복 | 코어 기본 비활성(`ulimit -c 0`) + `$CUBRID/log/coredump` 스택으로 원인 파악 (ADR-EXT-003 C7) |
 
 ---

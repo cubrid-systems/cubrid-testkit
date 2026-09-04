@@ -64,7 +64,7 @@ DifferentialDriver.exec(config)
 |------|------|---------------------|
 | 도입 비용 | 중 (rewrite layer 가 핵심 비용) | survey §8.2 — *dialect mismatch 지옥* |
 | 즉시 ROI | ★★★ (N13 후) | N13 미진척 시 ROI 작음 |
-| N13 pg-wire-compat 종속 | selected 이상이면 비용 급감 | roadmap repo cross-cutting C-014 후보 |
+| N13 pg-wire-compat 종속 | selected 이상이면 비용 급감 | roadmap repo cross-cutting 후보 (번호 미배정) |
 | canonical subset 만 | rewrite layer 없이도 가능 | 단, 다룰 수 있는 SQL 범위가 좁음 |
 | 라이선스 | PostgreSQL JDBC BSD 류 / 자유 | 외부 DBMS 자체 라이선스 점검 필요 |
 | §6a-E1 (sqllogictest) 와의 결합 | sqllogictest cross-DB 강점 활용 | E1 + E6 자연스러운 조합 |
@@ -90,7 +90,7 @@ DifferentialDriver.exec(config)
 3. **dialect rewrite catalog** — DATE / NULL / float / collation / JSON / overflow 카테고리별 rewrite 정책
 4. **peer DBMS 범위** — 1차 PostgreSQL 만 / + MySQL / + SQLite
 5. **케이스 코퍼스 input source** — E1 / E2 / 직접 작성
-6. **C-014 (roadmap cross-cutting)** — survey §13: testkit §6a-E6 × N13 pg-wire-compat
+6. **roadmap cross-cutting (번호 미배정)** — survey §13: testkit §6a-E6 × N13 pg-wire-compat. ~~C-014~~ 는 2026-05-13 에 lock-manager × maintenance-mode 로 등록되어 쓸 수 없다 — N13 selected 진입 시 새 번호를 신청한다
 7. **regression seed 보관 정책** — NG1 점검
 
 **ADR placeholder:**

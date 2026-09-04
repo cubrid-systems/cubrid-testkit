@@ -17,7 +17,13 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 | E5 | 5 | Parser/protocol fuzzing harness (libFuzzer) | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | [E5-parser-fuzzing/](E5-parser-fuzzing/requirements.md) |
 | E6 | 6 | Differential testing (PostgreSQL pair) | 조건부 | N13 pg-wire-compat selected 이상 | [E6-differential/](E6-differential/requirements.md) |
 | E7 | 7 | Stateful / randomized workload | 조건부 | C-004 책임 경계 정의 | [E7-workload/](E7-workload/requirements.md) |
-| (E8) | 8 | Hybrid CI 통합 (Materialize 패턴) | 메타 | E2~E7 중 둘 이상 채택 | (TBD — 카탈로그 항목 외) |
+| (E8) | 8 | Hybrid CI 통합 (Materialize 패턴) | 메타 | E2~E7·E9 중 둘 이상 채택 | (TBD — 카탈로그 항목 외) |
+| E9 | 5 확장 × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | 조건부 | **E5 선행** + SERVER_MODE in-process 기동 + **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.md) |
+| E10 | 보조 설비 | XASL fixture 생산·보관 (버전 식별 포함) | 즉시 후보 | — (엔진 변경 없음) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.md) |
+
+**번호 공간 주의.** `E8` 은 축 8 *Hybrid CI 통합* 메타 자리로 예약되어 있다. E9 가 E8 을 건너뛴 것은 결번이 아니라 이 예약 때문이다.
+
+**착수 순서는 이 표가 정하지 않는다.** fuzzing 계열(E3·E5·E9)과 미등록 후보 2건의 우선순위는 ROADMAP **§6a 사다리** 가 단일 출처다.
 
 ---
 
@@ -48,6 +54,9 @@ extensions/E{N}-{name}/
 | ADR-EXT-005 | E5 incubating 정식 진입 | fuzz target build option (cubrid 본 repo) + fuzzer 본체 + corpus + 책임 경계 |
 | ADR-EXT-006 | E6 incubating 정식 진입 | peer DBMS + mode (canonical vs rewrite) + dialect rewrite catalog + corpus |
 | ADR-EXT-007 | E7 incubating 정식 진입 | scenario 1차 선정 + invariant 카탈로그 + engine-suite 책임 경계 + corpus |
+| (ADR-EXT-008) | E8 (Hybrid CI) 정식 진입 | *예약* — 축 8 메타 항목 자리 |
+| ADR-EXT-009 | E9 incubating 정식 진입 | 입력 IR + **스케줄 표현** + 참가자 수 상한 + corpus 위치 + 본 repo 책임 경계(rendezvous 핸들러) |
+| ADR-EXT-010 | E10 incubating 정식 진입 | 생산 경로(csql/CCI/JDBC) + 픽스처 포맷 + 버전 식별 방식 + 보관 위치 |
 
 ---
 
@@ -56,23 +65,27 @@ extensions/E{N}-{name}/
 1. **즉시 후보 (strangler-fig Phase 3·4 와 *병행* 가능):** E2 (SQLsmith), E3 (SQLancer NoREC+TLP)
    - 도입 비용 낮음, 의존 없음, *지금 testkit 이 비어 있는 영역* 을 직접 채움
    - PostgreSQL ecosystem 의 *de facto* 모범
-2. **조건부 후보 (선결 의존 충족 후):** E5 (cubrid 본 repo PR), E6 (N13 selected), E4 (HA graduation), E7 (C-004 정의)
-3. **장기 추적:** SQLancer++ (adaptive grammar), FoundationDB simulation 컨셉
+2. **조건부 후보 (선결 의존 충족 후):** E5 (cubrid 본 repo PR), **E9 (E5 + E10 선행)**, E6 (N13 selected), E4 (HA graduation), E7 (C-004 정의)
+   - **E10 은 즉시 후보** — 엔진 변경이 없고 선결 의존도 없다. E9 Tier 2 의 선결이면서 독립 실행 가능
+   - E5 → E9 는 *같은 인프라를 공유하는 한 줄기*. 순서 역전 시 중복 구축 (ROADMAP §8 risk)
+3. **장기 추적:** SQLancer++ (adaptive grammar), FoundationDB simulation 컨셉, §6a 사다리 순위 6·7 (recovery/crash framework, concurrency schedule fuzzing — 미등록)
 
 ---
 
 ## 위험 / 정합성 공통 메모
 
 - **NG1 (testcases 레포 동결)** — fuzz / mismatch / crash / violation corpus 가 testcases 에 들어가면 위반. *외부 storage 권장* (각 항목 §6 참조)
+- **E9 의 protobuf 는 프로토콜이 아니다** — CUBRID 자체 바이너리 프로토콜과 무관하다. protobuf 는 *fuzzer 내부 입력 IR* 이며 fuzz 바이너리에만 링크된다 (E9 requirements §2). 이 오해가 반복되면 항목 자체가 잘못 반려될 수 있다
 - **NG2 (외부 표면 동결)** — §6a 항목은 *모두 신규 진입점* 이라 충돌 없음
 - **NG4 (비-CUBRID DBMS 호환 금지)** — §6a 항목은 *CUBRID 가 SUT* — 충돌 없음
 - **분기 게이트 §7** — *strangler-fig 우선원칙* (ROADMAP §8). §6a 진척을 별 행으로 분리 기재
-- **case-format ingestion 인터페이스** — Phase 2 `design/contracts.md` 에 hybrid 합성 가능성 반영 (E1~E7 모두 공유)
+- **case-format ingestion 인터페이스** — Phase 2 `design/contracts.md` 에 hybrid 합성 가능성 반영 (E1~E7 공유). **E9 는 예외** — case format 을 거치지 않고 내부 API 를 직접 호출한다
 
 ---
 
 ## 출처
 
-- `../survey/dbms-testing-ecosystem.md` — 8축 분류, 도구·연구 catalog, §6a-E2~E7 후보 도출 근거
+- `../survey/dbms-testing-ecosystem.md` — 8축 분류, 도구·연구 catalog, §6a-E2~E7 + E9 후보 도출 근거
 - `../ROADMAP.md` §6a — 카탈로그 / Phase 정합 / Open Questions / ADR-EXT 자리표시자
+- `../ROADMAP.md` §6a 부록 — **fuzzing 우선순위 사다리** (착수 순서의 단일 출처)
 - `../analysis/{module}/` — strangler-fig 대상 모듈의 Phase 0 산출물 (참고)

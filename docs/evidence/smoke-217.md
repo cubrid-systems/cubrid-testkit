@@ -229,3 +229,36 @@ the shard and record which cases disagree with themselves. Those are counted
 separately, as `_25_unstable` already is, and for the same reason rather than as
 a convenience. Without that step every unstable case reads as a runner
 difference, which is what happened here.
+
+## 8. The corpus reproduces, and now there is a noise floor
+
+`selfcheck.sh`, testkit twice over the same 217 cases, 66 minutes each and an
+hour apart.
+
+**Every case agrees.** 173 OK and 44 NOK both times, and the same cases in each
+column. The expectation going in was the opposite -- that §7 had found an
+unstable corpus -- and on this runner, in this window, it is not there. The only
+instability actually observed belongs to CTP: `itrack01` returned NOK at 13:31
+and OK at 16:40.
+
+That does not make the corpus stable, and the difference matters. Two agreeing
+runs are one observation about one runner in one window; CTP's disagreement with
+itself is a fact about CTP. What can be said is narrower than §7 assumed: **the
+five disagreements are not explained by a corpus that cannot reproduce itself,
+because on this runner it can.**
+
+**The by-product is worth more than the answer.** Two runs of the same runner
+are the floor under which no difference means anything:
+
+| | same runner, twice | CTP against testkit |
+|---|---:|---:|
+| `check_local.log` · `test_status.data` · `main_snapshot.properties` · `monitor_local.log` | **identical** | identical, one deviation |
+| `feedback.log` new | **24** | 2,874 |
+| `test-shell.xml` new | **24** | 2,887 |
+| `test_local.log` new | **234** | 43,939 |
+
+Two orders of magnitude. Whatever the five cases are, the difference they
+produce is not noise, and the four files that carry verdicts are identical even
+across runs -- which is the strongest thing the harness has said so far.
+
+Per-case cost held: median 12 s both times, mean 18.2 and 18.0.

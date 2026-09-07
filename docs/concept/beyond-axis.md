@@ -173,12 +173,53 @@ by running that one alone. `Parameters` is keyed by the file and section
 `deploy.go` already names, so the allocator decides the values and nothing
 between it and the file gets to invent one.
 
-**What is left is execution, and it has a shape now.** N workers on the shared
-queue is mechanical; each slot needing its own `$CUBRID` is not. With B-T2 built,
-the answer is likely a mount namespace per slot binding that slot's `conf/` and
-`databases/` over one shared install -- cheaper than copying and cheaper than
-overlayfs, and available only because containment exists. That is a design step,
-not a coding one, and it is not taken here.
+**What is left is execution: N workers on the shared queue, and an install each.**
+The first is mechanical. The second has a design, below.
+
+### A mount namespace per slot
+
+Each slot runs in a mount namespace where **`$CUBRID` is the same path it always
+was**, with the few directories a run writes to bound over from that slot's own
+copy. Nothing else moves.
+
+*Why the path must not change.* If slot 2 had `$CUBRID=/…/slot2/CUBRID`, every
+absolute path a run records would carry the slot number: `databases.txt`, the
+`_vinf` and `_lginf` files, every log line, every traced command. The comparison
+would need a slot mask, and a parallel run would stop being byte-comparable with
+a serial one -- which is precisely the evidence B-T3 has to produce ("verdicts
+identical, not merely similar"). Keeping the path makes a slotted run's output
+the same output. It also lets B-T8's template cache be shared across slots
+unchanged, because the key stops depending on which slot built it.
+
+*What has to be bound, measured rather than guessed.* `$CUBRID` is 321 MB, and
+`lib/` is 241 MB of it. What a run writes is much smaller:
+
+| | size | why it is written |
+|---|---:|---|
+| `conf/` | **60 KB** | cases edit `cubrid.conf`; the slot's ports and shm ids live here |
+| `log/` | **12 KB** | server and utility logs, and `qa_fatal_error_count.log` |
+| `var/` | **4 KB** | cleared by the reset |
+| `lib/` | 241 MB | **206 cases of 3,452 call `make_locale`**, which writes `libcubrid_*.so` here |
+| `$CUBRID_DATABASES` | -- | outside `$CUBRID` already, so it is simply a per-slot directory |
+
+Three of those are 76 KB together: a per-slot copy is free. `lib/` is the awkward
+one, and it is awkward at 6% of the corpus rather than at none, so it cannot be
+waved away. Two ways, and the choice is not made here: bind a per-slot copy
+(241 MB a slot, real but not prohibitive beside the 707 MB a case's database
+already costs), or bind only the generated `libcubrid_*.so` names over a shared
+read-only `lib/` and accept that a case which writes something else there is
+outside the design.
+
+*What this is not.* Not overlayfs -- there is nothing to stack when the writable
+set is four directories. Not a copy of the install -- 321 MB a slot to isolate
+76 KB. The namespace is doing the work that copying would otherwise do, and it
+is available only because B-T2 exists.
+
+*Where it lands.* `contain` currently re-executes the runner once, for the whole
+process. A slot needs the same thing per worker, so `contain` grows the ability
+to run a subprocess in a namespace rather than only to put itself in one. That is
+the interface change B-T3 asks of B-T2, and naming it is the point of writing
+this down before building it.
 
 ### B-T7. Compare a query plan as data, not as prose — **blocked**
 

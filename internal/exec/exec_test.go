@@ -11,12 +11,8 @@ import (
 	"time"
 )
 
-// Cancelling a case has to reach what the case started, not just the shell it
-// started in. Without a process group the shell dies and everything below it --
-// a csql, a cub_commdb asleep in a retry loop -- keeps running and keeps the
-// pipe open, so Wait never returns and the runner waits for a case that will
-// never end. That is not hypothetical: docs/evidence/regression-shell.md records
-// the run it stopped, at case 2 of 217.
+// Cancellation has to reach what the script started, not just the script. A
+// survivor keeps the pipe open, and then Wait never returns.
 func TestCancellingLocalReachesWhatTheScriptStarted(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "started.pid")
 

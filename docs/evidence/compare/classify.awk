@@ -1,11 +1,9 @@
 # Sort the differences of one result file into named buckets, and print what
 # falls into none of them.
 #
-# A bucket is a rule in baseline.txt. The rules exist so that silence means
-# something: a run that produces only known differences prints nothing, and the
-# first line of NEW output is the finding. That is the only job they have --
-# a rule is not a judgement that the difference is acceptable, only that it has
-# been seen and named before.
+# A bucket is a rule in baseline.txt. A rule is not a judgement that the
+# difference is acceptable, only that it has been seen and named -- which is what
+# lets the NEW list be short enough to read.
 #
 # Input is the marked difference of two normalised files, one line each:
 #   "< text"  present only on the CTP side

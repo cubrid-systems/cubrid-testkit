@@ -3,31 +3,19 @@
 #
 #   compare.sh <ctp-result-dir> <testkit-result-dir> [label]
 #
-# Prints a report on stdout. Exits 0 when the run is clean, 1 when it is not,
-# and 2 when it could not be run at all -- so it can drive a loop over shards.
+# Prints a report on stdout. Exit 0 clean, 1 dirty, 2 could not run -- so it can
+# drive a loop over shards.
 #
-# "Clean" is two separate things, and the difference is the whole design:
+# "Clean" means two different things, and the split is the design. The six files
+# that carry verdicts must be identical, with the baseline not applied: a rule
+# that let one of them differ quietly would hide the only thing this is for. The
+# other four carry prose, environment and traced output, and go through
+# baseline.txt; whatever matches no rule is printed in full.
 #
-#   The files that carry verdicts are held to zero differences with the
-#   baseline switched off. dispatch_tc_ALL.txt, dispatch_tc_FIN_<env>.txt,
-#   test_status.data, check_<env>.log, current_task_id and monitor_<env>.log
-#   were byte-identical on the first comparison and there is no reason for
-#   them ever not to be. A rule that let one of them differ quietly would be
-#   hiding the only thing the exercise is for.
-#
-#   The other four -- main_snapshot.properties, feedback.log, test-<cat>.xml
-#   and test_<env>.log -- carry prose, environment and traced output, and they
-#   differ for reasons that have been named. Those go through baseline.txt, and
-#   what does not match a rule is printed in full.
-#
-# ADR-013 defines the comparison: normalise, then require the rest to be
-# identical. This is that, applied to a whole shard instead of by hand.
-#
-# The operator is comm, not diff. Both inputs are sorted -- normalize.sh ends
-# with `LC_ALL=C sort` -- and on sorted input comm is the exact multiset
-# difference, with no alignment heuristics to produce pairs that are not
-# really differences. diff on the same files agreed line for line and offered
-# no way to tell those pairs apart from real ones.
+# The operator is comm rather than diff because normalize.sh leaves both inputs
+# sorted, and on sorted input comm is the exact multiset difference. diff also
+# pairs lines inside a hunk, and its output gives no way to tell such a pair from
+# a real difference.
 set -u
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -67,8 +55,8 @@ echo "  testkit  $new"
 echo
 
 # ---------------------------------------------------------------------------
-# Which files each side left behind. A file only one runner wrote is a finding
-# on its own, and a louder one than any line inside a file they both wrote.
+# A file only one runner wrote is a finding on its own, and a louder one than
+# any line inside a file they both wrote.
 # ---------------------------------------------------------------------------
 (cd "$old" && ls -1) | LC_ALL=C sort > "$work/files.old"
 (cd "$new" && ls -1) | LC_ALL=C sort > "$work/files.new"
@@ -84,9 +72,7 @@ if [ -n "$missing" ] || [ -n "$extra" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Timing, from what the runners already record. Not a comparison -- the numbers
-# are what a plan to make the suite faster has to start from, and the first
-# shard is where they stop being a guess.
+# Timing, from what the runners already record. Not part of the comparison.
 # ---------------------------------------------------------------------------
 times() {
   # init.sh closes every case with "<time>----<dir>--- time=<seconds>".

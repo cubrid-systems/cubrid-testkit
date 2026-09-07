@@ -143,18 +143,10 @@ func (l *Local) Run(ctx context.Context, script string) (Result, error) {
 	cmd.Dir = l.Dir
 	cmd.Env = l.Env
 
-	// A case is a tree, not a process, so cancelling has to reach the tree.
-	//
-	// The script runs in a process group of its own and cancellation kills the
-	// group. Without Setpgid, CommandContext signals the shell alone and every
-	// descendant it started -- the case script, a csql, a cub_commdb sleeping in
-	// a retry loop -- survives, holding the pipe open so Wait never returns. The
-	// runner would go on believing the case is still running, which is exactly
-	// what it did before this existed.
-	//
-	// WaitDelay bounds what is left. If some descendant escaped the group and
-	// still holds standard output, Wait gives up on the pipe rather than
-	// blocking, and reports the case rather than hanging on it.
+	// A case is a tree, not a process, so cancellation has to reach the tree.
+	// Without Setpgid it signals the shell alone, the descendants survive holding
+	// the pipe, and Wait never returns. WaitDelay bounds the case where one of
+	// them escapes the group anyway.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

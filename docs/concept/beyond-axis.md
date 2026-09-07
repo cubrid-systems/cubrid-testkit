@@ -210,6 +210,14 @@ already costs), or bind only the generated `libcubrid_*.so` names over a shared
 read-only `lib/` and accept that a case which writes something else there is
 outside the design.
 
+**And it cannot be settled on this machine.** `make_locale` is not on `PATH`
+here at all -- only `make_locale.sh`, which fails with `Command cubrid genlocale
+force failed`. So nothing on this sandbox writes to `lib/`, the cost of the 206
+cases that would is unmeasured, and whether their output is worth caching the
+way `cubrid_createdb` now is remains a question rather than a plan. Choosing
+between the two bindings, or building a template for the locale libraries, needs
+a machine where the thing runs.
+
 *What this is not.* Not overlayfs -- there is nothing to stack when the writable
 set is four directories. Not a copy of the install -- 321 MB a slot to isolate
 76 KB. The namespace is doing the work that copying would otherwise do, and it
@@ -357,8 +365,77 @@ snapshot when recovery fails. `cubrid_createdb` — what cases actually call —
 | Where it goes | `init.sh`'s `cubrid_createdb`, which **both runners call**. That is what keeps criterion 2 satisfiable: the change does not distinguish CTP from testkit, so a comparison across it stays a comparison. What it does change is old behaviour against new, and `selfcheck.sh` is exactly the instrument for that |
 | Risk | a wrong key copies the wrong database, and that failure is silent. The mitigation is that the key *is* the parameters: same key, same database by construction. An argument the key does not understand falls through to a real `createdb` rather than being guessed at |
 | Not in the key | the parameters cases actually change. `supplemental_log`, `unicode_input_normalization`, `dont_reuse_heap_file`, `isolation_level` and `lock_timeout_in_secs` were each set before a `createdb` and the resulting files compared: **identical every time**, against `db_page_size` and `db_volume_size` which differ as they should. These are read by the server at startup, which happens after the copy, so a case's edit still takes effect. Hashing the whole `cubrid.conf` into the key -- the first thing this entry proposed -- would have missed the cache for the 46 cases that set `supplemental_log` and gained nothing |
-| Beyond the harness | start and stop are 5 s of the 11.6 and **about 4.8 of that is `sleep (1)`**. Removing it is an engine change, not a harness one: it is `util_service.c`, a third repository, and it belongs here only because the same measurement found it. Worth roughly 4.6 s a case -- **four hours a runner over the corpus** -- against the template cache's 6.2 s |
+| Start and stop | start and stop are 5 s of the 11.6 and **about 4.8 of that is `sleep (1)`** in `util_service.c`. This entry concluded that removing it was an engine change in a third repository. **That was wrong for start**: the wrapper can return when the server answers without touching the engine, which is B-T9. It remains true for stop |
 | Why not share one database | because the corpus does not. 88% of cases call `deletedb`, 75% `server start`, 64% `server stop`: they own the lifecycle explicitly. 13% call `loaddb`, 6% `unloaddb`, 3% `backupdb`, 2% `restoredb` and 2% `checkdb` -- they test the database files themselves. A long-lived shared database would change what a quarter of the corpus is testing |
+
+### B-T9. Let a case go on when the server answers — **blocked**
+
+| | |
+|---|---|
+| Blocked on | T: the shell task passing the full-corpus gate (ADR-013) |
+| Improves on | T: nothing in the runner. Like B-T8 the cost is inside the cases, and the cases may not be touched (NG1) |
+| Kind | **speed** — the same verdicts, sooner |
+
+**B-T8 said this one was somebody else's repository, and that was wrong.** Its last row concluded
+that the `sleep (1)` in `util_service.c` "is an engine change, not a harness one". The measurement
+that settles it is when the server becomes usable against when the utility says so:
+
+| | |
+|---|---:|
+| `cub_commdb -P` lists the database | 1.16 s |
+| `csql` connects and answers a query | **1.16 s** |
+| `cubrid server start` returns | 3.02 s |
+
+The two readiness numbers are the same instant, which is the whole argument: `cub_commdb -P` is not
+a registration that precedes usability, it *is* usability, so a wrapper that waits for it and then
+returns has not shortened anything a case depends on. **2,590 of the 3,452 case scripts start a server**,
+so the 1.9 s is hours.
+
+**What it costs is that the output has to be written rather than read.** The utility buffers
+everything and flushes at exit -- at 1.16 s, when the server is usable, nothing has been printed
+yet. So an early return has to produce the text itself, and the text is compared: 14 cases hold
+these lines in an answer file. Measured rather than guessed, the grammar is:
+
+```
+[jsp=n]        java_stored_procedure system parameter is not enabled
+[master down]  @ cubrid master start
+[master down]  ++ cubrid master start: success
+               @ cubrid server start: <db>
+               ++ cubrid server start: success
+[jsp=y]        Calling java stored procedure is allowed
+[jsp=n]        Calling java stored procedure is not allowed
+```
+
+all on stdout, stderr empty, exit 0. `java_stored_procedure` is read the way the engine reads it --
+`[@db]` overriding `[common]`, which was confirmed by setting them against each other.
+
+| Beyond | **return from `server start` when the server answers.** The wrapper backgrounds the real utility, polls until the database is connectable, writes the output above and returns; the utility finishes on its own |
+| Where it goes | `init.sh`'s sibling, the `${init_path}/cubrid` wrapper that already intercepts `server` and `checkdb`. **Both runners put `${init_path}` at the head of `PATH`**, so like B-T8 this does not distinguish CTP from testkit and a comparison across it stays a comparison |
+| Risk | the written output is wrong somewhere the grammar does not cover, and that failure is silent in exactly the 14 cases that would catch it. The mitigation is that **everything outside the grammar declines**: a flag, a database already up, a `java_stored_procedure` it cannot parse, a start that fails -- each falls back to the wait and to the utility's own words, so the written text is only ever produced for the one shape it was measured against |
+| Evidence | `CTP_SERVER_START_NOWAIT=verify` takes the fast path and then waits anyway, comparing what was written against what the utility really printed and recording **every** fast path, not only the ones that differ -- a log that only recorded differences would be equally empty when nothing was taken |
+| Why a third setting | because `1` has to be earned. `verify` is no faster than before and exists only to produce the evidence for flipping the default |
+
+**What has been shown so far.** Against the utility itself, over the conditions the grammar
+distinguishes -- `java_stored_procedure` y and n, master up and down, and a `[@db]` section set
+against `[common]` -- stdout, stderr and exit code are **byte-identical**, at 1.16-1.32 s against
+3.02. Against the corpus, the 14 cases that hold this output in an answer file were run three ways:
+
+| | wall | OK | NOK | fast paths | differing |
+|---|---:|---:|---:|---:|---:|
+| wait | 345 s | 6 | 8 | — | — |
+| verify | 350 s | 6 | 8 | 12 | **0** |
+| nowait | 336 s | 6 | 8 | — | — |
+
+Verdicts identical case by case, and the eight failures are the machine's, not the change's: they
+fail in the `wait` arm too. The wall clock barely moves because these fourteen are heavy cases that
+spend their time on their own work -- this run was for the output, not for the speed.
+
+**The lingering utility does not interfere.** The fast path returns with the real `cubrid server
+start` still running for another 1.9 s, so what a case does next was tried against it: an immediate
+`server stop` succeeds and the server stays down after the utility finishes, an immediate query
+connects, and an immediate `deletedb` refuses exactly as it does today. It is started with stdin on
+`/dev/null` so it cannot hold a pipe the case owns, and its output goes to files that are unlinked
+before the wrapper returns.
 
 ### B-T4. A verdict that says why — **idea**
 

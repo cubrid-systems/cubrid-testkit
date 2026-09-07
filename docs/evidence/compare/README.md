@@ -10,11 +10,13 @@ seconds a case on each runner the whole corpus is somewhere between thirty and
 a hundred hours. That gap is what these four files fill.
 
 ```
-shards.sh     the corpus, cut into units of work and of resume
-shard.sh      one unit: run both runners, keep both trees, compare them
-compare.sh    the comparison itself
-classify.awk  sort the differences into named buckets
-baseline.txt  the buckets, each with the reason it exists
+shards.sh       the corpus, cut into units of work and of resume
+shard.sh        one unit: run both runners, keep both trees, compare them
+selfcheck.sh    one unit, one runner, twice: what the corpus cannot reproduce
+compare.sh      the comparison itself
+classify.awk    sort the differences into named buckets
+baseline.txt    the buckets, each with the reason it exists
+deviations.txt  the verdict files' only exemption, matched literally
 ```
 
 ## Running it
@@ -42,15 +44,32 @@ To compare two trees you already have, without running anything:
 ./compare.sh <ctp-result-dir> <testkit-result-dir> [label]
 ```
 
+**Measure the corpus before judging the runners.** A case whose verdict one
+runner cannot reproduce against itself cannot be evidence that two runners
+differ -- the argument that stopped `dispatch_tc_ALL.txt` from being gradeable,
+moved from a file to a verdict. `selfcheck.sh` runs one runner twice and reports
+what it disagrees with itself about:
+
+```sh
+./selfcheck.sh "$CORPUS/_01_utility" /somewhere/out testkit
+```
+
+Skipping this step makes every unstable case read as a runner difference, which
+is what the first 217-case report did with five of them.
+
 ## What a report means
 
-Exit 0 and a `COMPLETE clean` line mean: the six verdict-carrying files were
-identical, and every difference in the other four matched a rule in
+**`VERDICTS` comes first and answers the question.** It lists the cases the two
+sides disagree about, by name. Everything below it is detail: two runs that
+disagree about five cases disagree about everything those five printed, and
+reading forty thousand difference lines as forty thousand findings is how a real
+one gets missed.
+
+Exit 0 and a `COMPLETE clean` line mean: every case agrees, the six
+verdict-carrying files are identical apart from anything named in
+`deviations.txt`, and every difference in the other four matched a rule in
 `baseline.txt`. Anything else is exit 1 and a `COMPLETE dirty` line, with the
 unmatched differences printed in full under `NEW`.
-
-**`NEW` is the whole product.** Everything else on the page is there so that
-`NEW` can be short enough to read.
 
 ## Two decisions worth knowing about
 
@@ -92,13 +111,23 @@ An extra leading tab, and a carriage return — which is what a pseudo-terminal
 produces and a pipe does not. `expect` allocates one, so both sides have a pty
 somewhere; what differs is the environment around it.
 
-There is a difference in that environment, confirmed on both sides in source
-and not yet confirmed as the cause: **CTP gives a case a pipe on standard input
-and testkit gives it `/dev/null`.** CTP reaches a case through
-`Runtime.getRuntime().exec`, whose child gets a pipe nothing ever writes to;
-`internal/exec` builds an `exec.Cmd` and never sets `Stdin`, which Go documents
-as the null device. Any case that reads standard input, or asks whether it is a
-terminal, can tell the difference.
+**The standard-input hypothesis is wrong, and it was measured rather than
+argued.** CTP reaches a case through `Runtime.getRuntime().exec`, whose child
+gets a pipe nothing ever writes to; `internal/exec` never sets `Stdin`, which Go
+documents as the null device. That difference is real. It is not this one:
 
-It is deliberately **not** in `baseline.txt`. It is the first thing the harness
-found and it is still open.
+```
+expect spawning a printf, stdin = /dev/null : \t C U B R I D ... \r \n
+expect spawning a printf, stdin = a pipe    : \t C U B R I D ... \r \n
+```
+
+Byte for byte the same, so what expect is given on its own standard input does
+not change what the pty it allocates produces. The stdin difference stays worth
+knowing -- a case that reads standard input can still tell -- but it does not
+explain these ten lines.
+
+The ten lines are **still open**, and deliberately not in `baseline.txt`. What is
+known: the case drives `csql` through `expect`, a pty always adds the carriage
+return, and CTP's recording has neither the return nor the second tab -- so on
+CTP's side something either did not use a pty or removed what a pty added.
+Deciding between those needs the case itself, which needs the machine to itself.

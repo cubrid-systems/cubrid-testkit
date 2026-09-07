@@ -149,7 +149,7 @@ version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
 | 4 — the rest | — | `sql` family, `isolation`, `ha_repl`, `cdc_repl`, `jdbc` |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
-![Animated: CTP and testkit run on the same four cases on the same machine in the same minute. Both report three passed and one failed, the same case failing on both, and exit 0. Of the ten files a run leaves behind, six are byte-identical after normalisation, one is identical once the JVM's own properties are removed, and three differ by a named number of lines.](docs/assets/anim-equivalence.svg)
+![Animated: CTP and testkit run on the same four cases on the same machine in the same minute. Both report three passed and one failed, the same case failing on both, and exit 0. Of the ten files a run leaves behind, six are byte-identical after normalisation, one is identical once the JVM's own properties are removed, and three differ by a named number of lines. Ten of those lines are still unexplained, and the largest difference turned out to be a defect in the new runner rather than a difference between the two.](docs/assets/anim-equivalence.svg)
 
 **What is proven.** CTP and testkit, run on the same four cases on the same machine in the same
 minute: both **3 passed, 1 failed**, the same case failing on both, the same summary counters, exit
@@ -172,6 +172,8 @@ runner, so it is run by [`evidence/compare/`](docs/evidence/compare/README.md) r
 a shard is the unit of resume, the six files that carry verdicts are held to zero differences with
 no baseline allowed, and everything else is classified — so that a difference nobody has seen
 before is the only thing on the page.
+
+![Animated: how the whole shell corpus is compared. 3,452 cases are cut into 64 shards, with _06_issues holding half of everything and split into sub-shards; every case lands in exactly one shard. One shard runs on CTP and on testkit, both result trees are kept, and a shard whose report already ends in COMPLETE is skipped, so the loop survives being killed. In the report the six files that carry verdicts must be identical with no baseline allowed, and the other four are classified: on the four-case calibration 154 differences became 143 known and 11 new, and ten of the eleven are one finding.](docs/assets/anim-compare.svg)
 
 **Corrections are recorded where the mistake was made.** The CLI survey that justified the project
 covered one entry point out of fifteen; the freeze specification was wrong in eight further places;

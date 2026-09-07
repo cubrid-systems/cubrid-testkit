@@ -3,28 +3,24 @@
 #
 #   shards.sh <corpus-root> [max-cases-per-shard]
 #
-# A shard is the unit of work and the unit of resume, so its size is the answer
-# to one question: how much is it acceptable to lose when a run dies? At the
-# rate the four-case comparison measured -- about 18 seconds a case on each
-# runner, so roughly 36 a case for the pair -- 250 cases is around two and a
-# half hours. That is the default.
+# A shard is the unit of work and of resume, so its size answers one question:
+# how much is it acceptable to lose when a run dies? At about 19 seconds a case
+# on each runner, the default limit is around two and a half hours for the pair.
 #
-# Families are the natural shard, except that they are not evenly sized: on the
-# corpus as measured, _06_issues holds 1,721 of 3,452 cases, half of everything,
-# and the next largest holds 253. A family over the limit is split into its own
-# subdirectories, which is enough because the discovery rule only cares that a
-# case is <name>/cases/<name>.sh somewhere below the scenario root.
+# Families are the natural shard but are not evenly sized -- one holds half the
+# corpus -- so a family over the limit is split into its own subdirectories. That
+# works because the discovery rule only requires a case to be
+# <name>/cases/<name>.sh somewhere below the scenario root.
 #
-# Shards are printed largest first, because a shard that is going to fail is
-# better found early, and the big ones fail in more ways.
+# Largest first: a shard that is going to fail is better found early.
 set -u
 
 corpus=${1:-}
 limit=${2:-250}
 [ -n "$corpus" ] && [ -d "$corpus" ] || { echo "usage: shards.sh <corpus-root> [max-cases-per-shard]" >&2; exit 2; }
 
-# count is ADR-013's rule, and it is the one CTP applies: a case is
-# <name>/cases/<name>.sh, matched as "the directory two levels up, plus .sh".
+# ADR-013's rule, which is CTP's: a case is <name>/cases/<name>.sh, matched as
+# "the directory two levels up, plus .sh".
 count() {
   find "$1" -name '*.sh' -type f -print 2>/dev/null |
     awk -F/ '{ if ($(NF-2)".sh" == $NF) print }' | wc -l
@@ -39,12 +35,11 @@ emit() {
     return 0
   fi
 
-  # Splitting is only allowed when the children account for every case. A case
-  # is a directory with its own cases/, so it cannot be a shard root and cannot
-  # be descended into; if a family holds such directories directly, its cases
-  # are not the union of its subdirectories and splitting would silently drop
-  # them. Then the family goes out whole, over the limit, and says so -- a shard
-  # that is too big costs time, and a shard that is missing costs the evidence.
+  # Split only when the children account for every case. A directory with its
+  # own cases/ is a case: it cannot be a shard root and cannot be descended into,
+  # so a family holding one directly is not the union of its subdirectories and
+  # splitting would drop cases silently. Such a family goes out whole and says
+  # so -- an oversized shard costs time, a missing one costs the evidence.
   local child c sub_total=0
   local -a subs=()
   for child in "$dir"/*/; do

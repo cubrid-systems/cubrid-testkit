@@ -91,26 +91,17 @@ func (m *Monitor) check(ctx context.Context) {
 }
 
 // EscalateAfter is how long the monitor keeps sweeping before it ends the case
-// outright. Zero takes the default; negative turns escalation off, which is
+// outright. Zero takes this default; negative disables escalation, which is
 // CTP's behaviour exactly.
 //
-// CTP has no escalation. TestMonitor.resolveTimeout resets the processes, marks
-// the case failed and returns, on the assumption that with what the case was
-// waiting on dead, the case's own command comes back. Usually it does.
+// CTP has none: resolveTimeout sweeps, marks the case failed, and trusts the
+// case's own command to return once what it was waiting on is dead. That holds
+// until a sweep misses the thing being waited on, and then the worker blocks
+// for ever.
 //
-// On 2026-09-07 it did not, and the run stopped for good. `_01_sqlx/
-// bug_cubridsus2018` hung in `cubrid server stop`, which was waiting on a
-// `cub_commdb -S testdb` asleep in a retry loop. The sweep took the master, the
-// server and the javasp -- they are still there as zombies in the evidence --
-// and left cub_commdb, which is the one the case was waiting on. Twenty-three
-// minutes later nothing had moved, and nothing ever would have.
-//
-// This is a deviation from CTP and it is admitted for one reason: without it the
-// full-corpus gate cannot be reached at all. One case in 3,452 that behaves this
-// way stops the run, and ADR-013 needs the run to finish before it can say
-// anything. An improvement that the gate depends on cannot be one that waits for
-// the gate. It is off by a negative value for anyone who wants CTP's behaviour
-// unaltered.
+// The deviation is admitted because the gate depends on it: one case in 3,452
+// behaving that way stops the run, and ADR-013 cannot judge a run that does not
+// finish.
 const EscalateAfter = 2 * time.Minute
 
 // escalate ends a case that the sweep has not freed.

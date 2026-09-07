@@ -113,6 +113,52 @@ and the switch is a system parameter that exists — `query_trace_format`, whose
 | Constraint | the text form stays. The `.answer` files are frozen (NG1) and hold rendered plans; JSON is a **second** comparison an operator turns on, not a replacement |
 | Note | this is the clearest instance of criterion 1 in ADR-015: it names what it beats and what today is measured, and the measurement is a count from the corpus rather than an opinion |
 
+### B-T8. Stop paying 1.1 GB for every case — **blocked**
+
+| | |
+|---|---|
+| Blocked on | T: the shell task passing the full-corpus gate (ADR-013) |
+| Improves on | T: nothing in the runner. **The cost is inside the cases, and the cases may not be touched (NG1)** |
+| Kind | **speed** — the same verdicts, sooner |
+
+**Where the time actually goes, measured.** The runner is not the problem. Between two cases it
+does a process reset and `RestoreScript`, which copies `conf/*` and `databases/*` out of
+`~/.CUBRID_SHELL_FM` and deletes logs and cores; on the four-case comparison the gap between one
+case ending and the next starting was **about one second**. The cases themselves took 10 to 29
+seconds, mean 18.5 on CTP and 16.8 on testkit.
+
+What a case spends it on is visible in its own trace:
+
+```
++ cubrid createdb -r csqldb --db-volume-size=20M en_US
+  Creating database with 64.0M size using locale en_US.
+  The total amount of disk space needed is 1.1G.
++ cubrid server start csqldb
+  ... the actual test ...
++ cubrid server stop csqldb
++ cubrid deletedb csqldb
+```
+
+**The case asked for 20M and the engine laid out 1.1 GB**, because the volume size it was given is
+not the log volume or the generic volumes. Every case in the corpus does this: create a database,
+start a server, do a little work, throw the database away. Across 3,452 cases that is somewhere
+near four terabytes written and deleted to run a suite whose actual queries are small.
+
+**The interception point already exists, and it is not the cases.** `init.sh` puts `${init_path}`
+at the head of `PATH` and makes `${init_path}/cubrid` executable, so **every `cubrid` a case runs is
+already a wrapper script**, which today intercepts `deletedb`, `server` and `checkdb` to save a
+snapshot when recovery fails. `cubrid_createdb` — what cases actually call — is a shell function in
+`init.sh:1614`. Neither is in the testcases repository, so neither is frozen by NG1.
+
+**And CTP already did this once.** `create_ccidb` in the same file checks for
+`$CUBRID/databases/ccidbbak` and, if it is there and big enough, does `cp -r` instead of
+`createdb`. The pattern is not a new idea here; it is one function away from being general.
+
+| Beyond | three, in increasing order of what they touch. **(1)** put `$CUBRID_DATABASES` on tmpfs — nothing in CTP or the corpus changes, it is a placement decision. **(2)** generalise `create_ccidb` into `cubrid_createdb`: key a prepared database on `(charset, volume size, the parameters the case set)` and copy it when the key matches. **(3)** give each case a copy-on-write `$CUBRID` through overlayfs, which is worth little serially — the reset is already a second — and is what **B-T3** needs to give parallel cases an install each |
+| Evidence | wall clock for `_01_utility` before and after, **with verdicts identical rather than similar**, and `_25_unstable` run both ways. That family is the one whose own readme says it depends on elapsed time and machine load, so it is exactly where a change in I/O timing would show up as a changed verdict — and a case that only passes when the disk is slow is a finding, not a regression |
+| Instrument | `PS4='+[${EPOCHREALTIME}] '` exported from the runner's prologue puts a microsecond timestamp on every line `set -x` already prints, with no change to any case and none to `init.sh`, which sets no `PS4` of its own. It changes the bytes of the traced output, so it cannot be the default — it is a measurement mode, and it is what turns "createdb is slow" into a distribution |
+| Risk | tmpfs needs the memory, and all three change I/O timing. Under criterion 2 of ADR-015 none of them may be built before the shell task passes its gate, for the reason B-T2 and B-T3 carry: change the ground under a case before the comparison is clean and every later difference has two possible causes |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

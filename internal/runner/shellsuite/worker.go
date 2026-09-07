@@ -36,6 +36,10 @@ type Worker struct {
 	// kill the case that asked for the sweep.
 	Local bool
 
+	// Contained says the run has namespaces of its own, which changes what the
+	// sweep selects on -- see KillScript.
+	Contained bool
+
 	// CheckDiskSpace runs the disk check before each case. CTP's version also took
 	// two mail addresses and notified them; the notification is axis O and is
 	// gone, the check is not.
@@ -115,7 +119,7 @@ func (w *Worker) Run(ctx context.Context) error {
 func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console string) {
 	add := func(flag, msg string) { items = append(items, resultItem(flag, msg)) }
 
-	w.quietly(ctx, KillScript(w.Local), "CLEAN PROCESSES:", "Fail to reset processes")
+	w.quietly(ctx, KillScript(w.Local, w.Contained), "CLEAN PROCESSES:", "Fail to reset processes")
 	w.quietly(ctx, RestoreScript(), "Reset CUBRID:", "Fail to reset CUBRID")
 	if w.CheckDiskSpace {
 		w.diskSpace(ctx)

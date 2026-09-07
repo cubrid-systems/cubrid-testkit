@@ -9,6 +9,7 @@ import (
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
@@ -288,7 +289,7 @@ func (s *Shell) prepareWorkspace(ctx context.Context, ch exec.Channel, cfg *conf
 	scenario := strings.TrimSpace(cfg.GetOr("scenario", ""))
 	workspace := strings.TrimSpace(cfg.GetOr("testcase_workspace_dir", ""))
 
-	out, err := runIn(ctx, ch, KillScript(local))
+	out, err := runIn(ctx, ch, KillScript(local, contain.Active()))
 	if err != nil {
 		return "", err
 	}
@@ -404,11 +405,12 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 
 	ssh := machine.SSH()
 	w := &Worker{
-		EnvID:   machine.EnvID(),
-		Channel: workerCh,
-		Queue:   queue,
-		Sink:    sink,
-		Report:  report,
+		EnvID:     machine.EnvID(),
+		Contained: contain.Active(),
+		Channel:   workerCh,
+		Queue:     queue,
+		Sink:      sink,
+		Report:    report,
 		Options: CaseOptions{
 			Bits:                 bits,
 			BigSpaceDir:          cfg.GetOr("large_space_dir", ""),
@@ -428,10 +430,11 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	monitorCtx, stopMonitor := context.WithCancel(ctx)
 	defer stopMonitor()
 	go (&Monitor{
-		Worker:  w,
-		Channel: monitorCh,
-		Timeout: time.Duration(cfg.Int("testcase_timeout_in_secs", 0)) * time.Second,
-		Local:   local,
+		Worker:    w,
+		Channel:   monitorCh,
+		Timeout:   time.Duration(cfg.Int("testcase_timeout_in_secs", 0)) * time.Second,
+		Local:     local,
+		Contained: contain.Active(),
 	}).Watch(monitorCtx)
 
 	fmt.Println("STARTED")

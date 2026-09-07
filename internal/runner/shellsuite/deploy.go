@@ -163,13 +163,19 @@ var killPatterns = []string{
 // local drops the final sweep of shell scripts: when the runner is driving the
 // machine it is running on, killing every *.sh the user owns would kill the case
 // that is asking for the sweep.
-func KillScript(local bool) string {
+func KillScript(local, contained bool) string {
 	var lines []string
 	lines = append(lines, "cubrid service stop")
 	for _, p := range killPatterns {
-		lines = append(lines, bothKill(psPIDs(p)))
+		lines = append(lines, bothKill(psPIDs(p, contained)))
 	}
-	lines = append(lines, "ipcs | grep $USER | awk '{print $2}'  | xargs -i ipcrm -m {}")
+	// Same argument for shared memory: an IPC namespace holds this run's segments
+	// and no others, so there is no owner to match on.
+	if contained {
+		lines = append(lines, "ipcs -m | awk 'NR>3 {print $2}' | xargs -i ipcrm -m {}")
+	} else {
+		lines = append(lines, "ipcs | grep $USER | awk '{print $2}'  | xargs -i ipcrm -m {}")
+	}
 
 	// Every JVM except this run's own -- except that it never has. The test is
 	// written "[ $isExistPid -eq 0]" with no space before the bracket, which is a
@@ -178,20 +184,32 @@ func KillScript(local bool) string {
 	// identical, while "fixing" it would start killing JVMs on machines where
 	// nothing has killed one in years.
 	lines = append(lines,
-		"ctp_java_pid_list=`ps -u $USER -o pid,command| grep -v grep | grep -E 'com.navercorp.cubridqa|service.Server' | awk '{print $1}'`",
-		"all_java_pid_list=`ps -u $USER -o pid,comm| grep -v grep | grep -i java | awk '{print $1}'`",
+		"ctp_java_pid_list=`"+psAllCmd(contained)+"| grep -v grep | grep -E 'com.navercorp.cubridqa|service.Server' | awk '{print $1}'`",
+		"all_java_pid_list=`"+psAll(contained)+"| grep -v grep | grep -i java | awk '{print $1}'`",
 		`final_list=""`,
 		"for x in ${all_java_pid_list};do isExistPid=`echo ${ctp_java_pid_list}|grep -w $x|wc -l`;if [ $isExistPid -eq 0];then final_list=\"${final_list} $x\" ;fi;done",
 		bothKill("echo ${final_list}"),
 	)
 	for _, p := range []string{"sleep", "expect", "dos2unix"} {
-		lines = append(lines, bothKill(psPIDsInsensitive(p)))
+		lines = append(lines, bothKill(psPIDsInsensitive(p, contained)))
 	}
 	if !local {
-		lines = append(lines, bothKill(`ps -u $USER -o pid,cmd| grep -v grep | grep -i '\.sh' | awk '{print $1}'`))
+		sh := "ps -u $USER -o pid,cmd"
+		if contained {
+			sh = "ps -e -o pid,cmd"
+		}
+		lines = append(lines, bothKill(sh+`| grep -v grep | grep -i '\.sh' | awk '{print $1}'`))
+	}
+	// The four dumps that close the script are diagnostics, not selectors, and
+	// they have to follow the same move: contained, `ps -u $USER -f` prints an
+	// empty table and the worker log loses the only picture it has of what the
+	// machine was doing.
+	dump := "ps -u $USER -f"
+	if contained {
+		dump = "ps -e -f"
 	}
 	lines = append(lines,
-		"ps -u $USER -f",
+		dump,
 		"ps -ef | grep cub ",
 		"netstat -n -e -p -a",
 		"ipcs",
@@ -199,12 +217,27 @@ func KillScript(local bool) string {
 	return strings.Join(lines, "\n")
 }
 
-func psPIDs(name string) string {
-	return fmt.Sprintf("ps -u $USER -o pid,comm| grep -v grep | grep %s | awk '{print $1}'", name)
+// psPIDs selects by process name across the user's processes, or -- when the run
+// has namespaces of its own -- across the namespace, which is the same set with
+// none of the machine in it. See contain.
+func psPIDs(name string, contained bool) string {
+	return fmt.Sprintf("%s | grep -v grep | grep %s | awk '{print $1}'", psAll(contained), name)
 }
 
-func psPIDsInsensitive(name string) string {
-	return fmt.Sprintf("ps -u $USER -o pid,comm| grep -v grep | grep -i %s | awk '{print $1}'", name)
+// psAll is what the sweep looks at. Contained, "everything here" is already
+// "everything this run started", so there is nothing to filter on and nothing
+// that can be filtered wrongly. Uncontained it is CTP's own selector, kept
+// verbatim -- including that it matches nothing when the run's uid does not
+// answer to $USER.
+func psAll(contained bool) string {
+	if contained {
+		return "ps -e -o pid,comm"
+	}
+	return "ps -u $USER -o pid,comm"
+}
+
+func psPIDsInsensitive(name string, contained bool) string {
+	return fmt.Sprintf("%s | grep -v grep | grep -i %s | awk '{print $1}'", psAll(contained), name)
 }
 
 // bothKill runs the same pid query twice, piped into kill and then substituted
@@ -212,6 +245,14 @@ func psPIDsInsensitive(name string) string {
 // which is where the stray "kill: not enough arguments" in a worker log comes
 // from. Kept because a worker log that stops matching CTP's is harder to compare
 // than one with a known harmless line in it.
+// psAllCmd is psAll with the full command line, which the JVM filter needs.
+func psAllCmd(contained bool) string {
+	if contained {
+		return "ps -e -o pid,command"
+	}
+	return "ps -u $USER -o pid,command"
+}
+
 func bothKill(query string) string {
 	return query + " | xargs -i kill -9 {} \n" + "kill -9 `" + query + "`"
 }

@@ -127,7 +127,7 @@ func TestParamListIsOrderedSoTwoRunsMatch(t *testing.T) {
 func TestKillScriptIsValidShell(t *testing.T) {
 	for _, local := range []bool{true, false} {
 		cmd := exec.Command("bash", "-n")
-		cmd.Stdin = strings.NewReader(KillScript(local))
+		cmd.Stdin = strings.NewReader(KillScript(local, false))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Errorf("local=%v: bash -n rejected the script: %v\n%s", local, err, out)
 		}
@@ -138,10 +138,10 @@ func TestKillScriptIsValidShell(t *testing.T) {
 // the runner is the process being swept.
 func TestKillScriptSparesShellScriptsWhenRunningLocally(t *testing.T) {
 	const sweep = `grep -i '\.sh'`
-	if strings.Contains(KillScript(true), sweep) {
+	if strings.Contains(KillScript(true, false), sweep) {
 		t.Error("the local sweep would kill the case that asked for it")
 	}
-	if !strings.Contains(KillScript(false), sweep) {
+	if !strings.Contains(KillScript(false, false), sweep) {
 		t.Error("the remote sweep no longer clears leftover scripts")
 	}
 }
@@ -152,7 +152,7 @@ func TestKillScriptSparesShellScriptsWhenRunningLocally(t *testing.T) {
 // runner kills on machines where nothing has been killed in years. This test
 // fails if someone tidies it.
 func TestTheJVMSweepIsKeptExactlyAsBrokenAsItWas(t *testing.T) {
-	if !strings.Contains(KillScript(false), "-eq 0]") {
+	if !strings.Contains(KillScript(false, false), "-eq 0]") {
 		t.Fatal("the JVM sweep was repaired; see the comment on KillScript")
 	}
 
@@ -193,6 +193,41 @@ func TestRestoreClearsTheStateACaseCanLeaveBehind(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("restore no longer clears %s:\n%s", want, got)
+		}
+	}
+}
+
+// Containment changes what the sweep selects on, and that is the point of B-T2
+// rather than a detail of it: inside a PID namespace "everything here" is
+// already "everything this run started", so there is no owner to match and
+// nothing that can be matched wrongly.
+func TestTheSweepSelectsByNamespaceWhenContained(t *testing.T) {
+	loose := KillScript(true, false)
+	tight := KillScript(true, true)
+
+	if !strings.Contains(loose, "ps -u $USER") {
+		t.Error("the uncontained sweep no longer reproduces CTP's selector")
+	}
+	if strings.Contains(tight, "ps -u $USER") {
+		t.Error("the contained sweep still mentions $USER, which selects nothing inside")
+	}
+	if !strings.Contains(tight, "ps -e -f") {
+		t.Error("the contained sweep lost the machine-state dump the worker log carries")
+	}
+	if !strings.Contains(tight, "ps -e -o pid,comm") {
+		t.Error("the contained sweep does not select the namespace")
+	}
+	if !strings.Contains(loose, "ipcs | grep $USER") {
+		t.Error("the uncontained shared-memory sweep changed")
+	}
+	if strings.Contains(tight, "ipcs | grep $USER") {
+		t.Error("the contained shared-memory sweep still filters by owner")
+	}
+	// Both must still stop the services first: that line is what actually works
+	// today, and it is the only reason a hung case's master ever died.
+	for name, s := range map[string]string{"uncontained": loose, "contained": tight} {
+		if !strings.HasPrefix(s, "cubrid service stop") {
+			t.Errorf("%s sweep no longer starts with cubrid service stop", name)
 		}
 	}
 }

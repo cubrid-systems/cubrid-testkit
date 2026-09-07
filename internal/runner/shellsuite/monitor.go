@@ -34,6 +34,9 @@ type Monitor struct {
 	// Local matches the worker's setting, so the kill has the same reach.
 	Local bool
 
+	// Contained matches the worker's setting for the same reason.
+	Contained bool
+
 	// EscalateAfter overrides the default grace period before a case that the
 	// sweep did not free is ended outright. Negative turns it off.
 	EscalateAfter time.Duration
@@ -71,7 +74,7 @@ func (m *Monitor) check(ctx context.Context) {
 	// arrived afterwards the case could be recorded as a pass on its way out.
 	first := m.Worker.markTimedOut()
 
-	res, err := runIn(ctx, m.Channel, KillScript(m.Local))
+	res, err := runIn(ctx, m.Channel, KillScript(m.Local, m.Contained))
 	cleaned := ""
 	if err != nil {
 		cleaned = "fail to reset processes: " + err.Error()

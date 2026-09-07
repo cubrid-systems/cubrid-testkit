@@ -24,6 +24,7 @@ import (
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
@@ -48,6 +49,19 @@ const (
 )
 
 func main() {
+	// Containment happens before anything else or it happens to a process that
+	// has already opened files and started goroutines. Enter re-executes this
+	// program in namespaces of its own and returns the child's exit code; -1
+	// means there was nothing to do, which is the default.
+	if code := contain.Enter(); code >= 0 {
+		os.Exit(code)
+	}
+	if err := contain.Setup(); err != nil {
+		fmt.Fprintf(os.Stderr, "testkit: %v\n", err)
+		os.Exit(exitEnvironment)
+	}
+	contain.Reap()
+
 	os.Exit(run(os.Args[1:]))
 }
 

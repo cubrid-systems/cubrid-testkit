@@ -437,6 +437,66 @@ connects, and an immediate `deletedb` refuses exactly as it does today. It is st
 `/dev/null` so it cannot hold a pipe the case owns, and its output goes to files that are unlinked
 before the wrapper returns.
 
+### B-T10. The other second, on the way down — **idea**
+
+| | |
+|---|---|
+| Improves on | T: nothing in the runner; the same place as B-T8 and B-T9 |
+| Kind | **speed** — the same verdicts, sooner |
+
+**The mechanism is proven for the engine that is actually running.** The installed build is
+11.3.5.1275-0e31336 and that commit is in the source tree, so this is read from it rather than from
+a neighbouring version. `cubrid server stop` runs `cub_commdb --server-stop` and waits for it;
+`cub_commdb` asks the master for the server's pid, sends the kill, prints the reply, and then waits
+like this:
+
+```c
+while (1) {
+    if (kill (pid, 0) < 0) break;
+    sleep (1);
+}
+```
+
+**It checks before it sleeps.** So the 1.01 s a stop costs with the Java stored-procedure server off
+is one whole tick: the server was still alive at the first check and gone by the second. The real
+shutdown therefore takes somewhere in `(0, 1 s)`, and what could be saved is one second minus that
+-- **a quantity this has not measured.** The register's own rule is why this is an idea and not a
+plan.
+
+**Where it would probably disappoint.** Shutdown has to flush, so a case that wrote a lot should
+take longer to come down than an empty database -- which means the saving is largest exactly where
+the case was cheapest, and a single measurement on an empty database would overstate it. The
+measurement has to span a database with data in it, and the Java stored-procedure server on as well
+as off: `process_javasp(STOP)` runs first and is the second that separates 2.02 s from 1.01 s.
+
+**The risk is the opposite shape to B-T9's, and then it is not.** Returning early from a *start*
+hands the case a server; if that were wrong the case fails visibly. Returning early from a *stop*
+hands the case a database it believes is down, and if that were wrong the next `deletedb` or
+`createdb` would act on live files. But unlike start, the predicate here can be the state itself
+rather than a promise about it: **the process is gone (`kill -0` fails) and the master no longer
+lists it**. Both are cheap, and if both hold the case's belief is true. So the risk collapses back
+to the output text, which is where B-T9's already is.
+
+**The output is harder here than it was for start.** `cub_commdb` prints its own two lines as a
+child process, and the order they land in depends on buffering -- into a file the child's text
+arrives before the parent's, because the parent's stdout is block-buffered and the child flushes its
+own:
+
+```
+Server <db> notified of shutdown.
+This may take several minutes. Please wait.
+@ cubrid server stop: <db>
+++ cubrid server stop: success
+```
+
+Five cases hold this in an answer file, four of which are already in B-T9's fourteen, so the
+instrument for checking it exists. **A third of the calls would decline anyway**: in a sample of
+case logs, `++ cubrid server '<db>' is not running.` appears 98 times against 172 successes, and
+that path does no shutdown work and has nothing to save.
+
+| Worth | 2,239 of the 3,452 case scripts stop a server, so a bound of one second each is under half of what B-T9 is worth, and the true figure is smaller by however long a shutdown really takes |
+| First | measure `t_gone` against `t_return`, on an empty database and on one with data, with the stored-procedure server on and off. If `t_gone` is not well under a second there is nothing here and this entry closes |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

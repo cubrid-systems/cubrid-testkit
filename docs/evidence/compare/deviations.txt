@@ -1,0 +1,28 @@
+# Differences in the verdict-carrying files that this runner makes on purpose.
+#
+# Format:  <id> TAB <the difference line, exactly as compare.sh prints it>
+# The leading "< " means CTP alone produced it, "> " means testkit alone did.
+#
+# Matching is whole-line and literal, not regex, and that is the point. These
+# lines are exempt from the rule that a verdict file must be identical, so the
+# exemption has to be impossible to widen by accident: a regex here could grow
+# to cover a real difference the day someone edits it. A literal line covers one
+# line and nothing else, and a changed message stops matching and comes back as
+# a failure, which is the correct outcome.
+#
+# The bar for an entry: the deviation is deliberate, it is written up outside
+# this file, and reproducing CTP instead would make someone trust a wrong
+# result. Everything that does not clear that bar belongs in baseline.txt, and
+# baseline.txt does not apply to these files at all.
+#
+# compare.sh names each match in its report, so an exemption is visible rather
+# than silent.
+
+# CTP's requirements check tests each command with a csh-shaped condition that
+# is always true, so it printed PASS for every command whether or not it was
+# there -- dos2unix included, on machines that do not have it. Reporting PASS
+# for an absent command is the failure mode the check exists to prevent, so the
+# check now actually tests, and dos2unix left the required list because nothing
+# in the corpus calls it. README "The freeze preserves what CTP did, not what
+# CTP got wrong"; evidence/spec-corrections.md.
+dos2unix-not-required	< ==> Check command 'dos2unix' ...... PASS

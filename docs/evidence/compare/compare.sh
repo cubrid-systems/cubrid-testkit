@@ -8,9 +8,11 @@
 #
 # "Clean" means two different things, and the split is the design. The six files
 # that carry verdicts must be identical, with the baseline not applied: a rule
-# that let one of them differ quietly would hide the only thing this is for. The
-# other four carry prose, environment and traced output, and go through
-# baseline.txt; whatever matches no rule is printed in full.
+# that let one of them differ quietly would hide the only thing this is for.
+# Their one exemption is deviations.txt, which matches whole lines literally and
+# names every match in the report. The other four carry prose, environment and
+# traced output, and go through baseline.txt; whatever matches no rule is
+# printed in full.
 #
 # The operator is comm rather than diff because normalize.sh leaves both inputs
 # sorted, and on sorted input comm is the exact multiset difference. diff also
@@ -21,6 +23,7 @@ set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 normalize=$here/../normalize.sh
 rules=$here/baseline.txt
+deviations=$here/deviations.txt
 
 if [ $# -lt 2 ]; then
   echo "usage: compare.sh <ctp-result-dir> <testkit-result-dir> [label]" >&2
@@ -47,6 +50,19 @@ strict() {
     check_*.log|monitor_*.log)                 return 0 ;;
     *)                                         return 1 ;;
   esac
+}
+
+# named_deviations reports which recorded exemptions a strict file used, so an
+# exemption is never silent. It re-reads the raw difference kept in $work/raw.
+named_deviations() {
+  [ -r "$deviations" ] || return 0
+  local out="" id line
+  while IFS=$'\t' read -r id line; do
+    case $id in \#*|"") continue ;; esac
+    [ -n "$line" ] || continue
+    if LC_ALL=C grep -F -x -q -- "$line" "$work/raw" 2>/dev/null; then out="$out $id"; fi
+  done < "$deviations"
+  [ -n "$out" ] && echo " (allowed:$out)"
 }
 
 echo "=== $label ==="
@@ -111,12 +127,19 @@ for f in $both; do
     LC_ALL=C comm -23 "$work/a" "$work/b" | sed 's/^/< /'
     LC_ALL=C comm -13 "$work/a" "$work/b" | sed 's/^/> /'
   } > "$work/d"
+  cp "$work/d" "$work/raw"
   n=$(wc -l < "$work/d")
   lines=$(wc -l < "$work/a")
 
   if strict "$f"; then
+    if [ -s "$work/d" ] && [ -r "$deviations" ]; then
+      cut -f2- "$deviations" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' > "$work/dev"
+      LC_ALL=C grep -F -x -v -f "$work/dev" "$work/d" > "$work/d2" || true
+      mv "$work/d2" "$work/d"
+      n=$(wc -l < "$work/d")
+    fi
     if [ "$n" -eq 0 ]; then
-      printf '  %-28s %6s lines   identical\n' "$f" "$lines"
+      printf '  %-28s %6s lines   identical%s\n' "$f" "$lines" "$(named_deviations "$f")"
     else
       printf '  %-28s %6s lines   VERDICT FILE DIFFERS -- %s lines, baseline not applied\n' "$f" "$lines" "$n"
       sed 's/^/    /' "$work/d"

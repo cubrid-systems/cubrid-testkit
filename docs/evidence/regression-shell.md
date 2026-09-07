@@ -166,9 +166,9 @@ such a pair the same way it reports an alignment artifact, and the difference
 was not looked at. Replacing `diff` with `comm` — the two files are sorted, so
 `comm` is the exact multiset difference and has no alignment step to blame —
 made the ten lines the only unexplained thing left, which is what they had been
-all along. `evidence/compare/README.md` records the leading hypothesis: the
-case drives `csql` through `expect`, and the two runners give a case a
-different standard input.
+all along. The two runners do give a case a different standard input -- a pipe
+against `/dev/null` -- but that is measurably not the cause, and
+`evidence/compare/README.md` records what eliminating it left.
 
 Everything else is accounted for.
 

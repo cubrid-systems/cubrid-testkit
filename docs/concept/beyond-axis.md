@@ -57,6 +57,22 @@ not passed its gate. The rule is not ceremony -- improving the reset before the 
 equivalent would leave any later difference with two possible causes. Corrected the day it was
 written, which is the cheapest a correction ever gets.
 
+**A runner at PID 1 has to reap, and this one does not (2026-09-07).** The comparison wrapper found
+this before the feature did. `in-ns.sh` ended in `exec "$@"`, which makes whichever runner it starts
+PID 1 of the new PID namespace -- and PID 1 must collect orphans. A shell does, so CTP, whose PID 1
+was `bash ctp.sh`, collected what its cases left behind. A Go binary does not, so testkit did not:
+`cub_master` never learned that `cub_server` had exited, and `cubrid server stop` polled through
+`cub_commdb -S` indefinitely. On `_01_sqlx/bug_cubridsus2018` that is 21 s under CTP against over
+twelve minutes under testkit, and 15 s under testkit once a shell is left at PID 1.
+
+In the sandbox it is the wrapper's bug and it is fixed there. **For this entry it is the feature's
+bug**, because a container is exactly the case where the runner *is* PID 1 with no shell above it
+and no system init to fall back on. Handing testkit a container therefore means one of two things,
+and the entry has to choose: the runner reaps orphans itself, or the image ships an init and the
+runner documents that it requires one. Neither is written yet.
+
+| Also in scope | reaping, on the terms above. The evidence that it matters is already measured: `evidence/smoke-217.md` |
+
 ### B-T3. Cases that run at the same time — **blocked**
 
 | | |

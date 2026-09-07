@@ -145,7 +145,7 @@ version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
 | 0 — analysis | **done** | 39 documents on what CTP actually does |
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
-| **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` end-to-end and matching CTP's verdicts on four real cases; `run-shell` complete, with six axis-T options. The gate is the full corpus |
+| **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` end-to-end and matching CTP's verdicts on four real cases; `run-shell` complete, with six axis-T options. The harness that compares a corpus is built; the gate is running it |
 | 4 — the rest | — | `sql` family, `isolation`, `ha_repl`, `cdc_repl`, `jdbc` |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
@@ -155,17 +155,28 @@ version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
 minute: both **3 passed, 1 failed**, the same case failing on both, the same summary counters, exit
 code 0. Of the ten files a run leaves behind, **six are byte-identical** after normalisation —
 including the two that carry the verdicts — one more is identical once the JVM's own system
-properties are removed, and the remaining three differ by a named number of lines, each with a
-reason ([`evidence/regression-shell.md`](docs/evidence/regression-shell.md)).
+properties are removed, and the remaining three differ by a named number of lines
+([`evidence/regression-shell.md`](docs/evidence/regression-shell.md)).
+
+Those counts were taken again on 2026-09-07 and most of them moved, because the largest difference
+turned out to be **this runner's own defect** — a failing case wrote its console output to the
+worker log twice — and `test_local.log` fell from 650 lines to 154 when it was fixed. Ten lines are
+still unexplained, and saying so is the point: the page previously had one unexplained difference
+and it was the wrong one.
 
 **The gate.** Equivalence is proven by comparing normalised output over the whole shell corpus —
 3,452 cases, with the 195 in `_25_unstable` counted separately because their own readme says they
 depend on machine load and elapsed time ([ADR-013](docs/adr/ADR-013-regression-equivalence.md)).
-`TESTKIT_NATIVE_SHELL` comes off when that clears.
+`TESTKIT_NATIVE_SHELL` comes off when that clears. That is 64 shards and tens of hours on each
+runner, so it is run by [`evidence/compare/`](docs/evidence/compare/README.md) rather than by hand:
+a shard is the unit of resume, the six files that carry verdicts are held to zero differences with
+no baseline allowed, and everything else is classified — so that a difference nobody has seen
+before is the only thing on the page.
 
 **Corrections are recorded where the mistake was made.** The CLI survey that justified the project
 covered one entry point out of fifteen; the freeze specification was wrong in eight further places;
-the corpus counts were 3,722 and 204 until the discovery rule was fixed
+the corpus counts were 3,722 and 204 until the discovery rule was fixed; and the one difference the
+first comparison could not explain was blamed on the environment when it belonged to this runner
 ([`evidence/spec-corrections.md`](docs/evidence/spec-corrections.md)).
 
 ## Layout
@@ -182,7 +193,8 @@ docs/
   concept/               north star, the freeze, non-goals, exclusions
   design/                architecture, contracts, one doc per module
   analysis/              what CTP actually does, measured
-  evidence/              regression evidence and the normaliser
+  evidence/              regression evidence, the normaliser, and the corrections
+    compare/             the harness that runs the corpus and classifies what differs
   extensions/            testing axes CTP never had
   survey/                the DBMS testing ecosystem, classified into eight axes
 ```
@@ -196,6 +208,7 @@ docs/
 | what may never change | [`concept/external-surface-freeze.md`](docs/concept/external-surface-freeze.md) |
 | what was left out, and why | [`concept/migration-exclusions.md`](docs/concept/migration-exclusions.md) |
 | how it is built | [`design/architecture.md`](docs/design/architecture.md) · [`design/contracts.md`](docs/design/contracts.md) |
+| how equivalence is decided, and run | [`adr/ADR-013`](docs/adr/ADR-013-regression-equivalence.md) · [`evidence/compare/`](docs/evidence/compare/README.md) |
 | what happens next | [`ROADMAP.md`](docs/ROADMAP.md) · [`design/module-shell.md`](docs/design/module-shell.md) |
 | every decision so far | [`adr/README.md`](docs/adr/README.md) |
 

@@ -6,7 +6,7 @@
 - **Method:** `evidence/compare/`, one shard, ADR-013 normalisation.
 
 > **It produced no comparison.** CTP finished; testkit stopped at case 2 of 217
-> and would not have restarted. What it produced instead is three findings, and
+> and would not have restarted. What it produced instead is four findings, and
 > they are worth more than the comparison would have been.
 
 ---
@@ -108,7 +108,32 @@ intent. But `$USER` reaches the cases — `TEST_SSH_USER` is built from it — a
 `ipcs | grep $USER` reads it too, so it is a change to what a case observes.
 That is a freeze question, and it is left open here rather than answered.
 
-## 4. What this run does not tell us
+## 4. Why it was slow, which turned out not to be the runner
+
+Diagnosed after the run was stopped. `_01_sqlx/bug_cubridsus2018` runs in 21 seconds under CTP and
+timed out under testkit, on the same machine in the same minute, so it was not machine state. It was
+the wrapper.
+
+`in-ns.sh` ended in `exec "$@"`, which makes whichever runner it starts **PID 1 of the new PID
+namespace**. PID 1 has to collect orphans. A shell does; a Go binary does not. CTP's PID 1 was
+`bash ctp.sh` and it collected what its cases left; testkit's was the runner and it did not, so
+`cub_master` never learned that `cub_server` had exited and `cubrid server stop` polled through
+`cub_commdb -S` indefinitely. The zombies in §2 were the symptom, read at the time as debris.
+
+| `_01_sqlx/bug_cubridsus2018` | |
+|---|---|
+| CTP, `exec` wrapper | 21 s, `[NOK]` |
+| testkit, `exec` wrapper | **over 12 minutes**, hung |
+| testkit, shell left at PID 1 | **15 s**, `[NOK]` |
+| CTP, shell left at PID 1 | 23 s, `[NOK]` |
+
+Same verdict on all four. The wrapper keeps a shell at PID 1 now.
+
+**It is not a defect in the runner** — a QA machine has no namespace, so PID 1 is the system init and
+reaps. It is a defect in the runner *as a container image*, which is what B-T2 is about, and it is
+recorded there: handing testkit a container puts it at PID 1 for real, with no shell above it.
+
+## 5. What this run does not tell us
 
 | | |
 |---|---|

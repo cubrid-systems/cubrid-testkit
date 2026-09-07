@@ -92,6 +92,7 @@ Two kinds: running the new runner, and running it *beside* CTP on the same cases
 | **`check_<envId>.log`** — a twenty-one line requirements check (variables, commands, directories) written to the file *and* to standard output before any case runs. The specification had neither the file nor the console lines | `CheckRequirement` |
 | **`monitor_<envId>.log` is created whether or not anything is written to it**, so every result directory has one, usually empty | `TestMonitor`, `Log` |
 
+| **The process reset selects nothing inside the comparison's own namespace** *(2026-09-07)*. Both runners sweep with `ps -u $USER`. Under `unshare --map-root-user` the processes are uid 0 while `$USER` is still the outer name, so the selector matches nothing: every `killPatterns` entry, the JVM sweep, the `sleep`/`expect`/`dos2unix` kills and `ipcs \| grep $USER` have been no-ops in every namespaced run. Only `cubrid service stop`, the one line that does not go through `ps`, ever did anything. The spec described the reset as a thing that runs | `smoke-217.md` §3, measured directly inside the wrapper |
 | **A case under CTP inherits the JDK's rewrite of `LD_LIBRARY_PATH`** *(2026-09-06)*. When a JVM library directory is on the variable but not at its head, the JDK 8 launcher rebuilds it as `<its own three directories>:<the original>` and re-execs; `Runtime.exec` then hands that to every case. CTP does not do this and cannot stop it — its entry point is `java`. The spec described the environment a case is entitled to assume and had no row for this | `regression-shell.md` §3-5, reproduced with `jrunscript` |
 
 **What this method catches:** whole surfaces nobody thought to write down. Reading more carefully
@@ -186,7 +187,7 @@ nothing, are both invisible until someone has to decide whether to carry them ov
 
 A frozen surface is only as good as the reading behind it, and the reading was done six different
 ways here with six different yields. The spec was not careless — it was written from a careful
-analysis — and it was still wrong in thirty-three places, every one of them F1.
+analysis — and it was still wrong in thirty-four places, every one of them F1.
 
 Three practical consequences:
 
@@ -201,7 +202,7 @@ Three practical consequences:
 
 ## Where CTP does not agree with itself
 
-Some of the thirty-three are not errors the spec could have avoided by reading harder. They are
+Some of the thirty-four are not errors the spec could have avoided by reading harder. They are
 places where CTP cannot reproduce its own behaviour, or where two parts of it contradict each other.
 Each one needs a decision, and the decisions are not all the same:
 

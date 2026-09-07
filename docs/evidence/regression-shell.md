@@ -34,6 +34,14 @@ memory segment. On this machine that was 63 processes — three `cub_master`s, a
 makes `ps -u $USER` and `ipcs` show the run its own work and nothing else. **CTP has the same
 problem**: this is not a property of the port.
 
+**Corrected 2026-09-07.** The paragraph above is wrong about what the namespace
+achieves. `ps -u $USER` selects *nothing* inside `unshare --map-root-user` — the
+processes are uid 0 while `$USER` is still the outer name — so the sweep is not
+scoped to the run's own work, it is empty. The containment is real and both
+runners were affected identically, so this comparison stands; what it did not do
+is exercise the reset at all. Measured and written up in
+[`smoke-217.md`](smoke-217.md) §3.
+
 **`/bin/sh` here is dash, and the shell suite has never run on dash.** Without the bind mount CTP
 fails every case with `init.sh: Syntax error: "(" unexpected`, and so does testkit. Making `/bin/sh`
 bash reproduces the platform CTP supports rather than testing both runners against a shell neither
@@ -90,13 +98,13 @@ including both `AUTO_TEST_*` keys.
 **Grade: F2.** The configuration keys are frozen; the JVM's description of itself is not a fact about
 the test run.
 
-### 3-2. `feedback.log` — 8 lines
+### 3-2. `feedback.log` — 6 lines
 
 Two blank lines, and six lines inside the failing case's traced output: `LD_LIBRARY_PATH` (see 3-5)
 and a `rm -rf $CUBRID/log/*` whose glob expanded on one side and not the other because the directory
 was empty. No line that reports a verdict differs.
 
-### 3-3. `test-shell.xml` — 13 lines
+### 3-3. `test-shell.xml` — 11 lines
 
 CTP writes a passing case as `<testcase ...></testcase>`; this writes `<testcase .../>`. Same
 document, different serialisation, which is the F2 grade this file was given when it was written —

@@ -48,6 +48,12 @@ type Worker struct {
 	current time.Time
 	timedIn string
 	timeout bool
+	// abort ends the case in flight. It is the monitor's last resort, and it is
+	// nil whenever no case is running.
+	abort context.CancelFunc
+	// resolved is when the monitor first declared this case over time. Zero means
+	// it has not. The monitor measures its own grace period from here.
+	resolved time.Time
 }
 
 // envIdentify is the string feedback records a case against.
@@ -84,11 +90,16 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.Report.CaseStart(ticket.Case, w.envIdentify())
 		w.log("[TESTCASE] " + ticket.Case)
 
+		// The case gets a context of its own so the monitor has something to pull
+		// when its sweep has not freed the case. Cancelling this one ends the
+		// case; cancelling the run's ends everything.
+		caseCtx, abort := context.WithCancel(ctx)
 		start := time.Now()
-		w.beginCase(start, ticket.Case)
-		items, console := w.runOne(ctx, c)
+		w.beginCase(start, ticket.Case, abort)
+		items, console := w.runOne(caseCtx, c)
 		elapsed := time.Since(start)
 		w.endCase()
+		abort()
 
 		v := verdictOf(items)
 		if w.tookTooLong() {
@@ -265,16 +276,17 @@ func (w *Worker) log(line string) {
 	}
 }
 
-func (w *Worker) beginCase(at time.Time, name string) {
+func (w *Worker) beginCase(at time.Time, name string, abort context.CancelFunc) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.current, w.timedIn, w.timeout = at, name, false
+	w.abort, w.resolved = abort, time.Time{}
 }
 
 func (w *Worker) endCase() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.current = time.Time{}
+	w.current, w.abort, w.resolved = time.Time{}, nil, time.Time{}
 }
 
 func (w *Worker) tookTooLong() bool {
@@ -293,9 +305,31 @@ func (w *Worker) runningSince() (time.Time, string) {
 	return w.current, w.timedIn
 }
 
-func (w *Worker) markTimedOut() {
+// markTimedOut records that the case in flight ran past its timeout, and says
+// whether this is the first time. It deliberately leaves `current` alone.
+//
+// It used to clear it, which stopped the monitor after one pass -- runningSince
+// returned zero and every later check gave up before doing anything. CTP does not
+// do that: TestMonitor.resolveTimeout leaves test.startTime set, so it resolves
+// again every three seconds for as long as the case keeps running, and its
+// feedback carries one entry per pass. Clearing the field was a divergence with
+// no reason behind it.
+func (w *Worker) markTimedOut() (first bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	first = !w.timeout
 	w.timeout = true
-	w.current = time.Time{}
+	if first {
+		w.resolved = time.Now()
+	}
+	return first
+}
+
+// resolvedAt reports when the monitor first resolved the case in flight, and the
+// function that ends it. Both are zero when nothing is running or nothing has
+// timed out.
+func (w *Worker) resolvedAt() (time.Time, context.CancelFunc) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.resolved, w.abort
 }

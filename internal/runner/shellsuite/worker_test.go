@@ -382,9 +382,9 @@ func TestAMonitorIsInertWithoutATimeout(t *testing.T) {
 func TestTheMonitorKillsTheProcessesRatherThanTheConnection(t *testing.T) {
 	ch := &guardedChannel{inner: exec.NewLocal("")}
 	w := &Worker{EnvID: "env1", Channel: ch, Sink: newSink(t), Report: feedback.Null{}, Local: true}
-	w.beginCase(time.Now().Add(-time.Hour), "a/b/cases/b.sh")
+	w.beginCase(time.Now().Add(-time.Hour), "a/b/cases/b.sh", func() {})
 
-	m := &Monitor{Worker: w, Channel: ch, Timeout: time.Second, Local: true}
+	m := &Monitor{Worker: w, Channel: ch, Timeout: time.Second, Local: true, EscalateAfter: -1}
 	m.check(t.Context())
 
 	if !ch.asked("cubrid service stop") {
@@ -392,5 +392,60 @@ func TestTheMonitorKillsTheProcessesRatherThanTheConnection(t *testing.T) {
 	}
 	if !w.tookTooLong() {
 		t.Error("the case was not marked as timed out")
+	}
+}
+
+// CTP resolves again every three seconds for as long as the case keeps running:
+// resolveTimeout leaves test.startTime set. This used to resolve once, because
+// markTimedOut cleared the start time and every later check gave up before doing
+// anything.
+func TestTheMonitorKeepsResolvingWhileTheCaseRuns(t *testing.T) {
+	ch := &guardedChannel{inner: exec.NewLocal("")}
+	w := &Worker{EnvID: "env1", Channel: ch, Sink: newSink(t), Report: feedback.Null{}, Local: true}
+	w.beginCase(time.Now().Add(-time.Hour), "a/b/cases/b.sh", func() {})
+
+	m := &Monitor{Worker: w, Channel: ch, Timeout: time.Second, Local: true, EscalateAfter: -1}
+	m.check(t.Context())
+	first := ch.count()
+	m.check(t.Context())
+
+	if second := ch.count(); second <= first {
+		t.Errorf("the monitor resolved once and stopped: %d scripts after one pass, %d after two", first, second)
+	}
+}
+
+// A sweep that does not free the case used to leave the worker blocked for good.
+// docs/evidence/regression-shell.md records the run where that happened.
+func TestTheMonitorEndsACaseTheSweepDidNotFree(t *testing.T) {
+	ch := &guardedChannel{inner: exec.NewLocal("")}
+	w := &Worker{EnvID: "env1", Channel: ch, Sink: newSink(t), Report: feedback.Null{}, Local: true}
+
+	aborted := false
+	w.beginCase(time.Now().Add(-time.Hour), "a/b/cases/b.sh", func() { aborted = true })
+
+	m := &Monitor{Worker: w, Channel: ch, Timeout: time.Second, Local: true, EscalateAfter: time.Nanosecond}
+	m.check(t.Context()) // resolves, and starts the grace period
+	if aborted {
+		t.Error("the monitor gave up on the first pass, before the sweep had a chance")
+	}
+	m.check(t.Context()) // the grace period has passed; the case is still running
+	if !aborted {
+		t.Error("the case was never ended, so the worker would wait for it for ever")
+	}
+}
+
+// Off means off: a run that wants CTP's behaviour unaltered gets it.
+func TestEscalationCanBeTurnedOff(t *testing.T) {
+	ch := &guardedChannel{inner: exec.NewLocal("")}
+	w := &Worker{EnvID: "env1", Channel: ch, Sink: newSink(t), Report: feedback.Null{}, Local: true}
+
+	aborted := false
+	w.beginCase(time.Now().Add(-time.Hour), "a/b/cases/b.sh", func() { aborted = true })
+
+	m := &Monitor{Worker: w, Channel: ch, Timeout: time.Second, Local: true, EscalateAfter: -1}
+	m.check(t.Context())
+	m.check(t.Context())
+	if aborted {
+		t.Error("escalation ran with a negative grace period")
 	}
 }

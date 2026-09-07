@@ -16,7 +16,14 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"syscall"
+	"time"
 )
+
+// cancelGrace is how long Wait will keep reading a cancelled command's output
+// before giving up on it. Something outside the process group holding the pipe
+// is a bug worth a few seconds, not a reason to block a whole run.
+const cancelGrace = 5 * time.Second
 
 // Result is what a command left behind.
 type Result struct {
@@ -135,6 +142,27 @@ func (l *Local) Run(ctx context.Context, script string) (Result, error) {
 	cmd := osexec.CommandContext(ctx, Shell, name)
 	cmd.Dir = l.Dir
 	cmd.Env = l.Env
+
+	// A case is a tree, not a process, so cancelling has to reach the tree.
+	//
+	// The script runs in a process group of its own and cancellation kills the
+	// group. Without Setpgid, CommandContext signals the shell alone and every
+	// descendant it started -- the case script, a csql, a cub_commdb sleeping in
+	// a retry loop -- survives, holding the pipe open so Wait never returns. The
+	// runner would go on believing the case is still running, which is exactly
+	// what it did before this existed.
+	//
+	// WaitDelay bounds what is left. If some descendant escaped the group and
+	// still holds standard output, Wait gives up on the pipe rather than
+	// blocking, and reports the case rather than hanging on it.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = cancelGrace
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

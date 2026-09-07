@@ -64,6 +64,33 @@ CTP's entry point is `java` and the JDK 8 launcher reorders the variable (`regre
 profile puts a JVM directory mid-path, and masking it would hide the one place where the two
 runners genuinely hand a case something different.
 
+**Measured before judged** — added 2026-09-08. A difference is not a finding until the cases it
+involves are known to reproduce. Before a difference between the two runners can be attributed to
+the runners, **one runner is run twice over the same shard**, and the cases that disagree with
+themselves are counted separately -- as `_25_unstable` already is, and for the same reason rather
+than as a convenience.
+
+This is the argument that removed `dispatch_tc_ALL.txt` from being gradeable, moved from a file to a
+verdict: **a case whose verdict one runner cannot reproduce against itself cannot be evidence that
+two runners differ.** Skipping the step is not hypothetical. The first 217-case comparison reported
+five disagreements as runner differences; none of them was one.
+
+**It is a gate on findings, not a third full run.** Running the whole corpus a third time would cost
+as much as the comparison itself. The self-check is owed only where the comparison actually found
+something: a shard that compares clean needs no alibi, and a shard that does not is not evidence
+until its cases have produced one. `evidence/compare/selfcheck.sh` is the instrument.
+
+**What a clean self-check licenses is narrow.** Over `_01_utility` it found every case agreeing --
+173 OK and 44 NOK twice, the same cases in each column. That is one observation about one runner in
+one window; it does not make the corpus stable, and in the same window CTP disagreed with *itself*
+on `itrack01`. What it supports is only this: the differences that remain are not explained by a
+corpus that cannot reproduce itself.
+
+**The by-product is the more useful half.** Two runs of one runner are the floor under which no
+difference means anything -- 24 new lines in `feedback.log` against 2,874 between the runners, and
+the four files that carry verdicts identical even across runs. Without that number, "2,874 lines
+differ" is a quantity with nothing to compare it to.
+
 **Corpus.** The exit evidence runs the whole shell corpus — `cubrid-testcases-private-ex/shell`,
 3,452 cases. The development loop uses `_01_utility` (217 cases) as a smoke set: deterministic,
 low external dependency, and chosen for a reason that can be stated.
@@ -98,3 +125,6 @@ Excluded from the evidence, each with a reason:
    not a failure.
 4. `DeployHA` ships unverified. It must be listed as such in `docs/evidence/regression-shell.md`, not
    left for someone to discover.
+5. **A shard that differs owes a self-check before its differences are reported** — added 2026-09-08.
+   The comparison harness produces the difference; the self-check decides whether it is about the
+   runners. Reporting one without the other is what the first 217-case run did.

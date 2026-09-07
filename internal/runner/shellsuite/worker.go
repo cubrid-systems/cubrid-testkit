@@ -77,7 +77,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			// Discovery cannot produce such a path, so this is a case list edited
 			// by hand or a continue file from another run. Fail it rather than
 			// dropping it silently.
-			w.finish(ticket, Verdict{Items: []string{resultItem("NOK", err.Error())}}, 0)
+			w.finish(ticket, Verdict{Items: []string{resultItem("NOK", err.Error())}}, "", 0)
 			continue
 		}
 
@@ -95,12 +95,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			v.Success = false
 			v.Items = append(v.Items, resultItem("NOK", "timeout"))
 		}
-		if !v.Success {
-			v.Items = append(v.Items,
-				"============================= CONSOLE OUTPUT =============================",
-				console)
-		}
-		w.finish(ticket, v, elapsed)
+		w.finish(ticket, v, console, elapsed)
 	}
 }
 
@@ -176,7 +171,14 @@ func (w *Worker) collect(ctx context.Context, c Case) ([]string, error) {
 // finish records the outcome and decides whether it is a verdict yet. A case
 // going back for a retry has produced no verdict: it is not printed, and it is
 // not written to the finished list, or a resumed run would skip it.
-func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, elapsed time.Duration) {
+//
+// The console output goes to feedback and not to the worker log. CTP kept two
+// buffers for exactly this: resultItemList, which workerLog receives line by
+// line, and resultCont, which is that list plus -- for a case that failed -- the
+// banner and the console output (Test.java). Putting the console in the items
+// would write it to the worker log a second time, because runOne has already
+// written it there as the case produced it.
+func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elapsed time.Duration) {
 	for _, item := range v.Items {
 		w.log(item)
 	}
@@ -187,7 +189,7 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, elapsed time.Duration
 		EnvID:      w.envIdentify(),
 		Success:    v.Success,
 		Elapsed:    elapsed,
-		ResultText: strings.Join(v.Items, "\n"),
+		ResultText: resultText(v, console),
 		TimedOut:   w.timedOut(),
 		HasCore:    v.HasCore,
 		SkipType:   feedback.SkipTypeNo,
@@ -206,6 +208,24 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, elapsed time.Duration
 		w.log("[ERROR] cannot record the case as finished: " + err.Error())
 	}
 	w.log("")
+}
+
+// consoleBanner separates a failing case's result lines from the console output
+// appended after them. It is F1: it goes into feedback.log and test-shell.xml.
+const consoleBanner = "============================= CONSOLE OUTPUT ============================="
+
+// resultText is what feedback receives: the result items, and for a case that
+// failed, the console output after the banner. The banner follows a failure
+// whether or not the case said anything, which is what CTP did.
+func resultText(v Verdict, console string) string {
+	text := strings.Join(v.Items, "\n")
+	if v.Success {
+		return text
+	}
+	if text != "" {
+		text += "\n"
+	}
+	return text + consoleBanner + "\n" + console
 }
 
 // quietly runs a script whose output belongs in the worker log and whose failure

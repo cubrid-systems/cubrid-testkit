@@ -138,11 +138,10 @@ and the switch is a system parameter that exists — `query_trace_format`, whose
 | Improves on | T: nothing in the runner. **The cost is inside the cases, and the cases may not be touched (NG1)** |
 | Kind | **speed** — the same verdicts, sooner |
 
-**Where the time actually goes, measured.** The runner is not the problem. Between two cases it
-does a process reset and `RestoreScript`, which copies `conf/*` and `databases/*` out of
-`~/.CUBRID_SHELL_FM` and deletes logs and cores; the gap between one case ending and the next
-starting is **about one second**. The rest is inside the cases, and over all 217 of `_01_utility`
-the two runners spend it identically:
+**Where the time actually goes, measured.** The runner is not the problem, and the number says how
+much not: over 217 cases the runner spends **52 s against the cases' 3,922** -- 1%, or 0.2 s a case.
+`RestoreScript` between cases measures 0.00 s. The rest is inside the cases, and over all 217 of
+`_01_utility` the two runners spend it identically:
 
 | | CTP | testkit |
 |---|---:|---:|
@@ -152,8 +151,21 @@ the two runners spend it identically:
 | max | 219 s | 219 s |
 
 **The median is the number that matters.** Half the corpus is cases that do very little, and they
-still cost eleven seconds each, because eleven seconds is what it costs to arrive at the point where
-a case can do anything at all. The mean is higher only because a few cases really are long.
+still cost twelve seconds each, because that is what it costs to arrive at the point where a case
+can do anything at all. Timed one at a time, that point costs:
+
+| | measured | what it needs | |
+|---|---:|---:|---|
+| `cubrid createdb` | 4.6–7.7 s | — | wall 7.72 s against **0.53 s of CPU**: waiting, not computing |
+| `cubrid server start` | 3.02 s | **0.17 s** | the server answers a query at 0.17 s; the utility says so at 3.02 |
+| `cubrid server stop` | 2.02 s | ~0 s | the process is already gone when it returns |
+| `cubrid deletedb` | 0.21 s | 0.21 s | |
+
+`util_service.c` polls with `sleep (1)` -- `is_server_running`, and the `sleep (1); /* wait to
+start */` and `/* wait to stop */` loops around the Java stored-procedure server. Turning that
+server off with `java_stored_procedure=no` takes start to 2.02 s and stop to 1.01 s, so a second of
+each is javasp and the rest is the same one-second granularity. **94% of the corpus (3,260 of 3,452
+cases) creates a database, so every case pays this.**
 
 What a case spends it on is visible in its own trace:
 
@@ -167,10 +179,32 @@ What a case spends it on is visible in its own trace:
 + cubrid deletedb csqldb
 ```
 
-**The case asked for 20M and the engine laid out 1.1 GB**, because the volume size it was given is
-not the log volume or the generic volumes. Every case in the corpus does this: create a database,
-start a server, do a little work, throw the database away. Across 3,452 cases that is somewhere
-near four terabytes written and deleted to run a suite whose actual queries are small.
+**The case asked for 20M and the engine laid out 1.1 GB**, of which 707 MB is really on disk. Across
+3,452 cases that is over two terabytes written and deleted to run a suite whose queries are small.
+
+**It is not the disk, and that was measured rather than assumed.** Putting `databases/` on tmpfs
+takes `createdb` from 4.29 s to 4.57 s -- no faster. The first version of this entry named tmpfs as
+the cheapest of three options; it is not an option at all, and the CPU numbers above say why.
+
+**Copying a prepared database is 27 times cheaper than creating one**, and the prototype in
+`scratchpad` proves the whole path rather than the copy alone: create in one directory, save a
+sparse template (356 MB, half the on-disk size), restore into a *different* directory, start the
+server, answer a query.
+
+| | |
+|---|---:|
+| `cubrid createdb` | 4.60 s |
+| save the template | 0.16 s |
+| restore it elsewhere | **0.17 s** |
+
+Restoring elsewhere needs two things a plain copy does not do: `<db>_vinf` and `<db>_lginf` are
+ASCII and hold absolute paths, and `databases.txt` needs the entry. Both are text edits.
+
+**The key has to carry the name.** Keyed on options alone the copy has to be renamed, and
+`cubrid renamedb` costs 3.13 s -- it eats half the saving. Keyed on `(name, options, charset,
+build)` there is nothing to rename. `_01_utility` uses 64 such keys against 16 option-only ones, so
+the cache is bounded by disk rather than by correctness: at 356 MB a template, the six most-used
+keys cover 56% of the 223 calls for about 2 GB.
 
 **The interception point already exists, and it is not the cases.** `init.sh` puts `${init_path}`
 at the head of `PATH` and makes `${init_path}/cubrid` executable, so **every `cubrid` a case runs is
@@ -182,10 +216,13 @@ snapshot when recovery fails. `cubrid_createdb` — what cases actually call —
 `$CUBRID/databases/ccidbbak` and, if it is there and big enough, does `cp -r` instead of
 `createdb`. The pattern is not a new idea here; it is one function away from being general.
 
-| Beyond | three, in increasing order of what they touch. **(1)** put `$CUBRID_DATABASES` on tmpfs — nothing in CTP or the corpus changes, it is a placement decision. **(2)** generalise `create_ccidb` into `cubrid_createdb`: key a prepared database on `(charset, volume size, the parameters the case set)` and copy it when the key matches. **(3)** give each case a copy-on-write `$CUBRID` through overlayfs, which is worth little serially — the reset is already a second — and is what **B-T3** needs to give parallel cases an install each |
-| Evidence | wall clock for `_01_utility` before and after, **with verdicts identical rather than similar**, and `_25_unstable` run both ways. That family is the one whose own readme says it depends on elapsed time and machine load, so it is exactly where a change in I/O timing would show up as a changed verdict — and a case that only passes when the disk is slow is a finding, not a regression |
-| Instrument | `PS4='+[${EPOCHREALTIME}] '` exported from the runner's prologue puts a microsecond timestamp on every line `set -x` already prints, with no change to any case and none to `init.sh`, which sets no `PS4` of its own. It changes the bytes of the traced output, so it cannot be the default — it is a measurement mode, and it is what turns "createdb is slow" into a distribution |
-| Risk | tmpfs needs the memory, and all three change I/O timing. Under criterion 2 of ADR-015 none of them may be built before the shell task passes its gate, for the reason B-T2 and B-T3 carry: change the ground under a case before the comparison is clean and every later difference has two possible causes |
+| Beyond | **memoise `cubrid_createdb`.** Normalise its arguments into a key; copy the prepared database when one exists for that key, create it and keep it when one does not. `create_ccidb` in the same file already does this for one fixed database, so the shape is CTP's own |
+| Evidence | `selfcheck.sh` over `_01_utility` with the cache off and then on: **verdicts identical case by case**, not merely the same counts, and wall clock roughly halved. The instrument for this already exists and its floor is measured — two runs of one runner differ by 24 lines in `feedback.log` and none at all in the four files that carry verdicts, so a verdict that moves is a finding rather than noise. `_25_unstable` gets the same treatment: it is the family whose own readme says it depends on elapsed time, and a case that only passes when creation is slow is a finding, not an acceptable cost |
+| Where it goes | `init.sh`'s `cubrid_createdb`, which **both runners call**. That is what keeps criterion 2 satisfiable: the change does not distinguish CTP from testkit, so a comparison across it stays a comparison. What it does change is old behaviour against new, and `selfcheck.sh` is exactly the instrument for that |
+| Risk | a wrong key copies the wrong database, and that failure is silent. The mitigation is that the key *is* the parameters: same key, same database by construction. An argument the key does not understand falls through to a real `createdb` rather than being guessed at |
+| Not in the key | the parameters cases actually change. `supplemental_log`, `unicode_input_normalization`, `dont_reuse_heap_file`, `isolation_level` and `lock_timeout_in_secs` were each set before a `createdb` and the resulting files compared: **identical every time**, against `db_page_size` and `db_volume_size` which differ as they should. These are read by the server at startup, which happens after the copy, so a case's edit still takes effect. Hashing the whole `cubrid.conf` into the key -- the first thing this entry proposed -- would have missed the cache for the 46 cases that set `supplemental_log` and gained nothing |
+| Beyond the harness | start and stop are 5 s of the 11.6 and **about 4.8 of that is `sleep (1)`**. Removing it is an engine change, not a harness one: it is `util_service.c`, a third repository, and it belongs here only because the same measurement found it. Worth roughly 4.6 s a case -- **four hours a runner over the corpus** -- against the template cache's 6.2 s |
+| Why not share one database | because the corpus does not. 88% of cases call `deletedb`, 75% `server start`, 64% `server stop`: they own the lifecycle explicitly. 13% call `loaddb`, 6% `unloaddb`, 3% `backupdb`, 2% `restoredb` and 2% `checkdb` -- they test the database files themselves. A long-lived shared database would change what a quarter of the corpus is testing |
 
 ### B-T4. A verdict that says why — **idea**
 

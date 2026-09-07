@@ -50,6 +50,8 @@ ceremony: equivalence cannot be proven against a system that has already been im
 | Note | the wrapper already exists — `regression-shell.md` §1 had to build it before either runner could be measured. It is a script beside the evidence, not part of the runner. **This entry is about making it the runner's own behaviour**, which ADR-014 made possible by scoping the runner to one machine |
 | Also in scope | **fixing the JVM sweep** (freeze §11-23). `[ $isExistPid -eq 0]` has no space before the bracket, so the test is a shell syntax error, the branch is never taken, and CTP has never killed a stray JVM through it. Fixing it alone would widen what the runner kills, which is the direction ADR-014 moved away from; inside a namespace "every JVM the user owns" *is* "every JVM this run started", and the sweep does what it was written to do |
 | Why the coupling gets tighter | the sweep spares CTP's own JVM by matching `com.navercorp.cubridqa\|service.Server`. **When the migration finishes there is no CTP JVM to spare**, so that filter matches nothing and the fixed sweep becomes an unconditional "kill every JVM". The containment is not a nicety that could be added later -- it is what the fix depends on, and it depends on it more as the port progresses |
+| Also in scope | **the network.** The wrapper isolates mounts, pids and IPC and not ports, so a run's `cub_master` and brokers compete with everything else on the box for them -- 47 listening sockets on the machine this was measured on, against 0 inside an added `unshare --net` with `lo` up. That is a live source of verdict differences: broker cases fail when a port is held and pass when it is not. Unprivileged and cheap, and nothing in the corpus reads what it would change (`TEST_SSH_HOST` is read by no case, and by CTP only to name a host in a core-backup message). **Deliberately not done yet**: ADR-014 scopes the runner to one machine, and which resources a run may share with that machine is this entry's question rather than the runner's |
+| Also in scope | **reaping.** A container puts the runner at PID 1 with no shell above it; see the note below |
 
 **Status correction (2026-09-03).** This entry was first written as *ready*, and that was wrong
 under criterion 2 of ADR-015: the T item it improves on is the shell task, and the shell task has
@@ -71,7 +73,6 @@ and no system init to fall back on. Handing testkit a container therefore means 
 and the entry has to choose: the runner reaps orphans itself, or the image ships an init and the
 runner documents that it requires one. Neither is written yet.
 
-| Also in scope | reaping, on the terms above. The evidence that it matters is already measured: `evidence/smoke-217.md` |
 
 ### B-T3. Cases that run at the same time — **blocked**
 
@@ -79,7 +80,7 @@ runner documents that it requires one. Neither is written yet.
 |---|---|
 | Blocked on | T: the shell task passing the full-corpus gate (ADR-013) |
 | Improves on | T: `Test.runAll` — one case at a time, per machine |
-| Today | a case restores the whole CUBRID install before it runs (`RestoreScript`), so two cases cannot share a machine. `_01_utility` is 217 cases at roughly 70 seconds each: **about four hours, serially**, and the full corpus is 3,452 |
+| Today | a case restores the whole CUBRID install before it runs (`RestoreScript`), so two cases cannot share a machine. `_01_utility` is 217 cases at a measured median of 12 s: **66 minutes, serially**, and the full corpus is 3,452 -- around sixteen hours a runner |
 | Beyond | each case gets its own instance — own port, own shared-memory id, own data directory — so N run at once on one machine. The per-instance parameters this needs are the ones `ConfigureScript` already writes; what is missing is allocating them per case rather than per machine |
 | Evidence | wall-clock for `_01_utility` at N=1 against N=4 and N=8, with verdicts identical to the serial run — **identical, not merely similar**: a case that passes only when it has the machine to itself is a finding, not an acceptable cost |
 | Risk | this is where the parallel-run bugs live. It must not ship before the serial version is proven, or a difference has two possible causes |

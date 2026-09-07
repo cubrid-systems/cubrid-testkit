@@ -57,6 +57,20 @@ what it disagrees with itself about:
 Skipping this step makes every unstable case read as a runner difference, which
 is what the first 217-case report did with five of them.
 
+**It also measures the floor.** Two runs of the same runner over `_01_utility`
+differ by this much, and a difference smaller than this means nothing:
+
+| | |
+|---|---:|
+| `check_local.log` · `test_status.data` · `main_snapshot.properties` · `monitor_local.log` | identical |
+| `feedback.log` | 24 new |
+| `test-shell.xml` | 24 new |
+| `test_local.log` | 234 new |
+
+The four files that carry verdicts come out identical even across separate runs,
+which is why compare.sh is allowed to hold them to zero. The floor is per shard
+and per machine; re-measure it rather than quoting these numbers elsewhere.
+
 ## What a report means
 
 **`VERDICTS` comes first and answers the question.** It lists the cases the two

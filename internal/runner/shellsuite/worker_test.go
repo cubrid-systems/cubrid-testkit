@@ -207,6 +207,24 @@ func writeCase(t *testing.T, root, name, body string) string {
 	return path
 }
 
+// recordingFeedback keeps the case events so a test can read what feedback was
+// told, which is not always what the worker log says.
+type recordingFeedback struct {
+	feedback.Null
+	stopped []feedback.CaseStop
+}
+
+func (r *recordingFeedback) CaseStop(ev feedback.CaseStop) { r.stopped = append(r.stopped, ev) }
+
+func (r *recordingFeedback) find(name string) *feedback.CaseStop {
+	for i := range r.stopped {
+		if r.stopped[i].Case == name {
+			return &r.stopped[i]
+		}
+	}
+	return nil
+}
+
 func newSink(t *testing.T) *result.Sink {
 	t.Helper()
 	s, err := result.Open(&conf.Home{Path: t.TempDir()}, "shell", false)
@@ -220,15 +238,16 @@ func newSink(t *testing.T) *result.Sink {
 func TestAWorkerRunsCasesAndRecordsTheirVerdicts(t *testing.T) {
 	root := t.TempDir()
 	pass := writeCase(t, root, "passing", `echo " : OK passing" >> passing.result`)
-	fail := writeCase(t, root, "failing", `echo " : NOK it did not work" >> failing.result`)
+	fail := writeCase(t, root, "failing", `echo CONSOLE-MARKER; echo " : NOK it did not work" >> failing.result`)
 
 	ch := &guardedChannel{inner: exec.NewLocal("")}
 	sink := newSink(t)
 	q := dispatch.New([]string{pass, fail}, 0)
 
+	reported := &recordingFeedback{}
 	w := &Worker{
 		EnvID: "env1", Channel: ch, Queue: q, Sink: sink,
-		Report: feedback.Null{}, Local: true,
+		Report: reported, Local: true,
 	}
 	if err := w.Run(t.Context()); err != nil {
 		t.Fatal(err)
@@ -251,8 +270,23 @@ func TestAWorkerRunsCasesAndRecordsTheirVerdicts(t *testing.T) {
 	if !strings.Contains(string(log), " : OK passing") {
 		t.Errorf("the passing case's result is not in the worker log:\n%s", log)
 	}
-	if !strings.Contains(string(log), "CONSOLE OUTPUT") {
-		t.Error("a failing case did not get its console output attached")
+
+	// The console output belongs to feedback, and to the worker log only once --
+	// as the case produced it. CTP wrote the items to workerLog and the banner
+	// plus the console to resultCont, and the two never met.
+	if n := strings.Count(string(log), "CONSOLE-MARKER"); n != 1 {
+		t.Errorf("the failing case's console output is in the worker log %d times, want 1:\n%s", n, log)
+	}
+	if strings.Contains(string(log), consoleBanner) {
+		t.Error("the console banner reached the worker log; CTP put it in resultCont only")
+	}
+	failed := reported.find(fail)
+	if failed == nil {
+		t.Fatal("feedback never heard about the failing case")
+	}
+	if !strings.Contains(failed.ResultText, consoleBanner) ||
+		!strings.Contains(failed.ResultText, "CONSOLE-MARKER") {
+		t.Errorf("feedback did not get the banner and the console output:\n%s", failed.ResultText)
 	}
 
 	if !ch.asked("cubrid service stop") {

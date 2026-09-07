@@ -141,9 +141,28 @@ What the 154 are:
 | `LD_LIBRARY_PATH` | 9 | 3-5; the harness change removes it on the next run |
 | blank lines | 8 | trailing the above |
 | `rm -rf $CUBRID/log/*` | 2 | 3-2 |
-| `diff` alignment | ~9 | lines whose bytes are identical, paired inside a changed hunk |
+| `csql_help`'s console shape | 10 | **open** — see below |
 
-Nothing is unaccounted for.
+**Corrected 2026-09-07.** The last row said "`diff` alignment — lines whose
+bytes are identical, paired inside a changed hunk", and that was wrong. The
+bytes are not identical:
+
+```
+CTP      \tCUBRID SQL Interpreter
+testkit  \t\tCUBRID SQL Interpreter\r
+```
+
+An extra leading tab and a carriage return, on every line of the `_38_csql/
+csql_help` case's `csql` session. It was written off because `diff` reports
+such a pair the same way it reports an alignment artifact, and the difference
+was not looked at. Replacing `diff` with `comm` — the two files are sorted, so
+`comm` is the exact multiset difference and has no alignment step to blame —
+made the ten lines the only unexplained thing left, which is what they had been
+all along. `evidence/compare/README.md` records the leading hypothesis: the
+case drives `csql` through `expect`, and the two runners give a case a
+different standard input.
+
+Everything else is accounted for.
 
 ### 3-5. `LD_LIBRARY_PATH` differs, and the JDK 8 launcher is why
 

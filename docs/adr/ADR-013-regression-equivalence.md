@@ -48,8 +48,21 @@ definition of what is frozen and what is not.
    is the contract. The new runner sorts at discovery, which makes its own reruns identical —
    a deviation in CTP's favour, recorded in `evidence/spec-corrections.md`
 
+7. **dates, wherever they appear** — added 2026-09-06. The rules masked a date only when a time
+   followed it, and the weekday form only with a zero-padded day and no meridiem. Two runs an hour
+   and a half apart across midnight therefore differed on every `date` a case calls: 48 lines in the
+   first comparison, none of them about the runners. The server error log's `_<YYYYMMDD>_<HHMM>`
+   name goes with them.
+
 **Not masked, and fixed as a precondition instead:** build id, bit width, charset. Masking these
 would leave the evidence unable to state that both sides ran against the same build.
+
+**Not masked, and left standing:** the environment a case inherits. A case under CTP sees three JVM
+library directories at the head of `LD_LIBRARY_PATH` that a case under testkit does not, because
+CTP's entry point is `java` and the JDK 8 launcher reorders the variable (`regression-shell.md`
+§3-5). The comparison harness avoids provoking it, but the difference is real on any machine whose
+profile puts a JVM directory mid-path, and masking it would hide the one place where the two
+runners genuinely hand a case something different.
 
 **Corpus.** The exit evidence runs the whole shell corpus — `cubrid-testcases-private-ex/shell`,
 3,452 cases. The development loop uses `_01_utility` (217 cases) as a smoke set: deterministic,

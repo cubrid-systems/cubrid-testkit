@@ -1,8 +1,8 @@
-# The first attempt at the smoke corpus
+# The smoke corpus
 
 - **Date:** 2026-09-07
-- **What this is:** the first time the two runners were put on `_01_utility` in
-  full — 217 cases rather than four — and an account of why it did not finish.
+- **What this is:** `_01_utility` in full — 217 cases rather than four — twice:
+  a first attempt that did not finish, and a second that did.
 - **Method:** `evidence/compare/`, one shard, ADR-013 normalisation.
 
 > **It produced no comparison.** CTP finished; testkit stopped at case 2 of 217
@@ -143,3 +143,52 @@ recorded there: handing testkit a container puts it at PID 1 for real, with no s
 
 The shard wrote no `report.txt`, so a resumed run does not skip it — which is
 the one part of the harness this confirmed by using it rather than by testing it.
+
+---
+
+## 6. The second run, which finished
+
+testkit again, with the monitor fix and a shell left at PID 1. Nothing stalled;
+**217/217, exit 0**, at 14.5 s a case against the morning's 18.9.
+
+Compared against the CTP tree from that morning:
+
+| | |
+|---|---|
+| `dispatch_tc_ALL.txt` | **217 lines, identical** — the same cases, in the same order |
+| `dispatch_tc_FIN_local.txt` | **217 lines, identical** — both finished all of them |
+| `current_task_id` · `monitor_local.log` | identical |
+| `main_snapshot.properties` | 55 differences, all classified, **0 new** |
+| `check_local.log` | identical, one recorded deviation (`dos2unix-not-required`) |
+| exit codes | 0 and 0 |
+| `test_status.data` | **170/47 against 173/44** |
+
+**Five cases disagree, and four of them are not a runner difference.**
+
+| CTP | testkit | case |
+|---|---|---|
+| NOK | OK | `_37_cubrid/_04_broker` |
+| NOK | OK | `_40_broker/_enhance_b5` |
+| NOK | OK | `_40_broker/itrack01` |
+| NOK | OK | `_40_broker/itrack02` |
+| OK | **NOK** | `_08_copydb/bug_xdbms_sus1210` |
+
+The four broker cases fail on CTP at `cubrid broker start: fail` and pass on
+testkit where the same line reads `success`. **Running `itrack01` under CTP again
+a few hours later gives OK** — so CTP does not reproduce its own verdict here,
+and the cases belong with `_25_unstable` rather than in a smoke set: whether a
+broker starts depends on what else on the machine is holding a port, and this
+machine runs other CUBRID work continuously.
+
+`_08_copydb/bug_xdbms_sus1210` points the other way and is **not explained**.
+
+**The method has a hole and it is mine.** The CTP side is the 13:08 run and the
+testkit side is the 15:39 one, reused to save 68 minutes of re-running CTP for an
+answer already known. Three hours is long enough for this machine to change, and
+it did. The five disagreements therefore cannot be read as runner differences
+from this report alone — each needs the two runners minutes apart, which is what
+`shard.sh` does when it is allowed to run both sides.
+
+**What it does establish**, and did not before: both runners discover the same
+217 cases in the same order, finish all of them, agree on 212, produce identical
+verdict files apart from one recorded deviation, and cost the same per case.

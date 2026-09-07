@@ -139,9 +139,20 @@ and the switch is a system parameter that exists — `query_trace_format`, whose
 
 **Where the time actually goes, measured.** The runner is not the problem. Between two cases it
 does a process reset and `RestoreScript`, which copies `conf/*` and `databases/*` out of
-`~/.CUBRID_SHELL_FM` and deletes logs and cores; on the four-case comparison the gap between one
-case ending and the next starting was **about one second**. The cases themselves took 10 to 29
-seconds, mean 18.5 on CTP and 16.8 on testkit.
+`~/.CUBRID_SHELL_FM` and deletes logs and cores; the gap between one case ending and the next
+starting is **about one second**. The rest is inside the cases, and over all 217 of `_01_utility`
+the two runners spend it identically:
+
+| | CTP | testkit |
+|---|---:|---:|
+| total | 7,708 s | 7,670 s |
+| **median** | **11 s** | **12 s** |
+| mean | 17.8 s | 17.8 s |
+| max | 219 s | 219 s |
+
+**The median is the number that matters.** Half the corpus is cases that do very little, and they
+still cost eleven seconds each, because eleven seconds is what it costs to arrive at the point where
+a case can do anything at all. The mean is higher only because a few cases really are long.
 
 What a case spends it on is visible in its own trace:
 

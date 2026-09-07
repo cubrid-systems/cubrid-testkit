@@ -11,7 +11,7 @@
 | [002](ADR-002-build-tool.md) | Build tool | `go build` + `go.mod` + Justfile 메타 + `ctltool/Makefile` 유지 | 2026-09-02 |
 | [003](ADR-003-external-surface-freeze.md) | External surface freeze | CLI/conf/출력/종료코드/원격컨트랙트만 동결. jar·Java API 제외. F1/F2/F3/NF 4등급 | 2026-09-02 |
 | [004](ADR-004-first-replacement-candidate.md) | First replacement candidate | **Option C' — shell 단독** (rqg / unittest). ~~jdbc~~ 는 2026-09-02 결정으로 제외 | 2026-09-02 |
-| [013](ADR-013-regression-equivalence.md) | How regression equivalence is proven | 정규화 후 diff 0. 코퍼스 = shell 전체 3,722, 스모크 = `_01_utility` 234. `_25_unstable` 별도 집계, HA·manually·Windows 제외 | 2026-09-02 |
+| [013](ADR-013-regression-equivalence.md) | How regression equivalence is proven | 정규화 후 diff 0. 코퍼스 = shell 전체 3,452, 스모크 = `_01_utility` 217. `_25_unstable` 별도 집계, HA·manually·Windows 제외 | 2026-09-02 |
 | [014](ADR-014-one-machine.md) | The runner's scope is one machine | 로컬이 기본, 원격도 '한 대'. 인스턴스 인벤토리·N대 deploy·기계 간 분배는 **축 O** 로 이관 (ADR-012 이 상속) | 2026-09-03 |
 | [015](ADR-015-beyond-axis.md) | Axis B — beyond | 축 T·O 는 *호환성을 지키는 재작성*이라 개선이 들어갈 자리가 없다. 세 번째 축을 두고 **입회 조건 4개**(무엇을 이기는지 명시 / parity 먼저 / 증거를 미리 선언 / 끌 수 있을 것). 등록부는 `concept/beyond-axis.md` | 2026-09-03 |
 

@@ -115,6 +115,45 @@ report_times testkit "$new"
 echo
 
 # ---------------------------------------------------------------------------
+# Verdicts, case by case. This is the answer the report exists to give, so it
+# comes before the forty thousand lines of file difference that follow from it:
+# two runs that disagree about five cases disagree about everything those five
+# printed, and reading that as forty thousand findings is how a real one gets
+# missed.
+#
+# Left and right are whatever was passed. Pointing both at the same runner is
+# how the corpus's own reproducibility gets measured, and a case that one runner
+# cannot reproduce against itself cannot be evidence that two runners differ.
+# ---------------------------------------------------------------------------
+verdicts() {
+  local f
+  f=$(ls "$1"/feedback.log 2>/dev/null | head -1)
+  [ -n "$f" ] || return 0
+  awk '/^\[(OK|NOK)\]/ {
+         v = ($1 == "[OK]:") ? "OK" : "NOK"
+         for (i = 1; i <= NF; i++) if ($i ~ /\.sh$/) { print $i "\t" v; break }
+       }' "$f" | LC_ALL=C sort
+}
+verdicts "$old" > "$work/v.old"
+verdicts "$new" > "$work/v.new"
+if [ -s "$work/v.old" ] && [ -s "$work/v.new" ]; then
+  echo "VERDICTS"
+  printf '  %-8s %s cases\n' CTP "$(wc -l < "$work/v.old")"
+  printf '  %-8s %s cases\n' testkit "$(wc -l < "$work/v.new")"
+  LC_ALL=C join -t"$(printf '\t')" -a1 -a2 -e MISSING -o 0,1.2,2.2 \
+      "$work/v.old" "$work/v.new" 2>/dev/null |
+    awk -F'\t' '$2 != $3 { n++; printf "    %-4s %-4s %s\n", $2, $3, $1 } END { exit (n > 0) }' > "$work/vd"
+  if [ -s "$work/vd" ]; then
+    printf '  %s cases disagree\n' "$(wc -l < "$work/vd")"
+    cat "$work/vd"
+    status=1
+  else
+    echo "  every case agrees"
+  fi
+  echo
+fi
+
+# ---------------------------------------------------------------------------
 # The comparison itself.
 # ---------------------------------------------------------------------------
 echo "RESULT FILES"

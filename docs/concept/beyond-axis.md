@@ -53,6 +53,34 @@ ceremony: equivalence cannot be proven against a system that has already been im
 | Also in scope | **the network.** The wrapper isolates mounts, pids and IPC and not ports, so a run's `cub_master` and brokers compete with everything else on the box for them -- 47 listening sockets on the machine this was measured on, against 0 inside an added `unshare --net` with `lo` up. That is a live source of verdict differences: broker cases fail when a port is held and pass when it is not. Unprivileged and cheap, and nothing in the corpus reads what it would change (`TEST_SSH_HOST` is read by no case, and by CTP only to name a host in a core-backup message). **Deliberately not done yet**: ADR-014 scopes the runner to one machine, and which resources a run may share with that machine is this entry's question rather than the runner's |
 | Also in scope | **reaping.** A container puts the runner at PID 1 with no shell above it; see the note below |
 
+**The design, and the constraint that shaped it (2026-09-07).** Prototyped in Go:
+the runner re-executes itself with `CLONE_NEWUSER|CLONE_NEWNS|CLONE_NEWPID|
+CLONE_NEWIPC`, remounts `/proc`, and reaps as PID 1. All three work
+unprivileged.
+
+The constraint is that **the uid mapping decides whether mounting is possible**,
+and there is only one mapping available to an unprivileged process:
+
+| mapping | `/proc` remount | `ps -u $USER` |
+|---|---|---|
+| uid → uid (stay yourself) | **fails** — `execve` drops capabilities when the euid inside is not 0 | works |
+| uid → 0 | works | **selects nothing** |
+
+Neither column can be had with the other, so the sweep has to stop selecting by
+user. It does not need to: **inside a PID namespace `ps -e` is already exactly
+this run's work**, and inside an IPC namespace so is `ipcs`. The prototype's
+`ps -e` returns three processes, all of them the run's own, on a machine with
+three hundred.
+
+So the reset changes shape here, and that *is* the entry rather than a detail of
+it: `ps -u $USER` becomes `ps -e`, `ipcs | grep $USER` becomes `ipcs`, and
+containment stops being a filter that can be wrong and becomes a property of
+where the process is. It is also what makes the JVM sweep fix safe -- inside,
+"every JVM the user owns" and "every JVM this run started" are the same set.
+
+| Evidence | the full suite runs while the developer keeps working, and `ps -e` inside the namespace shows only the run. Before and after verdicts identical case by case, measured with `selfcheck.sh`, because the reset going from a no-op to actually killing things is a behaviour change and has to be treated as one |
+| Off by default | it must be, and not only because ADR-015 says so: today's sweep does nothing, and turning it on is the first time in this project's history that the reset will kill anything |
+
 **Status correction (2026-09-03).** This entry was first written as *ready*, and that was wrong
 under criterion 2 of ADR-015: the T item it improves on is the shell task, and the shell task has
 not passed its gate. The rule is not ceremony -- improving the reset before the reset is proven

@@ -57,6 +57,12 @@ what it disagrees with itself about:
 Skipping this step makes every unstable case read as a runner difference, which
 is what the first 217-case report did with five of them.
 
+**When to spend it.** ADR-013 makes this a gate on findings rather than a third
+pass over the corpus: a shard that compares clean needs no alibi, and a shard
+that does not is not evidence until its cases have produced one. So run it where
+`compare.sh` found something, not everywhere first -- a third full run costs as
+much as the comparison it is meant to qualify.
+
 **It also measures the floor.** Two runs of the same runner over `_01_utility`
 differ by this much, and a difference smaller than this means nothing:
 

@@ -161,6 +161,25 @@ and copy-on-write through overlayfs is O(1), which is the third option under
 store. The sparse storage that made templates 356 MB stops being a nicety at
 four slots.
 
+**Built so far: the allocation, and nothing that runs.** `internal/slot` turns a
+count and a range into slots, or refuses. It was written first because it is the
+part where being wrong is silent: two slots sharing a port produce a suite that
+fails at random, and the test that matters checks *every* number in an allocation
+for a repeat rather than spot-checking one. A range too small refuses with the
+arithmetic in the message rather than wrapping.
+
+Slot *N* is always the same slot, so a failure found under four can be reproduced
+by running that one alone. `Parameters` is keyed by the file and section
+`deploy.go` already names, so the allocator decides the values and nothing
+between it and the file gets to invent one.
+
+**What is left is execution, and it has a shape now.** N workers on the shared
+queue is mechanical; each slot needing its own `$CUBRID` is not. With B-T2 built,
+the answer is likely a mount namespace per slot binding that slot's `conf/` and
+`databases/` over one shared install -- cheaper than copying and cheaper than
+overlayfs, and available only because containment exists. That is a design step,
+not a coding one, and it is not taken here.
+
 ### B-T7. Compare a query plan as data, not as prose — **blocked**
 
 | | |

@@ -192,3 +192,40 @@ from this report alone — each needs the two runners minutes apart, which is wh
 **What it does establish**, and did not before: both runners discover the same
 217 cases in the same order, finish all of them, agree on 212, produce identical
 verdict files apart from one recorded deviation, and cost the same per case.
+
+## 7. None of the five is a runner difference
+
+Each was re-run under both runners back to back, minutes apart rather than hours:
+
+| case | CTP | testkit |
+|---|---|---|
+| `_40_broker/itrack01` | OK, 10 s | OK, 7 s |
+| `_08_copydb/bug_xdbms_sus1210` | OK, 41 s | OK, 35 s |
+
+The broker case has a stronger result than agreement, and it does not involve
+testkit at all: **CTP returned NOK at 13:31 and OK at 16:40** on the same case,
+the same tree and the same machine. A runner that cannot reproduce its own
+verdict cannot be evidence about another runner's.
+
+`bug_xdbms_sus1210` only shows agreement in isolation, which is weaker: a case
+run on its own is not the same as a case run after two hundred others. It is not
+explained, only un-reproduced.
+
+**This is a correction to ADR-013, not a result about the runners.** The smoke
+set was chosen as "deterministic, low external dependency, and chosen for a
+reason that can be stated". At least five of its 217 cases are not deterministic:
+whether a broker starts depends on what else on the machine holds a port, and
+this machine runs other CUBRID work continuously.
+
+The project has already made this argument once. `dispatch_tc_ALL.txt` is not
+graded F1 because *CTP cannot reproduce it against itself*, so no grade was
+available to earn (B-T1, `spec-corrections.md`). The same reasoning reaches case
+verdicts: **a case whose verdict one runner cannot reproduce against itself
+cannot be evidence that two runners differ.**
+
+So the gate needs a step it does not have. Before the comparison can judge, the
+corpus's own reproducibility has to be established -- run one runner twice over
+the shard and record which cases disagree with themselves. Those are counted
+separately, as `_25_unstable` already is, and for the same reason rather than as
+a convenience. Without that step every unstable case reads as a runner
+difference, which is what happened here.

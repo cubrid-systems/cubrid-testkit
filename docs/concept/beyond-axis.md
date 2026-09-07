@@ -80,10 +80,58 @@ runner documents that it requires one. Neither is written yet.
 |---|---|
 | Blocked on | T: the shell task passing the full-corpus gate (ADR-013) |
 | Improves on | T: `Test.runAll` — one case at a time, per machine |
-| Today | a case restores the whole CUBRID install before it runs (`RestoreScript`), so two cases cannot share a machine. `_01_utility` is 217 cases at a measured median of 12 s: **66 minutes, serially**, and the full corpus is 3,452 -- around sixteen hours a runner |
+| Today | one case at a time. `_01_utility` is 217 cases at a measured median of 12 s: **66 minutes, serially**, and the full corpus is 3,452 -- around sixteen hours a runner. Two cases cannot share a machine today because they would collide on the master port, the broker ports, the shared-memory ids, `cubrid.conf` and `databases.txt` -- and because the reset would kill each other's servers. `RestoreScript` is not the reason: it measures 0.00 s |
 | Beyond | each case gets its own instance — own port, own shared-memory id, own data directory — so N run at once on one machine. The per-instance parameters this needs are the ones `ConfigureScript` already writes; what is missing is allocating them per case rather than per machine |
 | Evidence | wall-clock for `_01_utility` at N=1 against N=4 and N=8, with verdicts identical to the serial run — **identical, not merely similar**: a case that passes only when it has the machine to itself is a finding, not an acceptable cost |
 | Risk | this is where the parallel-run bugs live. It must not ship before the serial version is proven, or a difference has two possible causes |
+
+**What a slot is.** Everything below has to differ between two cases running at
+once, and each line is somewhere the suite already writes:
+
+| | where | |
+|---|---|---|
+| `cubrid_port_id` | `cubrid.conf` | each slot gets its own master |
+| `BROKER_PORT` | `cubrid_broker.conf`, `%query_editor` and `%BROKER1` | |
+| `MASTER_SHM_ID` | `cubrid_broker.conf`, `[broker]` | **ids that collide do not fail, they interfere** -- the same failure mode `spec-corrections.md` already records for the broker-only configuration |
+| `APPL_SERVER_SHM_ID` | per broker section | |
+| `$CUBRID` | the install | cases edit `cubrid.conf`, so the file cannot be shared |
+| `$CUBRID_DATABASES` | `databases.txt` | one registry, and every case adds and removes an entry |
+
+**The reset is what actually blocks it, not the ports.** `KillScript` matches
+`cub` as a substring across everything the user owns, so slot A's reset kills
+slot B's server. Partitioning ports without containing the reset produces a
+suite that fails at random. **Each slot therefore needs its own PID and IPC
+namespace** -- the same mechanism B-T2 is about, which makes B-T2 a dependency
+rather than a neighbour. It is available unprivileged: measured.
+
+**Configuration: a count and a range, and nothing else.**
+
+```
+parallel_slots=4                  # 1 is today's behaviour and the default
+parallel_port_range=15230-15299   # slots take consecutive blocks from here
+```
+
+Slot *i* takes a block -- one master port, the broker ports, and headroom -- and
+shared-memory ids come from a second range the same way. **A range too small for
+the requested slots is a startup failure**, not a wrap-around: two slots quietly
+sharing a port is the bug this whole entry exists to avoid, and it must not be
+reachable by arithmetic.
+
+**Most of it is already written.** `deploy.go`'s `iniTargets` maps a role to the
+`ini.sh` section that holds its parameters, and `ConfigureScript` writes them.
+What is missing is the allocation unit: they are computed per machine and need to
+be computed per slot. That is the sentence this entry has carried from the start,
+now with the mapping named.
+
+**Two questions this design does not answer.**
+
+*Does each slot get its own `$CUBRID`?* Copying the install per slot is expensive
+and copy-on-write through overlayfs is O(1), which is the third option under
+**B-T8** -- worth little serially, and the reason it exists is here.
+
+*Disk.* Four slots each creating a 707 MB database, alongside B-T8's template
+store. The sparse storage that made templates 356 MB stops being a nicety at
+four slots.
 
 ### B-T7. Compare a query plan as data, not as prose — **blocked**
 

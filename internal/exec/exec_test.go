@@ -59,3 +59,42 @@ func TestCancellingLocalReachesWhatTheScriptStarted(t *testing.T) {
 	_ = syscall.Kill(pid, syscall.SIGKILL)
 	t.Fatalf("the process the script started (%d) survived cancellation", pid)
 }
+
+// A case that starts a daemon leaves the daemon holding the pipe: the shell
+// exits, its output is complete, and Wait blocks until WaitDelay gives up. The
+// case has not failed, and reporting a runtime error there threw the verdict
+// away -- measured on _36_cub_master/bug_xdbms40 and _40_broker/itrack03, which
+// failed with no verdict at all.
+func TestADaemonHoldingThePipeDoesNotLoseTheVerdict(t *testing.T) {
+	l := NewLocal(t.TempDir())
+	// A background process that outlives the shell and keeps stdout open, which
+	// is what cub_master does.
+	res, err := l.Run(context.Background(),
+		"sleep 30 & echo started; exit 3")
+	if err != nil {
+		t.Fatalf("a held pipe was reported as a failure: %v", err)
+	}
+	if res.ExitCode != 3 {
+		t.Errorf("the shell's exit code is %d, want 3", res.ExitCode)
+	}
+	if !strings.Contains(res.Stdout, "started") {
+		t.Errorf("the output collected before the delay is missing: %q", res.Stdout)
+	}
+}
+
+// The other half of WaitDelay's job: a cancelled case must never come back
+// looking like it succeeded. It comes back as a killed process rather than an
+// error -- the worker is what turns that into a timeout verdict -- but a zero
+// exit code there would let a case that would not stop be recorded as a pass.
+func TestACancelledCaseNeverLooksLikeSuccess(t *testing.T) {
+	l := NewLocal(t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	res, err := l.Run(ctx, "sleep 30; echo finished")
+	if err == nil && res.ExitCode == 0 {
+		t.Errorf("a cancelled case came back as a success: %+v", res)
+	}
+	if strings.Contains(res.Stdout, "finished") {
+		t.Error("a cancelled case ran to completion")
+	}
+}

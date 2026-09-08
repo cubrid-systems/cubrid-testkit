@@ -697,6 +697,54 @@ would be N tmpfs where one will do.
 | Evidence | wall clock and verdicts at one and eight slots, against the same corpus on disk. Two levers -- the volume size and the ramdisk -- measured separately, because a combined number cannot say which one paid |
 | Risk | `ENOSPC` where there was 141 GB free. Named rather than mitigated: the cap is a number to pick with the corpus in front of you, and the verdicts say whether it was picked right |
 
+### B-T13. Fast and slow lanes, because memory is a rate not a size — **idea**
+
+| | |
+|---|---|
+| Depends on | B-T3's ranked queue: a lane assignment needs the durations the ranking needs |
+| Improves on | B-T12, by spending its ceiling where it buys the most |
+| Kind | **speed**, and it makes the ceiling affordable |
+
+**The ceiling looks like a size and behaves like a rate.** B-T12 caps the memory a
+run's writes may use, and the cap has to cover every slot at once: eight slots at
+215 MB is 1.7 GB, sixteen is 3.4, and on a machine that also holds sixteen servers
+that is where it stops. But a case does not hold its database for a fixed
+fraction of the run -- it holds it for as long as the case takes, and the cases
+differ by two orders of magnitude. A 227-second case holding 215 MB ties up more
+memory-seconds than forty 5-second cases do between them.
+
+**So the question is not which cases are big, it is which cases the memory turns
+over fastest.** Put the other way: a slot backed by memory is worth what the fixed
+cost is as a fraction of the case. The decomposition already measured says what
+that is -- about 2.6 s of createdb, start, stop and delete per case, against a
+median of 11 s and a maximum of 227.
+
+| a case of | fixed cost is | memory is worth |
+|---|---:|---|
+| 5 s | ~50% | a great deal |
+| 11 s (median) | ~24% | most of what there is to win |
+| 227 s | ~1% | nothing, and it holds the memory for four minutes |
+
+**Two lanes, then, and the ceiling only has to cover one of them.** Slots in the
+fast lane take their overlay's upper layer from a tmpfs; slots in the slow lane
+take it from disk. The cap becomes `k x case database` for the k fast slots
+rather than `N x`, which is what makes sixteen slots affordable on a machine that
+could not hold sixteen in memory.
+
+**And it does not fight the ordering.** B-T3 wants the queue longest-first, to
+keep every slot busy to the end. Long cases going to the slow lane costs them
+1% of themselves; short cases going to the fast lane is where the ratio moves.
+The two policies want the same split for different reasons.
+
+**What it asks for.** The overlay moves from one mount before the slots to one
+per slot -- the lower layer stays shared, because it is the same read-only corpus,
+and only the upper differs by lane. And `Queue.Claim` grows a lane, because a
+fast-lane slot asking for the longest remaining case is the one arrangement that
+gets this exactly backwards.
+
+| First | the durations. Everything here is a policy over a number this project does not yet record per case, and `test-shell.xml` already has it -- so the first step is the same one B-T3's ordering needs |
+| Not yet | picking the split by measurement rather than by argument. The threshold between lanes, and how many slots each gets, are two numbers with a corpus-shaped answer |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

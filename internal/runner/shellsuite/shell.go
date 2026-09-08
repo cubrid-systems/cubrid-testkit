@@ -383,7 +383,17 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	var board *status.Board
 	if addr := status.Addr(cfg.GetOr("status_http", "")); addr != "" {
 		board = status.New(len(cases))
+		// A second run on the same machine would find the default port taken, and
+		// killing the run over the page it was only asked to serve is the wrong
+		// trade -- so the default moves along until it finds a free one and says
+		// where it landed. An address the operator pinned is not moved: they
+		// asked for that one.
 		where, stop, err := board.Serve(addr)
+		if err != nil && addr == status.DefaultAddr {
+			for try := 1; try <= 16 && err != nil; try++ {
+				where, stop, err = board.Serve(status.NearDefault(try))
+			}
+		}
 		if err != nil {
 			return quit("%v", err)
 		}
@@ -392,6 +402,10 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		// The machine panel reports the two places that matter to this run
 		// rather than the root filesystem.
 		board.Watch(os.Getenv("CUBRID"), corpus.Ram(), cfg.Int("scenario_ram_mb", 0))
+		// Where the page finds what a case actually did. It is the file the run
+		// is already writing, so a click costs a scan and nothing is recorded
+		// twice.
+		board.Detail(filepath.Join(sink.Dir(), "feedback.log"))
 		// The template cache is CTP's, turned on with an environment variable and
 		// keeping its own store, so the page reads that store rather than asking
 		// the shell to report. Off unless the run asked for a cache, and then the
@@ -464,10 +478,7 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 	if !contain.Active() {
 		return nil, nil, fmt.Errorf("parallel_slots needs the runner contained; set %s=1", contain.Env)
 	}
-	root := os.Getenv("TESTKIT_SLOT_ROOT")
-	if root == "" {
-		root = filepath.Join(os.TempDir(), "testkit-slots")
-	}
+	root := contain.SlotRoot()
 
 	var pairs []channelPair
 	var opened []*contain.Namespace

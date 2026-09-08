@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -213,5 +214,21 @@ func TestNoBashLeavesShAlone(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if got := shellForSh(); got != "" {
 		t.Errorf("shellForSh() = %q with no bash on PATH", got)
+	}
+}
+
+// Two runs on one machine would otherwise both call a slot "slot0" and mount an
+// overlay over the same upper directory -- one run quietly writing into
+// another's $CUBRID, which is not a collision that announces itself.
+func TestSlotRootIsPerRun(t *testing.T) {
+	t.Setenv(SlotRootEnv, "")
+	got := SlotRoot()
+	if !strings.Contains(got, strconv.Itoa(os.Getpid())) {
+		t.Errorf("SlotRoot() = %q and does not carry this run's pid", got)
+	}
+	// An explicit setting still wins: the caller has taken responsibility.
+	t.Setenv(SlotRootEnv, "/somewhere/else")
+	if got := SlotRoot(); got != "/somewhere/else" {
+		t.Errorf("SlotRoot() = %q, want the override", got)
 	}
 }

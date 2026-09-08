@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -529,5 +530,134 @@ func TestNoCacheMeansNoPanel(t *testing.T) {
 	b.WatchTemplates("", 0)
 	if v := b.snapshot().Templates; v != nil {
 		t.Errorf("a run with no cache got a panel: %+v", v)
+	}
+}
+
+// Two runs on one machine is a normal thing to want, and the page is not worth
+// failing a run over.
+func TestTheDefaultPortMovesAlong(t *testing.T) {
+	a := New(1)
+	addr, stop, err := a.Serve(DefaultAddr)
+	if err != nil {
+		t.Skip("the default port is not available on this machine")
+	}
+	defer stop()
+	if addr != DefaultAddr {
+		t.Fatalf("listened on %q, want the default", addr)
+	}
+	// A second board finds it taken and takes the next one.
+	b := New(1)
+	var got string
+	var stop2 func()
+	for try := 1; try <= 16; try++ {
+		got, stop2, err = b.Serve(NearDefault(try))
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		t.Fatalf("no port near the default was free: %v", err)
+	}
+	defer stop2()
+	if got == DefaultAddr || got == "" {
+		t.Errorf("the second run took %q", got)
+	}
+}
+
+// A failing case provokes one question -- why -- and feedback.log already has the
+// answer, so the page has to be able to find it.
+func TestClickingAFinishedCaseFindsItsBlock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "feedback.log")
+	os.WriteFile(path, []byte(
+		"[OK]:  /x/a/cases/a.sh 100 EnvId=local[slot0]\n"+
+			"a-1 : OK\n"+
+			"[NOK]: TRY-> = 0 /x/b/cases/b.sh 200 EnvId=local[slot1]\n"+
+			"b-1 : NOK it did not work\n"+
+			"===== CONSOLE OUTPUT =====\n"+
+			"+ some trace\n"+
+			"[OK]:  /x/c/cases/c.sh 300 EnvId=local[slot0]\n"+
+			"c-1 : OK\n"), 0o644)
+
+	b := New(3)
+	b.Detail(path)
+	addr, stop, err := b.Serve("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+
+	get := func(name string) string {
+		res, err := http.Get("http://" + addr + "/case?name=" + url.QueryEscape(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return string(body)
+	}
+
+	got := get("/x/b/cases/b.sh")
+	for _, want := range []string{"NOK it did not work", "CONSOLE OUTPUT", "+ some trace"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the failing case's block is missing %q:\n%s", want, got)
+		}
+	}
+	// And it stops at the next case rather than running on.
+	if strings.Contains(got, "c-1 : OK") {
+		t.Errorf("the block ran into the next case:\n%s", got)
+	}
+	// A case with no block says so rather than 404ing.
+	if s := get("/x/nope/cases/nope.sh"); !strings.Contains(s, "nothing recorded") {
+		t.Errorf("an unknown case gave %q", s)
+	}
+	// And a board nobody told still serves the page.
+	plain := New(1)
+	addr2, stop2, _ := plain.Serve("127.0.0.1:0")
+	defer stop2()
+	res, err := http.Get("http://" + addr2 + "/case?name=/x/a/cases/a.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound {
+		t.Errorf("a board with no feedback.log answered %d", res.StatusCode)
+	}
+}
+
+// Everything a parallel run has been wrong about turned out to be a resource
+// question, and none of it was visible while a run was going. The panel is only
+// worth having if the numbers are real.
+func TestTheMachinePanelReportsRealNumbers(t *testing.T) {
+	b := New(1)
+	b.Watch(t.TempDir(), "", 0)
+	// CPU and disk are counters: the first reading seeds them and the second
+	// produces a rate, so wait for one tick.
+	var m machineView
+	for i := 0; i < 60; i++ {
+		m = b.snapshot().Machine
+		if m.MemAll > 0 && m.CPUIdle+m.CPUUser+m.CPUSys > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if m.Cores < 1 {
+		t.Error("no core count")
+	}
+	if m.MemAll <= 0 || m.MemUsed <= 0 {
+		t.Errorf("memory came back as %d used of %d", m.MemUsed, m.MemAll)
+	}
+	// The four CPU states are shares of one whole.
+	total := m.CPUUser + m.CPUSys + m.CPUIdle + m.CPUIOWait + m.CPUSteal
+	if total < 95 || total > 105 {
+		t.Errorf("the cpu states add to %.1f%%, not 100", total)
+	}
+	if m.Load1 < 0 || m.Load15 < 0 {
+		t.Errorf("load came back as %.2f/%.2f", m.Load1, m.Load15)
+	}
+	// Disk is a rate, so zero is a legitimate answer on an idle machine -- but
+	// it must not be negative, which is what a counter wrapping backwards gives.
+	if m.ReadMBs < 0 || m.WriteMBs < 0 || m.ReadIOPS < 0 || m.WritIOPS < 0 {
+		t.Errorf("a negative disk rate: %+v", m)
 	}
 }

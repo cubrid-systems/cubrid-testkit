@@ -647,6 +647,15 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	record *plan.Record, slotID string) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
+	// Which lane this slot is in: where its corpus writes land. One lane today,
+	// because the overlay is mounted once for every slot -- the page says "ram,
+	// 8 slots" rather than a split, and that is the honest reading of what the
+	// run is doing. The split is B-T13.
+	lane := "disk"
+	if corpus != nil {
+		lane = "ram"
+	}
+	board.Lane(slotID, lane)
 	ssh := machine.SSH()
 	w := &Worker{
 		EnvID:     machine.EnvID(),

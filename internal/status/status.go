@@ -87,9 +87,25 @@ type Board struct {
 	ramDir    string
 	ramCap    int
 
-	hist     []int
+	hist []int
+	// histSecs is the same buckets weighted by time rather than by count, and
+	// the two together are the lane decision. Counting cases says the corpus is
+	// mostly short cases; counting seconds says a handful of long ones own the
+	// run -- six cases of _01_sqlx measured 0, 6, 19, 182, 183 and 183 seconds,
+	// so three of six are 96% of the time. A lane split is a threshold on this
+	// panel, and without the second series the panel cannot show where to put
+	// it.
+	histSecs []int
 	byFamily map[string]*tally
 	bySlot   map[string]*tally
+	// laneOf is where a slot's writes go, and byLane adds the cases up by it.
+	// One lane today -- every slot's corpus writes go to the same place -- which
+	// is why the panel reads "ram 8 slots" rather than a split. It is here
+	// because the split is the next thing (B-T13) and because even undivided it
+	// answers a question the other panels do not: what fraction of the run's
+	// case-seconds is holding memory.
+	laneOf map[string]string
+	byLane map[string]*tally
 }
 
 // tally is what is known about a group of cases without keeping the cases.
@@ -140,7 +156,25 @@ const failedMax = 500
 func New(total int) *Board {
 	return &Board{started: time.Now(), total: total, running: map[string]inflight{},
 		hist:     make([]int, len(histEdges)+1),
-		byFamily: map[string]*tally{}, bySlot: map[string]*tally{}}
+		histSecs: make([]int, len(histEdges)+1),
+		byFamily: map[string]*tally{}, bySlot: map[string]*tally{},
+		laneOf: map[string]string{}, byLane: map[string]*tally{}}
+}
+
+// Lane says where a slot's corpus writes go, so the page can group by it.
+//
+// Called once per slot when the run opens it. A slot with no lane is still a
+// slot: the panel leaves it out rather than inventing a name for it.
+func (b *Board) Lane(slot, lane string) {
+	if b == nil || lane == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.laneOf[slot] = lane
+	if b.byLane[lane] == nil {
+		b.byLane[lane] = &tally{}
+	}
 }
 
 func (b *Board) Begin(slot, name string) {
@@ -178,8 +212,14 @@ func (b *Board) End(slot, name string, ok bool) {
 		}
 	}
 	secs := int(took.Seconds())
-	b.hist[bucketOf(secs)]++
-	for key, m := range map[string]map[string]*tally{familyOf(name): b.byFamily, slot: b.bySlot} {
+	bucket := bucketOf(secs)
+	b.hist[bucket]++
+	b.histSecs[bucket] += secs
+	groups := map[string]map[string]*tally{familyOf(name): b.byFamily, slot: b.bySlot}
+	if lane := b.laneOf[slot]; lane != "" {
+		groups[lane] = b.byLane
+	}
+	for key, m := range groups {
 		t := m[key]
 		if t == nil {
 			t = &tally{}
@@ -251,16 +291,31 @@ type view struct {
 	RateSpan int         `json:"rateSpan"`
 	Hist     []int       `json:"hist"`
 	HistEdge []int       `json:"histEdge"`
+	HistSecs []int       `json:"histSecs"`
 	Family   []groupView `json:"family"`
 	Slot     []groupView `json:"slot"`
+	Lanes    []laneView  `json:"lanes"`
 	Machine  machineView `json:"machine"`
 	Finished bool        `json:"finished"`
 }
 
 type slotView struct {
 	Slot string `json:"slot"`
+	Lane string `json:"lane"`
 	Case string `json:"case"`
 	Held int    `json:"held"`
+}
+
+// laneView is one lane added up. Share is the fraction of the run's case-seconds
+// that ran in it, which is the number a lane split exists to change: a lane on
+// memory that holds 5% of the seconds is memory spent where it does not pay.
+type laneView struct {
+	Name  string `json:"name"`
+	Slots int    `json:"slots"`
+	Done  int    `json:"done"`
+	NOK   int    `json:"nok"`
+	Secs  int    `json:"secs"`
+	Share int    `json:"share"`
 }
 
 // groupView is a family or a slot, added up.
@@ -312,7 +367,8 @@ func (b *Board) snapshot() view {
 	}
 	for slot, in := range b.running {
 		v.Slots = append(v.Slots, slotView{
-			Slot: slot, Case: in.Case, Held: int(time.Since(in.Since).Seconds()),
+			Slot: slot, Lane: b.laneOf[slot], Case: in.Case,
+			Held: int(time.Since(in.Since).Seconds()),
 		})
 	}
 	sort.Slice(v.Slots, func(i, j int) bool { return v.Slots[i].Slot < v.Slots[j].Slot })
@@ -329,9 +385,11 @@ func (b *Board) snapshot() view {
 	v.Rate = append([]int(nil), b.buckets...)
 	v.RateSpan = int(bucketSpan.Seconds())
 	v.Hist = append([]int(nil), b.hist...)
+	v.HistSecs = append([]int(nil), b.histSecs...)
 	v.HistEdge = append([]int(nil), histEdges...)
 	v.Family = groups(b.byFamily)
 	v.Slot = groups(b.bySlot)
+	v.Lanes = b.lanes()
 	v.Machine = machine(b.corpusDir, b.ramDir, b.ramCap)
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]
@@ -457,4 +515,41 @@ func usedMB(dir string) int {
 		return 0
 	}
 	return int((uint64(st.Blocks) - uint64(st.Bavail)) * uint64(st.Bsize) / (1 << 20))
+}
+
+// lanes adds the run up by lane, with each lane's share of the case-seconds.
+//
+// Ordered by share, largest first, and by name where that ties -- the same
+// reason the family table needs a second key: the page refreshes once a second
+// and sort.Slice is not stable, so tied rows would swap places on every poll.
+func (b *Board) lanes() []laneView {
+	if len(b.byLane) == 0 {
+		return nil
+	}
+	slots := map[string]int{}
+	for _, lane := range b.laneOf {
+		slots[lane]++
+	}
+	total := 0
+	for _, t := range b.byLane {
+		total += t.Secs
+	}
+	out := make([]laneView, 0, len(b.byLane))
+	for name, t := range b.byLane {
+		share := 0
+		if total > 0 {
+			share = t.Secs * 100 / total
+		}
+		out = append(out, laneView{
+			Name: name, Slots: slots[name], Done: t.Done, NOK: t.Done - t.OK,
+			Secs: t.Secs, Share: share,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Secs != out[j].Secs {
+			return out[i].Secs > out[j].Secs
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }

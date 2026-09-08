@@ -1,6 +1,8 @@
 package status
 
 import (
+	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -104,5 +106,60 @@ func TestReplayKeepsTheRealDurations(t *testing.T) {
 	defer stop()
 	if took := time.Since(started); took > 5*time.Second {
 		t.Errorf("a 15-second run at 1000x took %v", took)
+	}
+}
+
+// The playback is a position on the run's own clock, not a loop through a list,
+// which is what lets it be scrubbed. Going forward folds in more moments; going
+// back rebuilds, because a board is an accumulation and there is nothing to
+// subtract.
+func TestAReplayCanBeScrubbed(t *testing.T) {
+	ev, err := ParseFeedback(strings.NewReader(feedbackSample))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, err := Replay(ev, 1, "127.0.0.1:0", &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+
+	b := lastBoard
+	rp := b.replay
+	seek := func(sec float64) view {
+		rp.control(url.Values{"seek": {strconv.FormatFloat(sec, 'f', -1, 64)}})
+		return b.snapshot()
+	}
+
+	// At the very start nothing has happened.
+	if v := seek(0); v.Done != 0 {
+		t.Errorf("at the start %d cases are done", v.Done)
+	}
+	// At the end everything has.
+	end := seek(1e9)
+	if end.Done != 3 {
+		t.Fatalf("at the end %d of 3 are done", end.Done)
+	}
+	// And back to the start again -- the part that needs a rebuild rather than
+	// an undo.
+	if v := seek(0); v.Done != 0 || len(v.Recent) != 0 {
+		t.Errorf("scrubbing back left %d done and %d in the tail", v.Done, len(v.Recent))
+	}
+	// Forward once more gives the same answer as the first time: seeking is not
+	// allowed to accumulate.
+	if v := seek(1e9); v.Done != end.Done || v.OK != end.OK {
+		t.Errorf("a second pass gave %d/%d, the first gave %d/%d", v.Done, v.OK, end.Done, end.OK)
+	}
+
+	// The knobs report where they are, so the page can draw them there.
+	rp.control(url.Values{"speed": {"60"}, "paused": {"1"}})
+	got := b.snapshot().Replay
+	if got == nil || got.Speed != 60 || !got.Paused {
+		t.Errorf("the controls did not take: %+v", got)
+	}
+	// Nonsense is ignored rather than obeyed.
+	rp.control(url.Values{"speed": {"-5"}})
+	if s := b.snapshot().Replay.Speed; s != 60 {
+		t.Errorf("a negative speed was accepted: %v", s)
 	}
 }

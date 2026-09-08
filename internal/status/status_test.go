@@ -709,7 +709,7 @@ func TestThePageDefinesEveryFunctionItCalls(t *testing.T) {
 	// The helpers tick() and its callees depend on, by name.
 	for _, fn := range []string{
 		"machine", "hist", "groups", "lanes", "templates", "lane",
-		"spark", "draw", "secs", "short", "gb", "tick",
+		"spark", "draw", "secs", "short", "gb", "tick", "replayBar", "rpSend",
 	} {
 		if !strings.Contains(script, "function "+fn+"(") &&
 			!strings.Contains(script, "const "+fn+" =") {

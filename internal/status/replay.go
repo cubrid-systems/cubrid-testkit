@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,6 +32,10 @@ import (
 //
 // So there is no recorder. A replay reads what the run already wrote, which
 // means it works on runs that finished before this existed.
+
+// lastBoard is the board the most recent Replay built. It exists for the tests,
+// which have to drive the controls, and costs a pointer.
+var lastBoard *Board
 
 // Event is one case as the log recorded it.
 type Event struct {
@@ -146,6 +152,7 @@ func Replay(events []Event, speed float64, addr string, out io.Writer) (stop fun
 	}
 	b := New(len(events))
 	b.replaying = true
+	lastBoard = b
 	where, stop, err := b.Serve(addr)
 	if err != nil {
 		return func() {}, err
@@ -167,11 +174,6 @@ func Replay(events []Event, speed float64, addr string, out io.Writer) (stop fun
 
 	// One ordered list of moments, so a case beginning and another ending at the
 	// same instant happen in the order the run had them.
-	type moment struct {
-		at    time.Duration
-		begin bool
-		ev    Event
-	}
 	origin := events[0].Start
 	var ms []moment
 	for _, e := range events {
@@ -180,18 +182,162 @@ func Replay(events []Event, speed float64, addr string, out io.Writer) (stop fun
 	}
 	sort.SliceStable(ms, func(i, j int) bool { return ms[i].at < ms[j].at })
 
-	started := time.Now()
-	for _, m := range ms {
-		target := time.Duration(float64(m.at) / speed)
-		if d := target - time.Since(started); d > 0 {
-			time.Sleep(d)
+	// The playback is a position on the run's own clock, not a loop through a
+	// list. That is what lets it be scrubbed: the page can ask for any moment and
+	// the board is rebuilt to what the run looked like then -- which is cheap,
+	// because "then" is a prefix of a sorted list.
+	r := &replayer{board: b, moments: ms, span: ms[len(ms)-1].at, speed: speed}
+	b.mu.Lock()
+	b.replay = r
+	b.mu.Unlock()
+	r.mu.Lock()
+	r.publish()
+	r.mu.Unlock()
+	go r.play()
+
+	fmt.Fprintf(out, "[INFO] the page has the controls: scrub, step, speed, and back\n")
+	return stop, nil
+}
+
+// replayer holds where the playback is and what it is playing.
+type replayer struct {
+	mu      sync.Mutex
+	board   *Board
+	moments []moment
+	span    time.Duration
+	// at is the position on the run's clock; speed is how many of its seconds
+	// pass in one of ours; paused stops the clock without losing the position.
+	at     time.Duration
+	speed  float64
+	paused bool
+	// applied is how many moments have been folded into the board. Going
+	// forward folds more in; going back rebuilds from nothing, which for a
+	// corpus-sized run is a few thousand map operations and imperceptible.
+	applied int
+}
+
+type moment struct {
+	at    time.Duration
+	begin bool
+	ev    Event
+}
+
+// play advances the position in real time, twenty times a second, so that a
+// scrub feels like a scrub rather than a series of jumps.
+func (r *replayer) play() {
+	const tick = 50 * time.Millisecond
+	t := time.NewTicker(tick)
+	defer t.Stop()
+	for range t.C {
+		r.mu.Lock()
+		if !r.paused && r.at < r.span {
+			r.at += time.Duration(float64(tick) * r.speed)
+			if r.at > r.span {
+				r.at = r.span
+			}
+			r.seekLocked(r.at)
 		}
+		r.mu.Unlock()
+	}
+}
+
+// seekLocked makes the board show the run as it was at to.
+func (r *replayer) seekLocked(to time.Duration) {
+	if to < 0 {
+		to = 0
+	}
+	if to > r.span {
+		to = r.span
+	}
+	// Backwards means starting over: a board is an accumulation and there is
+	// nothing to subtract. Forwards is just more of the same prefix.
+	i := r.applied
+	if to < r.positionOf(i) {
+		r.board.reset()
+		i = 0
+	}
+	for i < len(r.moments) && r.moments[i].at <= to {
+		m := r.moments[i]
 		if m.begin {
-			b.Begin(m.ev.Slot, m.ev.Case)
+			r.board.Begin(m.ev.Slot, m.ev.Case)
 		} else {
-			b.endWith(m.ev.Slot, m.ev.Case, m.ev.OK, m.ev.Took)
+			r.board.endWith(m.ev.Slot, m.ev.Case, m.ev.OK, m.ev.Took)
+		}
+		i++
+	}
+	r.applied = i
+	r.at = to
+	r.publish()
+}
+
+// publish hands the knobs' state to the board. Called with r.mu held, and it
+// takes the board's lock -- which is the one direction the two locks are ever
+// taken in.
+func (r *replayer) publish() {
+	v := &replayView{At: int(r.at.Seconds()), Span: int(r.span.Seconds()),
+		Speed: r.speed, Paused: r.paused}
+	r.board.mu.Lock()
+	r.board.replayAt = v
+	r.board.mu.Unlock()
+}
+
+func (r *replayer) positionOf(i int) time.Duration {
+	if i <= 0 {
+		return 0
+	}
+	if i > len(r.moments) {
+		i = len(r.moments)
+	}
+	return r.moments[i-1].at
+}
+
+// control is what the page sends: a seek, a speed, or a pause.
+func (r *replayer) control(q url.Values) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if v := q.Get("speed"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 && f <= 100000 {
+			r.speed = f
 		}
 	}
-	fmt.Fprintf(out, "[INFO] replay complete; the page stays up until interrupted\n")
-	return stop, nil
+	if v := q.Get("paused"); v != "" {
+		r.paused = v == "1" || v == "true"
+	}
+	r.publish()
+	if v := q.Get("seek"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			r.seekLocked(time.Duration(f * float64(time.Second)))
+		}
+	}
+	if v := q.Get("step"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			r.seekLocked(r.at + time.Duration(f*float64(time.Second)))
+		}
+	}
+}
+
+func (r *replayer) view() *replayView {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return &replayView{
+		At:     int(r.at.Seconds()),
+		Span:   int(r.span.Seconds()),
+		Speed:  r.speed,
+		Paused: r.paused,
+	}
+}
+
+// replayView is the knobs' state, so the page can draw them where they are
+// rather than where it last set them.
+type replayView struct {
+	At     int     `json:"at"`
+	Span   int     `json:"span"`
+	Speed  float64 `json:"speed"`
+	Paused bool    `json:"paused"`
 }

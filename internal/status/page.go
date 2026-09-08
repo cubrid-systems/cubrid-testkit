@@ -63,7 +63,13 @@ const page = `<!doctype html>
  .slot{color:var(--ink-dim);width:4.5rem}
  .lanecol{width:4.5rem}
  .slots{color:var(--ink-dim);white-space:nowrap}
- .case{width:100%;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ /* The elastic column: it takes what is left and ellipsizes rather than pushing
+    the numbers off the edge. max-width:0 with width:100% is what makes a table
+    cell do that -- but only the body cells. On a header it collapses the word
+    itself, which is how "running" came to read "run…" and made the whole table
+    look misaligned. */
+ td.case{width:100%;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ th.case{width:100%;white-space:nowrap}
  .num{text-align:right;width:5rem;color:var(--ink-dim)}
  .empty{color:var(--ink-faint);padding:.4rem 0}
  /* A failing case provokes one question -- why -- and feedback.log already has

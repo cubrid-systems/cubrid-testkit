@@ -346,8 +346,8 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 		// The engine's own variable rather than a private /tmp. A mount would
 		// also take away the directory the scripts are written into, and it
 		// would isolate a /tmp that cases are entitled to share.
-		tmp := filepath.Join(root, label, "tmp")
-		if err := os.MkdirAll(tmp, 0o1777); err != nil {
+		tmp, err := slotTmp(label)
+		if err != nil {
 			closeAll()
 			return nil, nil, err
 		}
@@ -359,6 +359,30 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 		})
 	}
 	return pairs, closeAll, nil
+}
+
+// sunPathMax is the size of sockaddr_un.sun_path, and the reason a slot's
+// CUBRID_TMP cannot simply live under the slot root. A run whose working
+// directory is deep enough produces a path the kernel cannot hold a socket at,
+// and the engine says so -- "The $CUBRID_TMP is too long" -- on every command,
+// after which the case fails on a comparison rather than on the real cause.
+const sunPathMax = 108
+
+// slotTmp is the short directory a slot's master keeps its socket in.
+//
+// Deliberately not derived from TESTKIT_SLOT_ROOT: that is where the overlays
+// go, where length does not matter, and it is often long. This one is bounded.
+func slotTmp(label string) (string, error) {
+	dir := filepath.Join("/var/tmp", fmt.Sprintf("tk%d", os.Getpid()), label)
+	// The longest name the engine puts here is the socket, CUBRID<port>.
+	if n := len(dir) + len("/CUBRID65535") + 1; n > sunPathMax {
+		return "", fmt.Errorf("%s: CUBRID_TMP would be %s, and a socket under it needs %d of the %d bytes a Unix socket path has",
+			label, dir, n, sunPathMax)
+	}
+	if err := os.MkdirAll(dir, 0o1777); err != nil {
+		return "", fmt.Errorf("%s: %w", label, err)
+	}
+	return dir, nil
 }
 
 func openChannels(inst *topology.Instance) (worker, monitor exec.Channel, err error) {

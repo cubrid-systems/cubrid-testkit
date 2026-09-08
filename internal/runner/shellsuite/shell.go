@@ -215,8 +215,28 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		}
 	}
 
+	// Every worker gets a namespace, including the only one.
+	//
+	// This used to start at two, and one worker ran on the bare machine. That
+	// made a serial run *less* isolated than a parallel one, which is backwards
+	// and it cost a measurement: three _01_sqlx cases were recorded at 182, 183
+	// and 183 seconds in a serial arm and are 8.8, 12.4 and 38.4 on develop.
+	// With no network namespace the run shared port 1523 with leftover masters
+	// and another session's server, and three cases at almost exactly the same
+	// number looked like a fixed timeout and were contention.
+	//
+	// A network namespace is most of what this buys a single worker: the run
+	// stops competing for the shipped ports with whatever else is on the
+	// machine. The private /dev/shm, the per-slot $CUBRID overlay and the short
+	// CUBRID_TMP come with it, and they are the same arrangement a two-slot run
+	// has been verified against -- 0 verdicts differ, measured.
+	// A caller that supplies its own channels is controlling how commands run,
+	// and slots would build their own and ignore it -- which is how the whole-task
+	// test lost the guard that intercepts the destructive reset. Slots are for the
+	// real opener.
+	own := s.Channels == nil
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
-	if slots > 1 {
+	if own && (slots > 1 || contain.Active()) {
 		slotted, closeSlots, err := openSlots(slots, opener, machine, corpus,
 			cfg.GetOr("scenario", ""), split)
 		if err != nil {

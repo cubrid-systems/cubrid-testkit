@@ -23,9 +23,12 @@ func TestTheCorpusIsReadOnlyAndItsWritesAreMemory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "case.sh"), []byte("clean\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	undo, err := ramOverlay(dir, 32)
+	undo, ramDir, err := ramOverlay(dir, 32)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if ramDir == "" {
+		t.Error("the overlay did not say where its upper layer is, so the status page cannot report it")
 	}
 
 	if b, err := os.ReadFile(filepath.Join(dir, "case.sh")); err != nil ||

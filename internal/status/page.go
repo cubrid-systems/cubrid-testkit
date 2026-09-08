@@ -66,6 +66,12 @@ const page = `<!doctype html>
  .case{width:100%;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .num{text-align:right;width:5rem;color:var(--ink-dim)}
  .empty{color:var(--ink-faint);padding:.4rem 0}
+ /* A failing case provokes one question -- why -- and feedback.log already has
+    the answer, so the case name is a link to it. */
+ .case a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--line)}
+ .case a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+ .detail{margin:0;padding:.7rem .9rem;background:var(--line-soft);border-radius:3px;
+   overflow:auto;max-height:26rem;font-size:.72rem;line-height:1.45;white-space:pre}
 
  /* What is interactive looks interactive: the toggle reads as a control at
     rest, not only once the pointer is over it. */
@@ -97,6 +103,19 @@ const page = `<!doctype html>
  .v.no{color:var(--fail);background:rgba(211,118,110,.15)}
  .panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1.6rem;margin-bottom:2rem}
  .panel{min-width:0}
+ /* The machine panel is an instrument rather than a summary, so it gets a row
+    of its own and the numbers are grouped by the question they answer. */
+ .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.9rem 1.6rem}
+ .mg h3{margin:0 0 .3rem;font-size:.66rem;font-weight:600;letter-spacing:.12em;
+   text-transform:uppercase;color:var(--ink-faint)}
+ .mg table{min-width:0}
+ .mg td{border:0;padding:.1rem .7rem .1rem 0;white-space:nowrap}
+ .mg td:first-child{color:var(--ink-faint);width:5.5rem}
+ .mg td.warn{color:var(--warn)}
+ /* A bar under a number says how full it is without needing a second glance. */
+ .mbar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:.25rem}
+ .mbar i{display:block;height:100%;background:var(--accent)}
+ .mbar i.warn{background:var(--warn)}
  table.kv td{border:0;padding:.15rem .9rem .15rem 0}
  table.kv td:first-child{color:var(--ink-faint);width:9rem}
  table.kv td.warn{color:var(--warn)}
@@ -147,14 +166,25 @@ const page = `<!doctype html>
 </div>
 <div class=bar><i id=fill></i></div>
 
+<section class=panel id=machinewrap style="margin-bottom:1.6rem">
+  <h2>machine <span class=count id=mwhen>every second</span></h2>
+  <div class=mgrid id=machine></div>
+</section>
+
 <div class=panels>
-  <section class=panel>
-    <h2>machine</h2>
-    <table class=kv><tbody id=machine></tbody></table>
-  </section>
   <section class=panel>
     <h2>how long cases take <span class=count>cases &middot; share of time</span></h2>
     <div id=hist class=hist></div>
+  </section>
+</div>
+
+<div class=panels>
+  <section class=panel>
+    <h2>lanes <span class=count>where the writes go</span></h2>
+    <div class=scroll><table>
+      <thead><tr><th>lane<th>slots<th class=num>done<th class=num>nok<th class=num>total<th class=num>share</tr></thead>
+      <tbody id=lanes><tr><td colspan=6 class=empty>no lane reported</tr></tbody>
+    </table></div>
   </section>
   <section class=panel id=tplpanel hidden>
     <h2>template cache <span class=count id=tplwhere></span></h2>
@@ -164,16 +194,6 @@ const page = `<!doctype html>
       <tbody id=tpltop></tbody>
     </table></div>
   </section>
-  <section class=panel>
-    <h2>lanes <span class=count>where the writes go</span></h2>
-    <div class=scroll><table>
-      <thead><tr><th>lane<th>slots<th class=num>done<th class=num>nok<th class=num>total<th class=num>share</tr></thead>
-      <tbody id=lanes><tr><td colspan=6 class=empty>no lane reported</tr></tbody>
-    </table></div>
-  </section>
-</div>
-
-<div class=panels>
   <section class=panel>
     <h2>by family <span class=count>slowest first</span></h2>
     <div class=scroll><table>
@@ -218,6 +238,13 @@ const page = `<!doctype html>
     </tr></thead>
     <tbody id=recent><tr><td colspan=4 class=empty>nothing yet</tr></tbody>
   </table></div>
+</section>
+
+<section id=detailwrap hidden>
+  <h2>case detail <span class=count id=detailname></span>
+    <span class=seg><button id=detailclose>close</button></span>
+  </h2>
+  <pre id=detail class=detail></pre>
 </section>
 
 <script>
@@ -303,7 +330,7 @@ function draw(v) {
     : rows.length + ' kept') + (showN && rows.length > showN ? ', showing ' + showN : '')
   $('recent').innerHTML = list.length ? list.map(r =>
     '<tr><td class=slot>' + r.slot +
-    '<td class=case title="' + r.case + '">' + short(r.case) +
+    '<td class=case title="' + r.case + '"><a href="#" data-case="' + r.case + '">' + short(r.case) + '</a>' +
     '<td class=num><span class="v ' + (r.ok?'ok':'no') + '">' + (r.ok?'OK':'NOK') + '</span>' +
     '<td class=num>' + secs(r.took) + '</tr>').join('')
     : '<tr><td colspan=4 class=empty>' + (showFailed ? 'nothing has failed' : 'nothing yet') + '</tr>'
@@ -333,6 +360,10 @@ async function tick() {
     '<td class=num>' + secs(s.held) + '</tr>').join('')
     : '<tr><td colspan=3 class=empty>' + (v.finished ? 'all slots idle' : 'waiting for the first case') + '</tr>'
 
+  // A replay is a finished run: the machine numbers would be this machine now,
+  // not the one the run happened on, and a panel that says something true about
+  // the wrong thing is worse than no panel.
+  $('machinewrap').hidden = !!v.replaying
   machine(v.machine || {})
   hist(v.hist || [], v.histSecs || [], v.histEdge || [])
   groups('family', v.family || [], false)
@@ -345,67 +376,74 @@ async function tick() {
 
 const gb = mb => mb >= 1024 ? (mb/1024).toFixed(1) + ' GB' : mb + ' MB'
 
+// The machine panel, grouped by the question each number answers.
+//
+// CPU is split because "load 50 on sixteen cores" said nothing until it was
+// split -- most of it was iowait, which is a disk problem wearing a CPU
+// costume. Disk is in both bytes and operations because those say different
+// things: 300 MB/s in 300 operations is a stream, and in 30,000 it is thrashing.
+// And memory names what is holding it, because a tmpfs shows up as shmem and
+// the corpus row is the same megabytes seen from the run's side.
 function machine(m) {
-  const rows = []
-  const hot = m.cores && m.load > m.cores
-  rows.push(['load', m.load == null ? '—' : m.load.toFixed(2) + ' of ' + m.cores + ' cores', hot])
-  if (m.memAll) rows.push(['memory', gb(m.memUsed) + ' of ' + gb(m.memAll),
-                           m.memUsed > m.memAll * 0.9])
-  // Shown even at zero. Zero is the value worth seeing, and hiding the row
-  // exactly then is what the first version of this did.
-  if (m.ramCap) rows.push(['corpus tmpfs', gb(m.ram) + ' of ' + gb(m.ramCap),
-                           m.ram > m.ramCap * 0.9])
-  rows.push(['disk free', m.corpus == null ? '—' : gb(m.corpus), m.corpus < 5120])
-  $('machine').innerHTML = rows.map(([k, val, warn]) =>
-    '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + val + '</tr>').join('')
-}
+  const pct = x => (x == null ? '—' : x.toFixed(0) + '%')
+  const mbs = x => (x == null ? '—' : (x >= 100 ? x.toFixed(0) : x.toFixed(1)) + ' MB/s')
+  const ops = x => (x == null ? '—' : x >= 1000 ? (x/1000).toFixed(1) + 'k' : x.toFixed(0))
 
-// A lane is one word, and an unset one is nothing rather than a placeholder.
-const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''
+  const bar = (used, all, warn) => !all ? '' :
+    '<div class=mbar><i class="' + (warn ? 'warn' : '') +
+    '" style="width:' + Math.min(100, 100*used/all) + '%"></i></div>'
 
-// The cache is off in most runs, so the panel is absent rather than empty: a
-// panel of zeroes reads as "nothing is hitting" when the truth is "nobody asked
-// for a cache".
-function templates(t) {
-  $('tplpanel').hidden = !t
-  if (!t) return
-  $('tplwhere').textContent = t.dir
-  const asked = (t.restored || 0) + (t.built || 0)
-  const hit = asked ? Math.round(100 * t.restored / asked) : 0
-  const rows = [
-    ['store', t.count + ' templates, ' + gb(t.mb) + (t.capMB ? ' of ' + gb(t.capMB) : ''),
-     t.capMB && t.mb > t.capMB * 0.9],
-    // Restored against built is the hit rate, which is the number the cache
-    // exists for -- and the one that says whether it is earning its keep.
-    ['this run', t.restored + ' restored, ' + t.built + ' built' + (asked ? '  (' + hit + '% hit)' : ''), false],
+  const group = (title, rows, foot) =>
+    '<div class=mg><h3>' + title + '</h3><table><tbody>' +
+    rows.map(([k, v, warn]) => '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + v + '</tr>').join('') +
+    '</tbody></table>' + (foot || '') + '</div>'
+
+  const busy = (m.cpuUser || 0) + (m.cpuSys || 0)
+  const cpu = group('cpu', [
+    ['busy', pct(busy), busy > 90],
+    ['user', pct(m.cpuUser)],
+    ['system', pct(m.cpuSys)],
+    // iowait is the one that explains a load nobody ordered.
+    ['iowait', pct(m.cpuIowait), (m.cpuIowait || 0) > 20],
+  ], bar(busy, 100, busy > 90))
+
+  const load = group('load', [
+    ['1 min', (m.load1 == null ? '—' : m.load1.toFixed(2)), m.cores && m.load1 > m.cores],
+    ['5 min', (m.load5 == null ? '—' : m.load5.toFixed(2))],
+    ['15 min', (m.load15 == null ? '—' : m.load15.toFixed(2))],
+    ['cores', m.cores + (m.procs ? '  ·  ' + m.procs + ' procs' : '')],
+  ])
+
+  const mem = group('memory', [
+    ['used', gb(m.memUsed) + ' of ' + gb(m.memAll), m.memAll && m.memUsed > m.memAll * 0.9],
+    ['free', gb(m.memFree)],
+    ['cache', gb(m.memCache)],
+    // A tmpfs is shmem, so this is the corpus overlay seen from the machine.
+    ['tmpfs', gb(m.memShmem)],
+  ], bar(m.memUsed, m.memAll, m.memAll && m.memUsed > m.memAll * 0.9))
+
+  const diskRows = [
+    ['read', mbs(m.readMBs) + '  ·  ' + ops(m.readIops) + ' IOPS'],
+    ['write', mbs(m.writeMBs) + '  ·  ' + ops(m.writeIops) + ' IOPS'],
+    ['free', m.corpus == null ? '—' : gb(m.corpus), m.corpus < 5120],
   ]
-  $('tplkv').innerHTML = rows.map(([k, val, warn]) =>
-    '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + val + '</tr>').join('')
-  const top = t.top || []
-  $('tpltop').innerHTML = top.length ? top.map(r =>
-    '<tr><td class=case title="' + r.key + '">' + r.key.slice(0, 12) +
-    '<td class=num>' + r.refs +
-    '<td class=num>' + gb(r.mb) +
-    '<td class=case title="' + (r.origin || '') + '">' + (r.origin || '') + '</tr>').join('')
-    : '<tr><td colspan=4 class=empty>the store is empty</tr>'
+  if (m.swapAll) diskRows.push(['swap', gb(m.swapUsed) + ' of ' + gb(m.swapAll), m.swapUsed > 0])
+  const disk = group('disk', diskRows)
+
+  // The corpus tmpfs against the ceiling it was given. Shown even at zero:
+  // zero is the value worth seeing, and hiding the row exactly then is what
+  // the first version of this did.
+  const corpus = m.ramCap ? group('corpus in tmpfs', [
+    ['held', gb(m.ram) + ' of ' + gb(m.ramCap), m.ram > m.ramCap * 0.9],
+    ['ceiling', gb(m.ramCap)],
+    // Past 90% a case that runs out of space fails like a case that got the
+    // wrong answer, and nothing else in the output would say so.
+    ['headroom', gb(Math.max(0, m.ramCap - m.ram)), m.ram > m.ramCap * 0.9],
+  ], bar(m.ram, m.ramCap, m.ram > m.ramCap * 0.9)) : ''
+
+  $('machine').innerHTML = cpu + load + mem + disk + corpus
 }
 
-function lanes(ls) {
-  $('lanes').innerHTML = ls.length ? ls.map(l =>
-    '<tr><td>' + lane(l.name) +
-    '<td class=slots title="' + l.nslots + ' slots">' + l.slots +
-    '<td class=num>' + l.done +
-    '<td class=num>' + (l.nok ? '<span class="v no">' + l.nok + '</span>' : '') +
-    '<td class=num>' + secs(l.secs) +
-    '<td class=num>' + l.share + '%</tr>').join('')
-    : '<tr><td colspan=6 class=empty>no lane reported</tr>'
-}
-
-// Two numbers a bucket: how many cases are in it, and how much of the run's
-// time they are between them. The bar stays the count, because that is the
-// distribution the panel is named for; the share is what a lane threshold is
-// chosen from, and a bucket holding a fifth of the run is marked so it can be
-// found without reading every row.
 function hist(h, secsIn, edges) {
   const max = Math.max(1, ...h)
   const total = secsIn.reduce((a, b) => a + b, 0)
@@ -434,6 +472,24 @@ function groups(id, gs, withLane) {
     '<td class=num>' + (g.done ? secs(g.max) : '') + '</tr>').join('')
     : '<tr><td colspan=' + cols + ' class=empty>nothing yet</tr>'
 }
+// Clicking a finished case shows what feedback.log recorded for it: its checks
+// and, when it failed, the console output of the run.
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[data-case]')
+  if (!a) return
+  e.preventDefault()
+  const name = a.getAttribute('data-case')
+  $('detailname').textContent = short(name)
+  $('detail').textContent = 'loading…'
+  $('detailwrap').hidden = false
+  $('detailwrap').scrollIntoView({block: 'nearest'})
+  fetch('/case?name=' + encodeURIComponent(name))
+    .then(r => r.text())
+    .then(t => { $('detail').textContent = t })
+    .catch(err => { $('detail').textContent = String(err) })
+})
+$('detailclose').addEventListener('click', () => { $('detailwrap').hidden = true })
+
 tick(); setInterval(tick, 1000)
 </script>
 `

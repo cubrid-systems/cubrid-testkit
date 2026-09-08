@@ -16,8 +16,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +32,21 @@ import (
 // already using. The digits are CUBRID's own 1523 with a 5 in front, which is
 // the only reason this number rather than another.
 const DefaultAddr = "127.0.0.1:51523"
+
+// NearDefault is the nth port after the default, for a machine already running a
+// run. Two runs on one machine is a normal thing to want -- a long one and a
+// quick check of one family -- and the page is not worth failing over.
+func NearDefault(n int) string {
+	host, port, ok := strings.Cut(DefaultAddr, ":")
+	if !ok {
+		return DefaultAddr
+	}
+	base, err := strconv.Atoi(port)
+	if err != nil {
+		return DefaultAddr
+	}
+	return host + ":" + strconv.Itoa(base+n)
+}
 
 // Addr reads what the configuration said. A bare "on" takes DefaultAddr, a bare
 // port takes every interface, and anything else is passed through as written.
@@ -86,6 +99,9 @@ type Board struct {
 	corpusDir string
 	ramDir    string
 	ramCap    int
+	// sampler reads the machine on its own ticker, because CPU and disk are
+	// counters and a rate needs two readings.
+	sampler *sampler
 
 	hist []int
 	// histSecs is the same buckets weighted by time rather than by count, and
@@ -114,6 +130,9 @@ type Board struct {
 	// identical otherwise, and mistaking the first for the second is the kind of
 	// error that costs an afternoon.
 	replaying bool
+	// detail is where this run's feedback.log is, which is what lets a finished
+	// case be clicked. Nil when nobody said.
+	detail *detail
 }
 
 // tally is what is known about a group of cases without keeping the cases.
@@ -372,20 +391,6 @@ type groupView struct {
 	Max  int    `json:"max"`
 }
 
-// machineView is what the run is competing for. Everything this project has
-// measured about parallelism is a resource question, and none of it was visible
-// while a run was going: a slot holding a case for four minutes reads the same
-// whether it is waiting on a lock or on a disk with nothing left to give.
-type machineView struct {
-	Load    float64 `json:"load"`
-	Cores   int     `json:"cores"`
-	MemUsed int     `json:"memUsed"`
-	MemAll  int     `json:"memAll"`
-	Corpus  int     `json:"corpus"`
-	Ram     int     `json:"ram"`
-	RamCap  int     `json:"ramCap"`
-}
-
 type doneView struct {
 	Slot string `json:"slot"`
 	Case string `json:"case"`
@@ -443,7 +448,7 @@ func (b *Board) snapshot() view {
 	}
 	v.Lanes = b.lanes()
 	v.Templates = b.templates.snapshot()
-	v.Machine = machine(b.corpusDir, b.ramDir, b.ramCap)
+	v.Machine = b.sampler.snapshot()
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]
 		v.Recent = append(v.Recent, doneView{
@@ -466,6 +471,7 @@ func (b *Board) Serve(addr string) (string, func(), error) {
 		return "", nil, fmt.Errorf("status page: %w", err)
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/case", b.serveDetail)
 	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(b.snapshot())
@@ -492,6 +498,7 @@ func (b *Board) Watch(diskDir, ramDir string, ramCapMB int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.corpusDir, b.ramDir, b.ramCap = diskDir, ramDir, ramCapMB
+	b.sampler = newSampler(diskDir, ramDir, ramCapMB)
 }
 
 // groups sorts the tallies slowest-first: the question is which family or slot
@@ -514,38 +521,6 @@ func groups(m map[string]*tally) []groupView {
 		return out[i].Name < out[j].Name
 	})
 	return out
-}
-
-// machine reads what the run is competing for. Straight from /proc every time
-// the page asks, once a second, because caching a number this cheap would be
-// one more thing that can be stale.
-func machine(corpusDir, ramDir string, ramCap int) machineView {
-	v := machineView{Cores: runtime.NumCPU(), RamCap: ramCap}
-	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
-		if f := strings.Fields(string(b)); len(f) > 0 {
-			v.Load, _ = strconv.ParseFloat(f[0], 64)
-		}
-	}
-	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
-		var total, avail int
-		for _, line := range strings.Split(string(b), "\n") {
-			f := strings.Fields(line)
-			if len(f) < 2 {
-				continue
-			}
-			n, _ := strconv.Atoi(f[1])
-			switch f[0] {
-			case "MemTotal:":
-				total = n / 1024
-			case "MemAvailable:":
-				avail = n / 1024
-			}
-		}
-		v.MemAll, v.MemUsed = total, total-avail
-	}
-	v.Corpus = freeMB(corpusDir)
-	v.Ram = usedMB(ramDir)
-	return v
 }
 
 func freeMB(dir string) int {

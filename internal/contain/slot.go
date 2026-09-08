@@ -307,9 +307,25 @@ var _ exec.Channel = (*nsChannel)(nil)
 // a /tmp of its own, and a script written into this process's would not be there
 // when the command went looking. /var/tmp is the same filesystem and not the
 // directory being replaced.
-func scratchRoot() string {
-	if r := os.Getenv("TESTKIT_SLOT_ROOT"); r != "" {
-		return filepath.Join(r, "scratch")
+func scratchRoot() string { return filepath.Join(SlotRoot(), "scratch") }
+
+// SlotRoot is where this run keeps everything it makes per slot: the overlay
+// upper layers and the scripts commands are written into.
+//
+// The default carries the process id, because two runs on one machine would
+// otherwise both call a slot "slot0" and mount an overlay over the same upper
+// directory -- which is not a collision that announces itself, it is one run
+// quietly writing into another's $CUBRID. Everything else a run makes is already
+// unique: the corpus tmpfs comes from MkdirTemp and CUBRID_TMP carries the pid.
+//
+// TESTKIT_SLOT_ROOT still overrides, and a caller that sets it takes
+// responsibility for keeping two runs apart.
+func SlotRoot() string {
+	if r := os.Getenv(SlotRootEnv); r != "" {
+		return r
 	}
-	return filepath.Join("/var/tmp", "testkit-slots", "scratch")
+	return filepath.Join("/var/tmp", "testkit-slots", strconv.Itoa(os.Getpid()))
 }
+
+// SlotRootEnv names the override.
+const SlotRootEnv = "TESTKIT_SLOT_ROOT"

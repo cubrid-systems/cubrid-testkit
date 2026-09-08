@@ -133,6 +133,40 @@ type Board struct {
 	// detail is where this run's feedback.log is, which is what lets a finished
 	// case be clicked. Nil when nobody said.
 	detail *detail
+	// replay is the playback's position, when this board is one. It is what the
+	// controls move.
+	replay *replayer
+	// replayAt is the knobs' state as the replayer last published it.
+	//
+	// Published rather than asked for. The replayer takes its own lock and then
+	// the board's -- seeking calls Begin and End -- so a snapshot that held the
+	// board's lock and then reached for the replayer's would deadlock the two
+	// against each other. One direction only: replayer, then board.
+	replayAt *replayView
+}
+
+// reset empties the board, which is what seeking backwards in a replay needs: a
+// board is an accumulation and there is nothing to subtract from it.
+func (b *Board) reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.running = map[string]inflight{}
+	b.done, b.ok = 0, 0
+	b.recent, b.failed = nil, nil
+	b.buckets, b.bucket0 = nil, time.Time{}
+	b.hist = make([]int, len(histEdges)+1)
+	b.histSecs = make([]int, len(histEdges)+1)
+	b.byFamily = map[string]*tally{}
+	// The lanes and the slots are the run's shape rather than its progress, so
+	// they are rebuilt empty but keep their membership: a slot that existed at
+	// the end existed at the start.
+	for slot := range b.bySlot {
+		b.bySlot[slot] = &tally{}
+	}
+	for lane := range b.byLane {
+		b.byLane[lane] = &tally{}
+	}
+	b.started = time.Now()
 }
 
 // tally is what is known about a group of cases without keeping the cases.
@@ -380,6 +414,7 @@ type view struct {
 	Machine   machineView   `json:"machine"`
 	Finished  bool          `json:"finished"`
 	Replaying bool          `json:"replaying,omitempty"`
+	Replay    *replayView   `json:"replay,omitempty"`
 }
 
 type slotView struct {
@@ -473,6 +508,7 @@ func (b *Board) snapshot() view {
 	}
 	v.Lanes = b.lanes()
 	v.Templates = b.templates.snapshot()
+	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]
@@ -497,6 +533,20 @@ func (b *Board) Serve(addr string) (string, func(), error) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/case", b.serveDetail)
+	// The replay's knobs. A GET so the page can drive it with fetch and nothing
+	// else has to exist.
+	mux.HandleFunc("/replay", func(w http.ResponseWriter, r *http.Request) {
+		b.mu.Lock()
+		rp := b.replay
+		b.mu.Unlock()
+		if rp == nil {
+			http.Error(w, "this board is not a replay", http.StatusNotFound)
+			return
+		}
+		rp.control(r.URL.Query())
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(rp.view())
+	})
 	mux.HandleFunc("/api", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(b.snapshot())

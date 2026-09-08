@@ -101,6 +101,17 @@ const page = `<!doctype html>
  .count{letter-spacing:0;text-transform:none;color:var(--ink-faint)}
  /* A finished run played back looks exactly like one happening now, and
     mistaking the first for the second costs an afternoon. */
+ /* The replay's knobs sit where the machine panel would be: a finished run has
+    no machine worth reporting, and a scrub bar is the thing you reach for. */
+ .rpbar{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+ .rpbtn{appearance:none;background:none;border:1px solid var(--line);border-radius:3px;
+   color:var(--ink-dim);cursor:pointer;font:inherit;font-size:.7rem;letter-spacing:.06em;
+   padding:.15rem .55rem}
+ .rpbtn:hover{color:var(--ink);border-color:var(--ink-faint)}
+ .rpbtn[aria-pressed=true]{background:var(--line);color:var(--accent)}
+ .seg .rpbtn{border:0;border-radius:0}
+ .seg .rpbtn+.rpbtn{border-left:1px solid var(--line)}
+ #rpseek{flex:1 1 14rem;min-width:8rem;accent-color:var(--accent)}
  .replay{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
    padding:.08rem .45rem;border-radius:2px;color:var(--warn);
    border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}
@@ -115,6 +126,13 @@ const page = `<!doctype html>
  .v.no{color:var(--fail);background:rgba(211,118,110,.15)}
  .panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1.6rem;margin-bottom:2rem}
  .panel{min-width:0}
+ /* A table three-across has about 26rem, and the global 34rem floor made it
+    overflow -- so nok, total and worst were cut off the right-hand edge and the
+    panel looked like it had two columns. Inside a panel a table sizes to what it
+    holds; the full-width tables below keep the floor. */
+ .panels table{min-width:0}
+ .panels .num{width:auto;min-width:2.6rem;padding-right:.6rem}
+ .panels th,.panels td{padding-right:.6rem}
  /* The machine panel is an instrument rather than a summary, so it gets a row
     of its own and the numbers are grouped by the question they answer. */
  .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.9rem 1.6rem}
@@ -177,6 +195,25 @@ const page = `<!doctype html>
   </div>
 </div>
 <div class=bar><i id=fill></i></div>
+
+<section class=panel id=replaywrap hidden style="margin-bottom:1.6rem">
+  <h2>replay <span class=count id=rpwhen></span></h2>
+  <div class=rpbar>
+    <button id=rpplay class=rpbtn title="space">pause</button>
+    <button class="rpbtn step" data-step="-60">&laquo; 1m</button>
+    <button class="rpbtn step" data-step="-10">&laquo; 10s</button>
+    <button class="rpbtn step" data-step="10">10s &raquo;</button>
+    <button class="rpbtn step" data-step="60">1m &raquo;</button>
+    <input id=rpseek type=range min=0 max=1000 value=0 aria-label="position in the run">
+    <span class=seg role=group aria-label="speed">
+      <button class="rpbtn speed" data-speed="1">1&times;</button
+      ><button class="rpbtn speed" data-speed="10">10&times;</button
+      ><button class="rpbtn speed" data-speed="60">60&times;</button
+      ><button class="rpbtn speed" data-speed="600">600&times;</button
+      ><button class="rpbtn speed" data-speed="3600">3600&times;</button>
+    </span>
+  </div>
+</section>
 
 <section class=panel id=machinewrap style="margin-bottom:1.6rem">
   <h2>machine <span class=count id=mwhen>every second</span></h2>
@@ -388,6 +425,7 @@ async function tick() {
   // not the one the run happened on, and a panel that says something true about
   // the wrong thing is worse than no panel.
   $('machinewrap').hidden = !!v.replaying
+  replayBar(v.replay)
   machine(v.machine || {})
   hist(v.hist || [], v.histSecs || [], v.histEdge || [])
   $('nfamily').textContent = (v.family || []).length + ' groups, slowest first'
@@ -485,6 +523,39 @@ function hist(h, secsIn, edges) {
   }).join('')
 }
 
+// The replay's knobs. Drawn from what the server says the position is, not from
+// what the page last asked for -- the playback moves on its own between clicks,
+// and a slider that showed the last click would drift away from the run.
+let rpDragging = false
+function replayBar(rp) {
+  $('replaywrap').hidden = !rp
+  if (!rp) return
+  $('rpwhen').textContent = secs(rp.at) + ' of ' + secs(rp.span) + '  ·  ' + rp.speed + '\u00d7'
+  $('rpplay').textContent = rp.paused ? 'play' : 'pause'
+  if (!rpDragging) {
+    $('rpseek').value = rp.span ? Math.round(1000 * rp.at / rp.span) : 0
+  }
+  document.querySelectorAll('.rpbtn.speed').forEach(b =>
+    b.setAttribute('aria-pressed', String(Number(b.dataset.speed) === rp.speed)))
+}
+
+// One call for every knob: the server owns the position and answers with it.
+function rpSend(q) { fetch('/replay?' + q).then(r => r.json()).then(replayBar).catch(() => {}) }
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('.rpbtn')
+  if (!b) return
+  if (b.id === 'rpplay') return rpSend('paused=' + ($('rpplay').textContent === 'pause' ? '1' : '0'))
+  if (b.dataset.step) return rpSend('step=' + b.dataset.step)
+  if (b.dataset.speed) return rpSend('speed=' + b.dataset.speed)
+})
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || $('replaywrap').hidden) return
+  if (e.key === ' ') { e.preventDefault(); $('rpplay').click() }
+  if (e.key === 'ArrowLeft') rpSend('step=-10')
+  if (e.key === 'ArrowRight') rpSend('step=10')
+})
+
 // A lane is one word, and an unset one is nothing rather than a placeholder.
 const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''
 
@@ -556,6 +627,15 @@ document.addEventListener('click', e => {
     .catch(err => { $('detail').textContent = String(err) })
 })
 $('detailclose').addEventListener('click', () => { $('detailwrap').hidden = true })
+
+// Dragging the scrub bar seeks; while a finger is down the poll must not fight
+// it for the slider's value.
+$('rpseek').addEventListener('input', () => { rpDragging = true })
+$('rpseek').addEventListener('change', e => {
+  rpDragging = false
+  const span = Number(($('rpwhen').dataset.span) || 0)
+  rpSend('seek=' + (Number(e.target.value) / 1000 * (lastView && lastView.replay ? lastView.replay.span : 0)))
+})
 
 tick(); setInterval(tick, 1000)
 </script>

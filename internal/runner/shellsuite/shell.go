@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	osexec "os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -159,14 +157,15 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// Clean is then structural rather than a step. 105 MB is cheap to copy, but a
 	// copy is something that can be skipped and a mount is a property of how the
 	// run is mounted.
-	var ramDir string
+
+	var corpus *Corpus
 	if mb := cfg.Int("scenario_ram_mb", 0); mb > 0 {
-		release, dir, err := ramOverlay(cfg.GetOr("scenario", ""), mb)
+		c, err := OpenCorpus(cfg.GetOr("scenario", ""), mb)
 		if err != nil {
 			return quit("%v", err)
 		}
-		ramDir = dir
-		defer release()
+		corpus = c
+		defer corpus.Close()
 		fmt.Printf("[INFO] the corpus is read-only for this run; its writes go to %d MB of memory\n", mb)
 	}
 
@@ -263,6 +262,9 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		s.recordSkipped(report, tempSkipped, feedback.SkipTypeByTemp)
 	}
 	fmt.Printf("The Number of Test Case : %d\n", len(cases))
+	// What to reclaim, and when: a directory's writes go when its last case
+	// retires, which is what keeps the ceiling a size instead of a rate.
+	corpus.Plan(cases)
 
 	// ---- deploy ----------------------------------------------------------
 	fmt.Println("============= DEPLOY ==================")
@@ -290,11 +292,11 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		fmt.Printf("[INFO] status page at http://%s/\n", where)
 		// The machine panel reports the two places that matter to this run
 		// rather than the root filesystem.
-		board.Watch(os.Getenv("CUBRID"), ramDir, cfg.Int("scenario_ram_mb", 0))
+		board.Watch(os.Getenv("CUBRID"), corpus.Ram(), cfg.Int("scenario_ram_mb", 0))
 	}
 
 	fmt.Println("STARTED")
-	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board)
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus)
 
 	report.TaskStop()
 
@@ -343,88 +345,6 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 //
 // Nothing is reconfigured, which is the point. A slotted run's conf files and
 // log lines are the ones a serial run produces.
-// ramOverlay puts dir behind an overlay whose upper layer is a tmpfs of mb
-// megabytes, and returns the way to take it down again.
-//
-// The cap is the safety property rather than a formality. What accumulated 20 GB
-// on disk over weeks would end a run in memory, so the ceiling turns a run that
-// dies into a case that fails for want of space -- which is itself a change in
-// behaviour, because a case that tests running out of space now finds a
-// different amount of it.
-func ramOverlay(dir string, mb int) (func(), string, error) {
-	if dir == "" {
-		return nil, "", fmt.Errorf("scenario_ram_mb needs scenario to be set")
-	}
-	if !contain.Active() {
-		return nil, "", fmt.Errorf("scenario_ram_mb needs the runner contained; set %s=1", contain.Env)
-	}
-	ram, err := os.MkdirTemp("", "testkit-corpus-*")
-	if err != nil {
-		return nil, "", err
-	}
-	run := func(script string) error {
-		out, err := osexec.Command(contain.Shell, "-c", script).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("%s: %w: %s", script, err, strings.TrimSpace(string(out)))
-		}
-		return nil
-	}
-	if err := run(fmt.Sprintf("mount -t tmpfs -o size=%dm corpus %s && mkdir -p %s/up %s/work",
-		mb, ram, ram, ram)); err != nil {
-		return nil, "", err
-	}
-	// The peak, and whether it ever reached the ceiling.
-	//
-	// A ceiling below what a run needs does not stop the run and does not put
-	// ENOSPC anywhere a reader will find it: the cases simply fail. One arm of
-	// this suite's own measurements gave 47 OK against 170 NOK for exactly that
-	// reason, and nothing in the output said why. So the run watches its own
-	// ceiling and says on the way out whether it hit it.
-	peak := 0
-	stop := make(chan struct{})
-	go func() {
-		t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-t.C:
-				out, err := osexec.Command(contain.Shell, "-c",
-					"df -m --output=used "+ram+" | tail -1").Output()
-				if err != nil {
-					continue
-				}
-				if v, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && v > peak {
-					peak = v
-				}
-			}
-		}
-	}()
-
-	undo := func() {
-		close(stop)
-		if peak*100 >= mb*90 {
-			fmt.Printf("[ERROR] the corpus used %d MB of its %d MB ceiling. "+
-				"Cases that ran out of space fail without saying so; raise scenario_ram_mb "+
-				"or lower log_volume_size, and treat this run's verdicts as unusable.\n", peak, mb)
-		} else {
-			fmt.Printf("[INFO] the corpus wrote at most %d MB of the %d MB it was allowed\n", peak, mb)
-		}
-		_ = run("umount " + dir)
-		_ = run("umount " + ram)
-		_ = os.Remove(ram)
-	}
-	if err := run(fmt.Sprintf(
-		"mount -t overlay overlay -o lowerdir=%s,upperdir=%s/up,workdir=%s/work %s",
-		dir, ram, ram, dir)); err != nil {
-		_ = run("umount " + ram)
-		_ = os.Remove(ram)
-		return nil, "", err
-	}
-	return undo, ram, nil
-}
-
 func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channel, error),
 	machine *topology.Instance) ([]channelPair, func(), error) {
 
@@ -662,7 +582,7 @@ func (s *Shell) deploy(ctx context.Context, machine *topology.Instance,
 func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
-	buildID, bits string, local bool, board *status.Board) error {
+	buildID, bits string, local bool, board *status.Board, corpus *Corpus) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -671,7 +591,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 		go func(i int, pair channelPair) {
 			defer wg.Done()
 			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg,
-				buildID, bits, local, board, fmt.Sprintf("slot%d", i))
+				buildID, bits, local, board, corpus, fmt.Sprintf("slot%d", i))
 		}(i, pair)
 	}
 	wg.Wait()
@@ -694,7 +614,8 @@ type channelPair struct {
 func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
-	buildID, bits string, local bool, board *status.Board, slotID string) error {
+	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
+	slotID string) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
 	ssh := machine.SSH()
@@ -702,6 +623,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 		EnvID:     machine.EnvID(),
 		SlotID:    slotID,
 		Board:     board,
+		Corpus:    corpus,
 		Contained: contain.Active(),
 		Channel:   workerCh,
 		Queue:     queue,

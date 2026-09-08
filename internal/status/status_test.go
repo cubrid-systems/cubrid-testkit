@@ -236,8 +236,11 @@ func TestLanesAddTheRunUpByWhereTheWritesGo(t *testing.T) {
 	if v.Lanes[0].Name != "disk" {
 		t.Errorf("lanes are not ordered by share of time: %+v", v.Lanes)
 	}
-	if v.Lanes[0].Slots != 1 || v.Lanes[1].Slots != 2 {
+	if v.Lanes[0].NSlots != 1 || v.Lanes[1].NSlots != 2 {
 		t.Errorf("slot counts are wrong: %+v", v.Lanes)
+	}
+	if v.Lanes[0].Slots != "slot2" || v.Lanes[1].Slots != "slot0-slot1" {
+		t.Errorf("lanes do not name their slots: %q and %q", v.Lanes[0].Slots, v.Lanes[1].Slots)
 	}
 	if v.Lanes[1].Done != 2 || v.Lanes[1].NOK != 1 {
 		t.Errorf("the ram lane's cases were not counted: %+v", v.Lanes[1])
@@ -376,5 +379,86 @@ func TestThePageIsWiredToWhatTheAPISends(t *testing.T) {
 	}
 	if !strings.Contains(page, "v.lanes") || !strings.Contains(page, "v.histSecs") {
 		t.Error("the API sends lanes and histSecs and the page does not read them")
+	}
+}
+
+// A slot has to appear in the by-slot table from the moment the run opens it.
+// Building the table only from cases that had finished hid exactly the slots
+// worth looking at: the slow lane's slots were on 195, 166 and 125-second
+// cases, so the panel showed five of eight for the first three minutes.
+func TestEverySlotIsInTheTableBeforeItFinishesAnything(t *testing.T) {
+	b := New(10)
+	for _, s := range []string{"slot0", "slot1"} {
+		b.Lane(s, "ram")
+	}
+	b.Lane("slot2", "disk")
+	b.Begin("slot2", "/x/_15_backupdb/c/cases/c.sh") // a long case, nothing finished
+
+	v := b.snapshot()
+	if len(v.Slot) != 3 {
+		t.Fatalf("the by-slot table has %d rows for three open slots: %+v", len(v.Slot), v.Slot)
+	}
+	// In slot order, so the lanes read as contiguous blocks and a row does not
+	// move as it works.
+	for i, want := range []string{"slot0", "slot1", "slot2"} {
+		if v.Slot[i].Name != want {
+			t.Errorf("row %d is %q, want %q", i, v.Slot[i].Name, want)
+		}
+	}
+	// And each row says which lane it is in.
+	if v.Slot[0].Lane != "ram" || v.Slot[2].Lane != "disk" {
+		t.Errorf("the by-slot rows do not carry their lane: %+v", v.Slot)
+	}
+	if v.Slot[2].Done != 0 {
+		t.Errorf("a slot that finished nothing reports %d done", v.Slot[2].Done)
+	}
+}
+
+// The lanes panel has to say which slots, not how many: the question it is read
+// for is which lane the stuck slot is in.
+func TestALaneNamesItsSlots(t *testing.T) {
+	b := New(10)
+	for _, s := range []string{"slot0", "slot1", "slot2", "slot3", "slot4"} {
+		b.Lane(s, "ram")
+	}
+	for _, s := range []string{"slot5", "slot6", "slot7"} {
+		b.Lane(s, "disk")
+	}
+	b.Begin("slot0", "/x/_01_a/c/cases/c.sh")
+	b.End("slot0", "/x/_01_a/c/cases/c.sh", true)
+
+	byName := map[string]laneView{}
+	for _, l := range b.snapshot().Lanes {
+		byName[l.Name] = l
+	}
+	if got := byName["ram"].Slots; got != "slot0-slot4" {
+		t.Errorf("the ram lane names its slots as %q, want slot0-slot4", got)
+	}
+	if got := byName["disk"].Slots; got != "slot5-slot7" {
+		t.Errorf("the disk lane names its slots as %q, want slot5-slot7", got)
+	}
+	if byName["disk"].NSlots != 3 {
+		t.Errorf("the disk lane counts %d slots, want 3", byName["disk"].NSlots)
+	}
+}
+
+func TestCompactSlots(t *testing.T) {
+	for _, c := range []struct {
+		in   []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"slot0"}, "slot0"},
+		{[]string{"slot0", "slot1", "slot2"}, "slot0-slot2"},
+		{[]string{"slot2", "slot0", "slot1"}, "slot0-slot2"},
+		{[]string{"slot0", "slot2"}, "slot0, slot2"},
+		{[]string{"slot0", "slot1", "slot5", "slot6"}, "slot0-slot1, slot5-slot6"},
+		// Ten before two is how strings sort and not how anyone reads slots.
+		{[]string{"slot10", "slot2", "slot9"}, "slot2, slot9-slot10"},
+		{[]string{"a", "b"}, "a, b"},
+	} {
+		if got := compactSlots(c.in); got != c.want {
+			t.Errorf("compactSlots(%v) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }

@@ -2,10 +2,12 @@ package status
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A run must not fail because nobody asked to watch it, and the runner passes
@@ -201,5 +203,178 @@ func TestTiesDoNotMove(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(names) {
 		t.Errorf("tied rows are not in name order: %v", names)
+	}
+}
+
+// A lane is where a slot's corpus writes go, and the panel has to add the run up
+// by it: a lane on memory holding a small share of the case-seconds is memory
+// spent where it does not pay, which is the whole reason to split the lanes.
+func TestLanesAddTheRunUpByWhereTheWritesGo(t *testing.T) {
+	b := New(4)
+	b.Lane("slot0", "ram")
+	b.Lane("slot1", "ram")
+	b.Lane("slot2", "disk")
+
+	run := func(slot, name string, secs int, ok bool) {
+		b.Begin(slot, name)
+		b.mu.Lock()
+		in := b.running[slot]
+		in.Since = time.Now().Add(-time.Duration(secs) * time.Second)
+		b.running[slot] = in
+		b.mu.Unlock()
+		b.End(slot, name, ok)
+	}
+	run("slot0", "/x/_01_a/c/cases/c.sh", 5, true)
+	run("slot1", "/x/_01_a/d/cases/d.sh", 5, false)
+	run("slot2", "/x/_01_a/e/cases/e.sh", 90, true)
+
+	v := b.snapshot()
+	if len(v.Lanes) != 2 {
+		t.Fatalf("two lanes were reported as %d: %+v", len(v.Lanes), v.Lanes)
+	}
+	// Largest share of the seconds first: the disk lane ran the 90-second case.
+	if v.Lanes[0].Name != "disk" {
+		t.Errorf("lanes are not ordered by share of time: %+v", v.Lanes)
+	}
+	if v.Lanes[0].Slots != 1 || v.Lanes[1].Slots != 2 {
+		t.Errorf("slot counts are wrong: %+v", v.Lanes)
+	}
+	if v.Lanes[1].Done != 2 || v.Lanes[1].NOK != 1 {
+		t.Errorf("the ram lane's cases were not counted: %+v", v.Lanes[1])
+	}
+	if v.Lanes[0].Share+v.Lanes[1].Share < 99 {
+		t.Errorf("the shares do not add up: %+v", v.Lanes)
+	}
+	if v.Lanes[0].Share < 85 {
+		t.Errorf("one 90s case against two 5s cases gave the disk lane %d%%", v.Lanes[0].Share)
+	}
+	// And the slot that is running says which lane it is in, because the
+	// question asked of the rail is whether the stuck slot holds memory.
+	b.Begin("slot0", "/x/_01_a/f/cases/f.sh")
+	if s := b.snapshot().Slots; len(s) != 1 || s[0].Lane != "ram" {
+		t.Errorf("a running slot did not report its lane: %+v", s)
+	}
+}
+
+// A slot with no lane is still a slot. The panel must leave it out rather than
+// invent a name, because a serial run on disk reports one and a run of the old
+// shape reports none.
+func TestASlotWithNoLaneIsNotGivenOne(t *testing.T) {
+	b := New(1)
+	b.Lane("slot0", "")
+	b.Begin("slot0", "/x/_01_a/c/cases/c.sh")
+	b.End("slot0", "/x/_01_a/c/cases/c.sh", true)
+	v := b.snapshot()
+	if len(v.Lanes) != 0 {
+		t.Errorf("a lane was invented: %+v", v.Lanes)
+	}
+	if v.Slots != nil && len(v.Slots) > 0 && v.Slots[0].Lane != "" {
+		t.Errorf("a slot reported a lane it was not given: %+v", v.Slots)
+	}
+}
+
+// Counting cases says the corpus is mostly short cases; counting seconds says a
+// few long ones own the run. The lane threshold is chosen from the second, so
+// both have to be there.
+func TestTheDistributionIsWeightedByTimeAsWellAsCount(t *testing.T) {
+	b := New(10)
+	at := func(secs int, name string) {
+		b.Begin("slot0", name)
+		b.mu.Lock()
+		in := b.running["slot0"]
+		in.Since = time.Now().Add(-time.Duration(secs) * time.Second)
+		b.running["slot0"] = in
+		b.mu.Unlock()
+		b.End("slot0", name, true)
+	}
+	for i := 0; i < 9; i++ {
+		at(1, "/x/_01_a/s/cases/s.sh") // nine cases under 2s
+	}
+	at(183, "/x/_01_a/l/cases/l.sh") // one at 183s
+
+	v := b.snapshot()
+	if v.Hist[0] != 9 {
+		t.Errorf("nine short cases landed as %v", v.Hist)
+	}
+	if got := v.HistSecs[0]; got != 9 {
+		t.Errorf("nine one-second cases are %d seconds, not 9", got)
+	}
+	// 183 s lands in the 120-300 bucket, not the one above it: the edges are
+	// upper bounds, so bucketOf(183) is the last edge it is under.
+	long := bucketOf(183)
+	if v.HistSecs[long] < 180 {
+		t.Errorf("the 183s case contributed %d seconds to bucket %d: %v", v.HistSecs[long], long, v.HistSecs)
+	}
+	// The point: 10% of the cases are 95% of the time.
+	total := 0
+	for _, s := range v.HistSecs {
+		total += s
+	}
+	if share := v.HistSecs[long] * 100 / total; share < 90 {
+		t.Errorf("one case of ten holds %d%% of the seconds, expected over 90", share)
+	}
+}
+
+// The lanes table refreshes once a second like every other, so tied rows have
+// to keep their places.
+func TestLaneTiesDoNotMove(t *testing.T) {
+	b := New(4)
+	for _, l := range []string{"zebra", "alpha", "middle"} {
+		b.Lane("slot-"+l, l)
+		b.Begin("slot-"+l, "/x/_01_a/c/cases/c.sh")
+		b.End("slot-"+l, "/x/_01_a/c/cases/c.sh", true)
+	}
+	first := b.snapshot().Lanes
+	for i := 0; i < 20; i++ {
+		got := b.snapshot().Lanes
+		for j := range got {
+			if got[j].Name != first[j].Name {
+				t.Fatalf("lane row %d moved: %q then %q", j, first[j].Name, got[j].Name)
+			}
+		}
+	}
+	if first[0].Name != "alpha" {
+		t.Errorf("tied lanes are not in name order: %+v", first)
+	}
+}
+
+// The page is one file with no build step, so the only thing that catches a
+// panel wired to nothing is asking for it. Every id the script writes into has
+// to exist in the markup, and every field it reads has to be one the API sends.
+func TestThePageIsWiredToWhatTheAPISends(t *testing.T) {
+	b := New(1)
+	addr, stop, err := b.Serve("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	res, err := http.Get("http://" + addr + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(body)
+
+	for _, id := range []string{"lanes", "hist", "family", "slot", "slots", "machine", "recent"} {
+		if !strings.Contains(page, "id="+id) {
+			t.Errorf("the script writes into %q but the markup has no such element", id)
+		}
+	}
+	// The lane fields the renderer reads, against the JSON tags the API emits.
+	raw, err := json.Marshal(b.snapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"lanes"`, `"histSecs"`} {
+		if !strings.Contains(string(raw), key) {
+			t.Errorf("the page reads %s and the API does not send it", key)
+		}
+	}
+	if !strings.Contains(page, "v.lanes") || !strings.Contains(page, "v.histSecs") {
+		t.Error("the API sends lanes and histSecs and the page does not read them")
 	}
 }

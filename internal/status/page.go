@@ -61,6 +61,7 @@ const page = `<!doctype html>
  td{padding:.28rem .9rem .28rem 0;border-bottom:1px solid var(--line-soft);vertical-align:top}
  tr:last-child td{border-bottom:0}
  .slot{color:var(--ink-dim);width:4.5rem}
+ .lanecol{width:4.5rem}
  .case{width:100%;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .num{text-align:right;width:5rem;color:var(--ink-dim)}
  .empty{color:var(--ink-faint);padding:.4rem 0}
@@ -102,6 +103,21 @@ const page = `<!doctype html>
  .hrow span:first-child{width:5rem;text-align:right;color:var(--ink-faint);font-size:.72rem}
  .hrow i{display:block;height:9px;background:var(--accent);opacity:.75;border-radius:1px;min-width:1px}
  .hrow span:last-child{color:var(--ink-dim);font-size:.72rem}
+ /* The histogram carries two numbers now -- how many cases, and how much of
+    the run's time they are -- because a lane split is a threshold on the
+    second and the first cannot show where to put it. */
+ .hrow .n{width:2.6rem;text-align:right}
+ .hrow .sh{width:2.8rem;text-align:right;color:var(--ink-faint)}
+ .hrow.heavy .sh{color:var(--accent)}
+ .hrow.heavy i{opacity:1}
+
+ /* A lane is where a slot's corpus writes go. Shown as a badge because it is a
+    property of the slot rather than a measurement of it, and because the
+    question it answers -- is the stuck slot the one holding memory -- is asked
+    by glancing at the rail. */
+ .lane{display:inline-block;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;
+   padding:.02rem .34rem;border-radius:2px;border:1px solid var(--line);color:var(--ink-faint)}
+ .lane.ram{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -130,8 +146,15 @@ const page = `<!doctype html>
     <table class=kv><tbody id=machine></tbody></table>
   </section>
   <section class=panel>
-    <h2>how long cases take</h2>
+    <h2>how long cases take <span class=count>cases &middot; share of time</span></h2>
     <div id=hist class=hist></div>
+  </section>
+  <section class=panel>
+    <h2>lanes <span class=count>where the writes go</span></h2>
+    <div class=scroll><table>
+      <thead><tr><th>lane<th class=num>slots<th class=num>done<th class=num>nok<th class=num>total<th class=num>share</tr></thead>
+      <tbody id=lanes><tr><td colspan=6 class=empty>no lane reported</tr></tbody>
+    </table></div>
   </section>
 </div>
 
@@ -155,8 +178,8 @@ const page = `<!doctype html>
 <section>
   <h2>slots <span id=nslots style="letter-spacing:0;text-transform:none"></span></h2>
   <div class=scroll><table>
-    <thead><tr><th class=slot>slot<th class=case>running<th class=num>for</tr></thead>
-    <tbody id=slots><tr><td colspan=3 class=empty>waiting for the first case</tr></tbody>
+    <thead><tr><th class=slot>slot<th class=lanecol>lane<th class=case>running<th class=num>for</tr></thead>
+    <tbody id=slots><tr><td colspan=4 class=empty>waiting for the first case</tr></tbody>
   </table></div>
 </section>
 
@@ -295,9 +318,10 @@ async function tick() {
     : '<tr><td colspan=3 class=empty>' + (v.finished ? 'all slots idle' : 'waiting for the first case') + '</tr>'
 
   machine(v.machine || {})
-  hist(v.hist || [], v.histEdge || [])
+  hist(v.hist || [], v.histSecs || [], v.histEdge || [])
   groups('family', v.family || [])
   groups('slot', v.slot || [])
+  lanes(v.lanes || [])
   lastView = v
   draw(v)
 }
@@ -319,15 +343,38 @@ function machine(m) {
     '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + val + '</tr>').join('')
 }
 
-function hist(h, edges) {
+// A lane is one word, and an unset one is nothing rather than a placeholder.
+const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''
+
+function lanes(ls) {
+  $('lanes').innerHTML = ls.length ? ls.map(l =>
+    '<tr><td>' + lane(l.name) +
+    '<td class=num>' + l.slots +
+    '<td class=num>' + l.done +
+    '<td class=num>' + (l.nok ? '<span class="v no">' + l.nok + '</span>' : '') +
+    '<td class=num>' + secs(l.secs) +
+    '<td class=num>' + l.share + '%</tr>').join('')
+    : '<tr><td colspan=6 class=empty>no lane reported</tr>'
+}
+
+// Two numbers a bucket: how many cases are in it, and how much of the run's
+// time they are between them. The bar stays the count, because that is the
+// distribution the panel is named for; the share is what a lane threshold is
+// chosen from, and a bucket holding a fifth of the run is marked so it can be
+// found without reading every row.
+function hist(h, secsIn, edges) {
   const max = Math.max(1, ...h)
+  const total = secsIn.reduce((a, b) => a + b, 0)
   const label = i => i === 0 ? '< ' + edges[0] + 's'
     : i < edges.length ? edges[i-1] + '–' + edges[i] + 's'
     : '> ' + edges[edges.length-1] + 's'
-  $('hist').innerHTML = h.map((n, i) =>
-    '<div class=hrow><span>' + label(i) + '</span>' +
-    '<i style="width:' + (100 * n / max) + '%"></i>' +
-    '<span>' + (n || '') + '</span></div>').join('')
+  $('hist').innerHTML = h.map((n, i) => {
+    const share = total ? Math.round(100 * (secsIn[i] || 0) / total) : 0
+    return '<div class="hrow' + (share >= 20 ? ' heavy' : '') + '"><span>' + label(i) + '</span>' +
+      '<i style="width:' + (100 * n / max) + '%"></i>' +
+      '<span class=n>' + (n || '') + '</span>' +
+      '<span class=sh>' + (n ? share + '%' : '') + '</span></div>'
+  }).join('')
 }
 
 function groups(id, gs) {

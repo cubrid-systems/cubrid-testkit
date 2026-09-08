@@ -33,7 +33,10 @@ type Shell struct {
 }
 
 // NewShell returns the runner for the shell and rqg tasks.
-func NewShell() *Shell { return &Shell{Channels: openChannels} }
+// NewShell leaves Channels nil on purpose. Run falls back to openChannels when
+// it is, and "nil" is then what distinguishes the real opener from one a caller
+// supplied -- which is what decides whether slots may be opened underneath it.
+func NewShell() *Shell { return &Shell{} }
 
 func (s *Shell) Tasks() []cli.Task { return []cli.Task{cli.Shell, cli.RQG} }
 
@@ -234,6 +237,10 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// and slots would build their own and ignore it -- which is how the whole-task
 	// test lost the guard that intercepts the destructive reset. Slots are for the
 	// real opener.
+	// Slots build their own channels and would ignore an injected one, so they
+	// are only for the real opener. Setting Channels is how a caller says it is
+	// controlling how commands run -- the whole-task test does it to intercept
+	// the destructive reset.
 	own := s.Channels == nil
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
 	if own && (slots > 1 || contain.Active()) {

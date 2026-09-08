@@ -29,7 +29,12 @@ type Worker struct {
 	// Board is where this worker says what it is doing, or nil when nobody asked
 	// for a status page. Every method on it tolerates nil, so no call site here
 	// has to check.
-	Board   *status.Board
+	Board *status.Board
+	// Corpus is the overlay a run's writes go to, or nil when they go to disk.
+	// A case's directory is reclaimed through it when the case retires, which is
+	// why the worker and not the queue owns the call: the worker is the one that
+	// knows a retry is not a retirement.
+	Corpus  *Corpus
 	Channel exec.Channel
 	Queue   *dispatch.Queue
 	Sink    *result.Sink
@@ -233,6 +238,9 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 	}
 
 	ev.LastPassResultCont = ev.ResultText
+	if c, err := Split(ticket.Case); err == nil {
+		w.Corpus.Retire(c.Dir)
+	}
 	w.Board.End(w.SlotID, ticket.Case, v.Success)
 	w.Report.CaseStop(ev)
 	w.Sink.TestCase(ticket.Case, w.EnvID, v.Success, w.MaxRetry, ticket.Retry)

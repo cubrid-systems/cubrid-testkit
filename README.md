@@ -527,6 +527,7 @@ docs/
 | how it is built | [`design/architecture.md`](docs/design/architecture.md) · [`design/contracts.md`](docs/design/contracts.md) |
 | how equivalence is decided, and run | [`adr/ADR-013`](docs/adr/ADR-013-regression-equivalence.md) · [`evidence/compare/`](docs/evidence/compare/README.md) |
 | how a run is made parallel | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T3, B-T12, B-T13 |
+| where the run's hours go, and what to do next | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T14 |
 | what the old system could fix cheaply | [`evidence/ctp-improvements.md`](docs/evidence/ctp-improvements.md) |
 | what happens next | [`ROADMAP.md`](docs/ROADMAP.md) · [`design/module-shell.md`](docs/design/module-shell.md) |
 | every decision so far | [`adr/README.md`](docs/adr/README.md) |

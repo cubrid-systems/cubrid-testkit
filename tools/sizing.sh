@@ -64,12 +64,14 @@ fi
 data_mb=$(mb "$(param data_buffer_size 512M)")
 log_mb=$(mb "$(param log_buffer_size 256M)")
 logvol_mb=$(mb "$(param log_volume_size 512M)")
+dbvol_mb=$(mb "$(param db_volume_size 512M)")
 
 say ""
 say "engine, from $CONF"
 kv "data_buffer_size" "${data_mb} MB"
 kv "log_buffer_size" "${log_mb} MB"
 kv "log_volume_size" "${logvol_mb} MB"
+kv "db_volume_size" "${dbvol_mb} MB"
 
 # ---- what one slot costs --------------------------------------------------
 # server ~= 85 MB + 0.54 * (data_buffer + log_buffer), fitted to three points
@@ -84,17 +86,32 @@ server_mb=$(( 85 + (54 * (data_mb + log_mb)) / 100 ))
 # suite's write volume comes from.
 case_mb=$(( 195 + logvol_mb ))
 
+# But the ceiling cannot be sized on the typical case, and the first version of
+# this script did exactly that -- it would have recommended 3,440 MB for the run
+# that peaked at 6,026. What a slot holds is whatever case it drew, and the cases
+# do not resemble each other: at log_volume_size=20M the typical case database
+# measured 215 MB and the largest directory measured 1,078
+# (_18_unloaddb/itrack_10010, which creates two of them), a factor of five.
+#
+# So the ceiling rests on the worst case a slot can draw. Sized that way it comes
+# out conservative -- 8 x 1,078 is 8.6 GB against the 6,026 that was measured --
+# and conservative is the safe direction for a ceiling that costs nothing until
+# it is used.
+worst_ratio=5
+worst_mb=$(( case_mb * worst_ratio ))
+
 say ""
 say "one slot costs"
 kv "cub_server" "~${server_mb} MB resident"
-kv "one case's database" "~${case_mb} MB written"
+kv "a typical case's database" "~${case_mb} MB written"
+kv "the largest one's" "~${worst_mb} MB -- measured 5x the typical, and a slot draws what it draws"
 
 # ---- what bounds the slot count ------------------------------------------
 # Memory: a slot costs its server *and* its database, because with the writes
 # in memory the database is memory too. Counting only the server is how the
 # first version of this recommended eighteen slots and then a ceiling smaller
 # than eighteen slots need.
-per_slot_mb=$(( server_mb + case_mb ))
+per_slot_mb=$(( server_mb + worst_mb ))
 by_mem=$(( (mem_avail - 2048) / per_slot_mb ))
 [ "$by_mem" -lt 1 ] && by_mem=1
 
@@ -135,11 +152,16 @@ disk_slots=$(( by_disk < ram_slots ? by_disk : ram_slots ))
 
 # The ceiling: what the run really writes, with room, and never so much that
 # filling it would take the machine down instead of the case.
-need_mb=$(( ram_slots * case_mb ))
+need_mb=$(( ram_slots * worst_mb ))
 room_mb=$(( mem_avail - ram_slots * server_mb - 2048 ))
-ceiling_mb=$(( need_mb * 2 ))
+# The need is already the worst case for every slot at once, so it is its own
+# headroom -- doubling it again would ask for more than the machine has and
+# report the run as impossible.
+# Rounded up to a 512 boundary and then clamped, in that order. Rounding down
+# last is how this recommended 11 slots and then declared 11 slots impossible:
+# the ceiling landed 49 MB under what it had just said the slots need.
+ceiling_mb=$(( (need_mb + 511) / 512 * 512 ))
 [ "$ceiling_mb" -gt "$room_mb" ] && ceiling_mb=$room_mb
-ceiling_mb=$(( (ceiling_mb / 512) * 512 ))
 [ "$ceiling_mb" -lt 1024 ] && ceiling_mb=1024
 # A ceiling below what a run needs would stop the run rather than a case, which
 # is the opposite of the point.
@@ -160,9 +182,9 @@ say "  # writes on disk -- more slots than this made it slower, measured"
 say "  # parallel_slots=${disk_slots}"
 say ""
 say "why ${ceiling_mb} MB"
-kv "a run needs" "~${need_mb} MB (${ram_slots} slots x ${case_mb} MB)"
+kv "a run needs" "~${need_mb} MB (${ram_slots} slots x ${worst_mb} MB, the largest case)"
 kv "the machine can spare" "~${room_mb} MB (available, less the servers and 2 GB)"
-kv "the ceiling is" "twice the need, or what can be spared, whichever is less"
+kv "the ceiling is" "the need, or what can be spared, whichever is less"
 if [ "$short" = yes ]; then
   say ""
   say "this machine is too small for ${ram_slots} slots with the writes in memory:"
@@ -185,4 +207,14 @@ if [ "$logvol_mb" -gt 64 ]; then
   say "  Only 40% of the 3,452 cases that create a database say --log-volume-size,"
   say "  so for the rest this file decides it. The template key includes it, so"
   say "  lowering it does not serve templates built at the old size."
+fi
+
+if [ "$dbvol_mb" -gt 64 ]; then
+  say ""
+  say "and one lever that has not been measured"
+  kv "db_volume_size=${dbvol_mb}M" "the same default log_volume_size had, and untouched"
+  say "  111 of this family's 217 cases do not override it, and the fitted model puts"
+  say "  it at about 195 MB of a case's ${case_mb}. Lowering it is one arm, worth"
+  say "  roughly 175 MB a case, and it needs its own verdict check -- a case that"
+  say "  tests filling a volume would find a different volume."
 fi

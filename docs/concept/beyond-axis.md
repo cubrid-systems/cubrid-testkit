@@ -203,6 +203,46 @@ The fourth is the one worth pausing on: it is the *cost* of the network
 namespace's simplification. Removing the need to allocate ports is what made
 every slot want the same socket path.
 
+**Measured, over `_01_utility`'s 217 cases, one lever at a time.** Every arm ran
+eight slots unless it says otherwise, on a corpus laid down fresh from the
+repository, and each row changes one thing from the row above it:
+
+| | wall | ok/nok | left in the tree |
+|---|---:|---|---|
+| one slot | 2,932 s | 161/56 | — |
+| eight slots | 1,738 s | 157/60 | 9.7 GB |
+| `log_volume_size=20M` | 1,047 s | **173/44** | 1.3 GB |
+| a tmpfs for the corpus | 777 s | 159/58 | **nothing** |
+| smaller engine buffers | **286 s** | 150/67 | nothing |
+| sixteen slots | 406 s | 151/66 | nothing |
+
+**Four things in that table were not what this entry expected.**
+
+*The bottleneck was never the slot count.* Eight slots were slower than four --
+217 cases at 708 MB each is 150 GB, and a disk that writes 332 MB/s sequentially
+delivered an effective 88 MB/s under four concurrent writers, because concurrent
+writes are seeks. Lowering what a case writes bought more than doubling the
+slots did.
+
+*And then it was the slot count, in the other direction.* With the writes in
+memory and the buffers small, sixteen slots came out **slower than eight**: load
+average 18 on 16 cores, where the only thing more parallelism buys is context
+switching. The ceiling moved from disk to CPU, and this machine's best is eight.
+
+*The engine's buffers were the largest single lever, at 2.7x*, which this entry
+had filed as a memory question. `log_buffer_size=256M` is 256 MB a server
+allocates and initialises, and this corpus starts a server per case -- so it is
+not memory, it is per-case fixed cost. It was found by running a control arm
+that was only supposed to confirm the buffers did nothing on their own.
+
+*Verdicts do not improve monotonically with any of it.* The best arm for
+verdicts is not the fastest: 173 OK with the volume size lowered and nothing
+else, against 161 for the serial baseline and 150 for the fastest arm. That the
+serial baseline is *worse* than an eight-slot arm is the corpus, not the
+parallelism -- the baseline ran over the 20 GB of leftovers that B-T12 is about.
+
+| Still open | which buffer costs the verdicts. 173 to 150 is 23 cases, and speed bought at that price is not this project's trade. `data_buffer_size` and `log_buffer_size` are being measured apart, with the tmpfs held out, because the tmpfs arm lost 14 of its own and it is not yet known whether that was the ceiling being too small |
+
 **What is left is the plan the queue is ordered by.** N workers on the shared
 queue is done; ordering that queue longest-first is not, and it is worth 18% at
 ten slots and 31% at sixteen -- measured over the smoke corpus's own durations,

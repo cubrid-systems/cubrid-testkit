@@ -62,6 +62,7 @@ const page = `<!doctype html>
  tr:last-child td{border-bottom:0}
  .slot{color:var(--ink-dim);width:4.5rem}
  .lanecol{width:4.5rem}
+ .slots{color:var(--ink-dim);white-space:nowrap}
  .case{width:100%;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .num{text-align:right;width:5rem;color:var(--ink-dim)}
  .empty{color:var(--ink-faint);padding:.4rem 0}
@@ -152,7 +153,7 @@ const page = `<!doctype html>
   <section class=panel>
     <h2>lanes <span class=count>where the writes go</span></h2>
     <div class=scroll><table>
-      <thead><tr><th>lane<th class=num>slots<th class=num>done<th class=num>nok<th class=num>total<th class=num>share</tr></thead>
+      <thead><tr><th>lane<th>slots<th class=num>done<th class=num>nok<th class=num>total<th class=num>share</tr></thead>
       <tbody id=lanes><tr><td colspan=6 class=empty>no lane reported</tr></tbody>
     </table></div>
   </section>
@@ -167,9 +168,9 @@ const page = `<!doctype html>
     </table></div>
   </section>
   <section class=panel>
-    <h2>by slot</h2>
+    <h2>by slot <span class=count>every slot, from the moment it opens</span></h2>
     <div class=scroll><table>
-      <thead><tr><th>slot<th class=num>done<th class=num>nok<th class=num>total<th class=num>worst</tr></thead>
+      <thead><tr><th>slot<th class=lanecol>lane<th class=num>done<th class=num>nok<th class=num>total<th class=num>worst</tr></thead>
       <tbody id=slot></tbody>
     </table></div>
   </section>
@@ -319,8 +320,8 @@ async function tick() {
 
   machine(v.machine || {})
   hist(v.hist || [], v.histSecs || [], v.histEdge || [])
-  groups('family', v.family || [])
-  groups('slot', v.slot || [])
+  groups('family', v.family || [], false)
+  groups('slot', v.slot || [], true)
   lanes(v.lanes || [])
   lastView = v
   draw(v)
@@ -349,7 +350,7 @@ const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''
 function lanes(ls) {
   $('lanes').innerHTML = ls.length ? ls.map(l =>
     '<tr><td>' + lane(l.name) +
-    '<td class=num>' + l.slots +
+    '<td class=slots title="' + l.nslots + ' slots">' + l.slots +
     '<td class=num>' + l.done +
     '<td class=num>' + (l.nok ? '<span class="v no">' + l.nok + '</span>' : '') +
     '<td class=num>' + secs(l.secs) +
@@ -377,14 +378,18 @@ function hist(h, secsIn, edges) {
   }).join('')
 }
 
-function groups(id, gs) {
+function groups(id, gs, withLane) {
+  const cols = withLane ? 6 : 5
   $(id).innerHTML = gs.length ? gs.map(g =>
     '<tr><td class=case title="' + g.name + '">' + g.name +
-    '<td class=num>' + g.done +
+    (withLane ? '<td class=lanecol>' + lane(g.lane) : '') +
+    // A slot that has opened but finished nothing shows a dash rather than a
+    // zero: nothing has happened there yet, which is different from none.
+    '<td class=num>' + (g.done || '—') +
     '<td class=num>' + (g.nok ? '<span class="v no">' + g.nok + '</span>' : '') +
-    '<td class=num>' + secs(g.secs) +
-    '<td class=num>' + secs(g.max) + '</tr>').join('')
-    : '<tr><td colspan=5 class=empty>nothing yet</tr>'
+    '<td class=num>' + (g.done ? secs(g.secs) : '') +
+    '<td class=num>' + (g.done ? secs(g.max) : '') + '</tr>').join('')
+    : '<tr><td colspan=' + cols + ' class=empty>nothing yet</tr>'
 }
 tick(); setInterval(tick, 1000)
 </script>

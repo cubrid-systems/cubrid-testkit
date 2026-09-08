@@ -175,6 +175,17 @@ func (b *Board) Lane(slot, lane string) {
 	if b.byLane[lane] == nil {
 		b.byLane[lane] = &tally{}
 	}
+	// And the slot itself, so it is in the by-slot table from the start.
+	//
+	// The table used to be built only from cases that had finished, which hid
+	// exactly the slots worth looking at: the slow lane's three slots were on
+	// 195, 166 and 125-second cases, so for the first three minutes of a run the
+	// panel showed five slots of eight and said nothing about the other three.
+	// The same shape of bug as a disk-free row that disappears when it reaches
+	// zero.
+	if b.bySlot[slot] == nil {
+		b.bySlot[slot] = &tally{}
+	}
 }
 
 func (b *Board) Begin(slot, name string) {
@@ -310,17 +321,22 @@ type slotView struct {
 // that ran in it, which is the number a lane split exists to change: a lane on
 // memory that holds 5% of the seconds is memory spent where it does not pay.
 type laneView struct {
-	Name  string `json:"name"`
-	Slots int    `json:"slots"`
-	Done  int    `json:"done"`
-	NOK   int    `json:"nok"`
-	Secs  int    `json:"secs"`
-	Share int    `json:"share"`
+	Name string `json:"name"`
+	// Slots is which slots are in this lane, compacted into ranges. A count
+	// alone does not answer the question the panel is read for -- when a slot is
+	// stuck, which lane is it in.
+	Slots  string `json:"slots"`
+	NSlots int    `json:"nslots"`
+	Done   int    `json:"done"`
+	NOK    int    `json:"nok"`
+	Secs   int    `json:"secs"`
+	Share  int    `json:"share"`
 }
 
 // groupView is a family or a slot, added up.
 type groupView struct {
 	Name string `json:"name"`
+	Lane string `json:"lane,omitempty"`
 	Done int    `json:"done"`
 	OK   int    `json:"ok"`
 	NOK  int    `json:"nok"`
@@ -389,6 +405,13 @@ func (b *Board) snapshot() view {
 	v.HistEdge = append([]int(nil), histEdges...)
 	v.Family = groups(b.byFamily)
 	v.Slot = groups(b.bySlot)
+	// By name, not by seconds: the lanes are contiguous blocks of slots, so
+	// name order groups them and a slot does not move as it works. The family
+	// table wants the slowest first; this one wants to sit still.
+	sort.Slice(v.Slot, func(i, j int) bool { return slotLess(v.Slot[i].Name, v.Slot[j].Name) })
+	for i := range v.Slot {
+		v.Slot[i].Lane = b.laneOf[v.Slot[i].Name]
+	}
 	v.Lanes = b.lanes()
 	v.Machine = machine(b.corpusDir, b.ramDir, b.ramCap)
 	for i := len(b.recent) - 1; i >= 0; i-- {
@@ -526,9 +549,9 @@ func (b *Board) lanes() []laneView {
 	if len(b.byLane) == 0 {
 		return nil
 	}
-	slots := map[string]int{}
-	for _, lane := range b.laneOf {
-		slots[lane]++
+	members := map[string][]string{}
+	for slot, lane := range b.laneOf {
+		members[lane] = append(members[lane], slot)
 	}
 	total := 0
 	for _, t := range b.byLane {
@@ -541,8 +564,8 @@ func (b *Board) lanes() []laneView {
 			share = t.Secs * 100 / total
 		}
 		out = append(out, laneView{
-			Name: name, Slots: slots[name], Done: t.Done, NOK: t.Done - t.OK,
-			Secs: t.Secs, Share: share,
+			Name: name, Slots: compactSlots(members[name]), NSlots: len(members[name]),
+			Done: t.Done, NOK: t.Done - t.OK, Secs: t.Secs, Share: share,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -552,4 +575,63 @@ func (b *Board) lanes() []laneView {
 		return out[i].Name < out[j].Name
 	})
 	return out
+}
+
+// slotLess orders slot0, slot1, ... slot10 the way a reader expects rather than
+// the way strings sort, where slot10 comes before slot2.
+func slotLess(a, b string) bool {
+	na, oka := slotNum(a)
+	nb, okb := slotNum(b)
+	if oka && okb && na != nb {
+		return na < nb
+	}
+	return a < b
+}
+
+func slotNum(s string) (int, bool) {
+	i := len(s)
+	for i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
+		i--
+	}
+	if i == len(s) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s[i:])
+	return n, err == nil
+}
+
+// compactSlots turns slot0,slot1,slot2,slot5 into "slot0-slot2, slot5".
+//
+// Sixteen slot names on one line is a line nobody reads, and the lanes are
+// contiguous by construction -- the fast slots are the first ones -- so almost
+// always this is one range a lane.
+func compactSlots(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	sorted := append([]string(nil), names...)
+	sort.Slice(sorted, func(i, j int) bool { return slotLess(sorted[i], sorted[j]) })
+
+	var parts []string
+	run := 0 // index in sorted where the current run started
+	flush := func(end int) {
+		if end == run {
+			parts = append(parts, sorted[run])
+			return
+		}
+		parts = append(parts, sorted[run]+"-"+sorted[end])
+	}
+	for i := 1; i <= len(sorted); i++ {
+		contiguous := false
+		if i < len(sorted) {
+			a, oka := slotNum(sorted[i-1])
+			b, okb := slotNum(sorted[i])
+			contiguous = oka && okb && b == a+1
+		}
+		if !contiguous {
+			flush(i - 1)
+			run = i
+		}
+	}
+	return strings.Join(parts, ", ")
 }

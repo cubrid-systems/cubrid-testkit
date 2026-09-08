@@ -243,3 +243,13 @@ func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
 		t.Errorf("nothing was configured, so nothing can be left out: %v", extra)
 	}
 }
+
+// Slots are only for the real opener, and the guard for that must not depend on
+// a field the constructor fills in. It did once: NewShell set Channels, so the
+// guard was false for every real run and parallel_slots stopped opening any slot
+// at all -- a four-slot run reported one.
+func TestTheRealShellCanOpenSlots(t *testing.T) {
+	if s := NewShell(); s.Channels != nil {
+		t.Error("NewShell set Channels, which makes the run look like a caller supplied its own")
+	}
+}

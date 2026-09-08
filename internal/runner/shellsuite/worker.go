@@ -11,6 +11,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
+	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 )
 
 // Worker runs cases on one instance, one at a time, until the queue is empty.
@@ -20,7 +21,15 @@ import (
 // the same machine while a case is running -- the timeout monitor, above all --
 // needs a connection of its own.
 type Worker struct {
-	EnvID   string
+	EnvID string
+	// SlotID names this worker on the status page. Slots share an EnvID on
+	// purpose -- so that a parallel run writes the files a serial one does --
+	// which makes this the only thing that tells them apart.
+	SlotID string
+	// Board is where this worker says what it is doing, or nil when nobody asked
+	// for a status page. Every method on it tolerates nil, so no call site here
+	// has to check.
+	Board   *status.Board
 	Channel exec.Channel
 	Queue   *dispatch.Queue
 	Sink    *result.Sink
@@ -96,6 +105,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		w.Report.CaseStart(ticket.Case, w.envIdentify())
+		w.Board.Begin(w.SlotID, ticket.Case)
 		w.hold()
 		w.log("[TESTCASE] " + ticket.Case)
 
@@ -223,6 +233,7 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 	}
 
 	ev.LastPassResultCont = ev.ResultText
+	w.Board.End(w.SlotID, ticket.Case, v.Success)
 	w.Report.CaseStop(ev)
 	w.Sink.TestCase(ticket.Case, w.EnvID, v.Success, w.MaxRetry, ticket.Retry)
 	if err := w.Sink.Finished(w.EnvID, ticket.Case); err != nil {

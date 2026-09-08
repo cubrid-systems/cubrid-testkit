@@ -694,10 +694,91 @@ slots are opened, so that they inherit one shared overlay: each case has its own
 directory, so there is nothing to isolate per slot, and mounting it per slot
 would be N tmpfs where one will do.
 
+#### What the ceiling turned out to be
+
+The table above sized the ceiling at 1.7 GB for eight slots -- the slots times a
+case's database -- and the first two runs at eight slots peaked at **6,026 MB and
+6,144 MB of a 6,144 MB ceiling**. Both filled it, so the verdicts of both are
+unusable: a case that runs out of space fails like a case that got the wrong
+answer.
+
+Sampling the upper layer directly while an arm ran says where the difference is.
+
+| when | the upper layer held |
+|---|---:|
+| case 112 of 217 | 4,730 MB across 120 directories |
+| case 216 of 217 | 817 MB across 217 directories |
+
+It goes **down**, so it is not accumulation -- which was the first reading, and it
+was wrong. Of the 817 MB at the end, two directories held 813:
+`_17_loaddb/_enhance_1002` at 531 MB and
+`_19_loaddb_parameter/bigdata_alltype_test` at 282. The other 215 held under a
+megabyte each. Subtract, and case 112 had **3,917 MB in flight across eight
+slots** -- the sum of the eight largest case databases to within 2%. Six of the
+eight slots were holding a 512 MB database at the same time.
+
+So the ceiling has two parts, and they want different answers:
+
+| part | at eight slots | what helps |
+|---|---:|---|
+| the working set -- databases of cases that are running | ~4-6 GB, and it is live data | nothing here. Keeping the big cases off each other is **B-T13** |
+| the residual -- cases that never clean up | 813 MB, and it is **two cases in 217** | reclaim it when the case is done |
+
+That ratio is what put 20 GB into a corpus that is 105 MB in git. At the same
+rate the full 3,475 cases leave about 13 GB behind, which no ceiling this machine
+can spare would survive -- and unlike the working set it is waste held to the end
+of the run.
+
+**So a directory's writes go when its last case retires.** The unit is the
+directory and not the case, because 15 of the 217 directories hold more than one
+case and a case that sets a database up for its sibling would find it gone. And a
+retry is not a retirement, which is why the worker makes the call rather than the
+queue.
+
+The reclaim goes **through the overlay**, not into its upper layer: overlayfs does
+not allow its layers to change underneath it. That costs one rule -- removing a
+name the lower layer has creates a whiteout, which would hide a corpus file from
+every later case, so a name present in both layers is left alone. A case's edit
+to a corpus file therefore stays in memory for the rest of the run, which is
+kilobytes against the database volumes this exists to reclaim. Telling the two
+apart needs the tree as it was, and once the overlay is mounted that path leads
+to the overlay -- hence a read-only bind of the lower, taken first.
+
+#### One tmpfs or one per slot
+
+Worth writing down because it was asked, and because the measurement answers it
+differently from the way it reads.
+
+Per-slot placement does not help the part that is breaking. The working set is
+the sum of what the slots hold, and splitting the pool does not shrink that sum
+-- it makes it worse, because each slot's ceiling then has to be sized for the
+**largest** directory it might get. That is `_18_unloaddb/itrack_10010` at
+1,078 MB, so eight private ceilings need 8.6 GB where one shared pool that flexes
+needed 6. A shared pool with a reclaim is strictly the better arrangement for
+memory.
+
+What per-slot would buy is **blast radius**. With one pool, the case that fills it
+fails every other slot's case at the same moment, and nothing in the output says
+which case did it -- one arm's 34 failures are indistinguishable from 34 wrong
+answers. Per-slot ceilings would confine that to the slot and make the peak
+attributable. That is worth having and it is a diagnosis property, not a capacity
+one, so it is filed with B-T13 rather than here.
+
+The other reading of the question -- *some* slots on memory and *some* on disk --
+is B-T13 itself, and per-slot placement is the mechanism it needs.
+
+**And one lever is still untouched.** `log_volume_size` went from 512M to 20M and
+the wall clock went 1,738 s to 1,047. `db_volume_size` is the **same 512M default**
+and was never changed; 111 of the 217 cases do not override it, and the fitted
+model says it is about 195 MB of a case's 215. Lowering it is one arm, expected
+to take roughly 175 MB per case off the working set -- 1.4 GB at eight slots --
+and it needs its own verdict check, because a case that tests filling a volume
+now finds a different volume.
+
 | Evidence | wall clock and verdicts at one and eight slots, against the same corpus on disk. Two levers -- the volume size and the ramdisk -- measured separately, because a combined number cannot say which one paid |
 | Risk | `ENOSPC` where there was 141 GB free. Named rather than mitigated: the cap is a number to pick with the corpus in front of you, and the verdicts say whether it was picked right |
 
-### B-T13. Fast and slow lanes, because memory is a rate not a size — **idea**
+### B-T13. Fast and slow lanes, and one ceiling per slot — **idea**
 
 | | |
 |---|---|
@@ -705,10 +786,13 @@ would be N tmpfs where one will do.
 | Improves on | B-T12, by spending its ceiling where it buys the most |
 | Kind | **speed**, and it makes the ceiling affordable |
 
-**The ceiling looks like a size and behaves like a rate.** B-T12 caps the memory a
-run's writes may use, and the cap has to cover every slot at once: eight slots at
-215 MB is 1.7 GB, sixteen is 3.4, and on a machine that also holds sixteen servers
-that is where it stops. But a case does not hold its database for a fixed
+**The ceiling is the slots times what they hold at once.** B-T12 caps the memory a
+run's writes may use, and the cap has to cover every slot at once. Measured, not
+modelled: eight slots held 3,917 MB of live databases at the moment it was
+sampled, and two arms peaked at 6,026 and 6,144 MB -- because six of the eight
+were holding a 512 MB database at the same time. Sixteen slots would ask for
+twice that on a machine that also holds sixteen servers. But a case does not hold
+its database for a fixed
 fraction of the run -- it holds it for as long as the case takes, and the cases
 differ by two orders of magnitude. A 227-second case holding 215 MB ties up more
 memory-seconds than forty 5-second cases do between them.
@@ -735,6 +819,16 @@ could not hold sixteen in memory.
 keep every slot busy to the end. Long cases going to the slow lane costs them
 1% of themselves; short cases going to the fast lane is where the ratio moves.
 The two policies want the same split for different reasons.
+
+**And a second reason to make the upper layer per slot: the failures become
+attributable.** With one pool, the case that fills it fails every other slot's
+case at the same moment, and nothing in the output says which case did it -- one
+arm's 34 failures are indistinguishable from 34 wrong answers, which is why two
+arms' verdicts had to be thrown away. A per-slot ceiling confines that to the
+slot that caused it. It costs memory to do (each slot's ceiling has to cover the
+largest directory it might get -- 1,078 MB, so eight private ceilings want 8.6 GB
+where one shared pool needed 6), which is why it belongs with the lanes, where
+only the fast slots pay it.
 
 **What it asks for.** The overlay moves from one mount before the slots to one
 per slot -- the lower layer stays shared, because it is the same read-only corpus,

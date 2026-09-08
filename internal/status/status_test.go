@@ -102,3 +102,28 @@ func TestAPortInUseIsAnError(t *testing.T) {
 		t.Error("a second board took a port that was already listening")
 	}
 }
+
+// 8080 is what everything else on a developer's machine is already using, and
+// a bare port or a plain "on" has to reach somewhere it will not collide.
+func TestAddr(t *testing.T) {
+	for in, want := range map[string]string{
+		"":               "",
+		"  ":             "",
+		"on":             DefaultAddr,
+		"YES":            DefaultAddr,
+		"1":              DefaultAddr,
+		"9999":           ":9999",
+		":9999":          ":9999",
+		"127.0.0.1:9999": "127.0.0.1:9999",
+		"0.0.0.0:80":     "0.0.0.0:80",
+	} {
+		if got := Addr(in); got != want {
+			t.Errorf("Addr(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// Loopback by default: turning the page on should not publish a run to the
+	// network.
+	if !strings.HasPrefix(DefaultAddr, "127.0.0.1:") {
+		t.Errorf("the default address is not loopback: %q", DefaultAddr)
+	}
+}

@@ -91,8 +91,8 @@ type Board struct {
 	// histSecs is the same buckets weighted by time rather than by count, and
 	// the two together are the lane decision. Counting cases says the corpus is
 	// mostly short cases; counting seconds says a handful of long ones own the
-	// run -- six cases of _01_sqlx measured 0, 6, 19, 182, 183 and 183 seconds,
-	// so three of six are 96% of the time. A lane split is a threshold on this
+	// run -- over _01_utility the 17 cases longer than 30 seconds are 8% of the
+	// cases and 41% of the case-seconds. A lane split is a threshold on this
 	// panel, and without the second series the panel cannot show where to put
 	// it.
 	histSecs []int

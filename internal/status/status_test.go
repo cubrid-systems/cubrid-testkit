@@ -686,3 +686,45 @@ func TestFamilyOfFindsTheFamilyAtAnyDepth(t *testing.T) {
 		}
 	}
 }
+
+// The page is one file with no build step, so nothing catches a helper that has
+// been edited away -- and one was. Restructuring the machine panel replaced a
+// region that also held lane(), lanes() and templates(), and tick() then threw
+// on the first call to a missing one. The panels below that point simply stopped
+// updating, silently, with the API still serving the data they wanted.
+//
+// So: every function the script calls has to be defined in the script.
+func TestThePageDefinesEveryFunctionItCalls(t *testing.T) {
+	res, err := http.Get(mustServe(t) + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	script := string(body)
+	if at := strings.Index(script, "<script>"); at >= 0 {
+		script = script[at:]
+	}
+
+	// The helpers tick() and its callees depend on, by name.
+	for _, fn := range []string{
+		"machine", "hist", "groups", "lanes", "templates", "lane",
+		"spark", "draw", "secs", "short", "gb", "tick",
+	} {
+		if !strings.Contains(script, "function "+fn+"(") &&
+			!strings.Contains(script, "const "+fn+" =") {
+			t.Errorf("the script calls %s() and does not define it", fn)
+		}
+	}
+}
+
+func mustServe(t *testing.T) string {
+	t.Helper()
+	b := New(1)
+	addr, stop, err := b.Serve("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(stop)
+	return "http://" + addr
+}

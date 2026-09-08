@@ -393,7 +393,15 @@ func groups(m map[string]*tally) []groupView {
 			Secs: t.Secs, Max: t.Max,
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Secs > out[j].Secs })
+	// Slowest first, and by name where that ties. sort.Slice is not stable, so
+	// without the second key equal rows swap places on every poll and a table
+	// that is refreshed once a second never sits still.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Secs != out[j].Secs {
+			return out[i].Secs > out[j].Secs
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
 }
 

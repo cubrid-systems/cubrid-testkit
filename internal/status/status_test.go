@@ -3,6 +3,7 @@ package status
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -171,5 +172,34 @@ func TestTheFailureListIsBounded(t *testing.T) {
 	}
 	if got := len(b.snapshot().Failed); got != failedMax {
 		t.Errorf("the failure list holds %d, not the %d it is capped at", got, failedMax)
+	}
+}
+
+// The table refreshes once a second, so equal rows have to keep their places:
+// sort.Slice is not stable, and without a second key a tie swaps on every poll.
+func TestTiesDoNotMove(t *testing.T) {
+	b := New(100)
+	base := "/x/scenario/"
+	// Three families with identical totals, and one that differs.
+	for _, f := range []string{"_30_c", "_10_a", "_20_b"} {
+		b.Begin("slot0", base+f+"/case/cases/x.sh")
+		b.End("slot0", base+f+"/case/cases/x.sh", true)
+	}
+	first := b.snapshot().Family
+	for i := 0; i < 20; i++ {
+		got := b.snapshot().Family
+		for j := range got {
+			if got[j].Name != first[j].Name {
+				t.Fatalf("row %d moved between polls: %q then %q", j, first[j].Name, got[j].Name)
+			}
+		}
+	}
+	// And the tie is broken by name, not by whatever the map iteration gave.
+	var names []string
+	for _, g := range first {
+		names = append(names, g.Name)
+	}
+	if !sort.StringsAreSorted(names) {
+		t.Errorf("tied rows are not in name order: %v", names)
 	}
 }

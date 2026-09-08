@@ -2,6 +2,8 @@ package status
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -161,5 +163,32 @@ func TestAReplayCanBeScrubbed(t *testing.T) {
 	rp.control(url.Values{"speed": {"-5"}})
 	if s := b.snapshot().Replay.Speed; s != 60 {
 		t.Errorf("a negative speed was accepted: %v", s)
+	}
+}
+
+// A replay is exactly where clicking a case should work: the run is over and
+// the feedback.log is all there is. It answered "this run did not say where its
+// feedback.log is" to every click, because only the runner was telling the board.
+func TestAReplayCanShowWhatACaseDid(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "feedback.log")
+	if err := os.WriteFile(path, []byte(feedbackSample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ev, err := ParseFeedbackFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, err := ReplayFrom(path, ev, 10000, "127.0.0.1:0", &strings.Builder{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	if lastBoard.detail == nil {
+		t.Fatal("a replay board was not told where its feedback.log is")
+	}
+	got := lastBoard.detail.block("/x/shell/_06_issues/b/cases/b.sh")
+	if !strings.Contains(got, "NOK it did not work") {
+		t.Errorf("the failing case's block did not come back:\n%s", got)
 	}
 }

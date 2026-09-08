@@ -923,6 +923,100 @@ gets this exactly backwards.
 | First | the durations. Everything here is a policy over a number this project does not yet record per case, and `test-shell.xml` already has it -- so the first step is the same one B-T3's ordering needs |
 | Not yet | picking the split by measurement rather than by argument. The threshold between lanes, and how many slots each gets, are two numbers with a corpus-shaped answer |
 
+### B-T14. Where the run's seventeen hours actually go — **measured, and the shortlist**
+
+| | |
+|---|---|
+| Measures | the whole corpus, not one family. Everything before this was `_01_utility`, which is 6% of it |
+| Kind | **the map the speed work needs**, and four ideas that come out of it |
+
+The first run over the whole shell corpus — 3,444 cases after CI's two exclusions,
+develop engine, eight slots — gives the distribution every earlier estimate was
+guessing at. At 1,374 cases in:
+
+| | |
+|---|---:|
+| work done | 25,059 case-seconds |
+| projected, whole corpus | **~62,800 case-seconds — 17.4 hours serial** |
+| median case | 8.4 s |
+| mean case | 18.2 s |
+
+The mean is more than twice the median, and that is the whole story:
+
+| duration | cases | share of cases | share of time |
+|---|---:|---:|---:|
+| < 2 s | 95 | 6.9% | 0.2% |
+| 2–10 s | 716 | 52.2% | 17.4% |
+| 10–60 s | 497 | 36.2% | 43.4% |
+| **> 60 s** | **66** | **4.8%** | **39.0%** |
+
+Five per cent of the cases are two fifths of the run. The ten slowest alone are
+13.7%, the fifty slowest 34.6%.
+
+**And the scheduler is not the problem.** Every arm measured so far lands within
+1–2% of `total work ÷ slots`, and on this run the eight slots were busy 94% of
+the elapsed time. So the wall clock is decided by how much work there is and how
+many slots there are, and nothing else. Which gives four places to push, in the
+order they are worth doing.
+
+#### 1. Give back the memory nobody is using — then add slots
+
+The run is at the shipped `data_buffer_size=512M` and `log_buffer_size=256M`,
+and eight `cub_server`s hold **4.5 GB** of RSS between them. Sixteen would hold
+nine. Measured earlier: at minimum buffers a server's RSS goes 498 MB → 102, and
+on a tmpfs the buffers *cost* 49 s rather than saving any — the ramdisk had
+already taken what they were for. So this is memory returned for nothing given
+up, and memory is what bounds the slot count.
+
+#### 2. `db_volume_size`, which one case turns into nine gigabytes
+
+Sampled mid-run, `_06_issues/_11_1h/bug_bts_4823` held **9,091 MB** — 251 volume
+files of exactly 536,870,912 bytes, because every volume it extends into is
+created at `db_volume_size`. It alone drove the corpus tmpfs to 92% of a 14 GB
+ceiling and nearly cost the run its verdicts.
+
+At 20M that case becomes about 360 MB, and every case that does not name its own
+size becomes ~175 MB smaller. On `_01_utility` it took the peak from 7,675 MB to
+5,353 and the wall clock from 407 s to 391.
+
+It costs three cases, and two have a specific cause: they assume a fresh database
+has exactly one data volume, which stops being true when 20M is too small for the
+catalog and `createdb` adds `_x001` itself. `_07_addvoldb/itrack_10005` asserts
+the volume it added is `_x001` and gets `_x002`; `_09_renamedb/bug_xdbms265`
+writes a control file naming volume 0 only and `renamedb` then refuses. Both are
+cases to update. The third, `_27_emergency_patch_logdb/bug_xdbms278`, did not
+reproduce in isolation.
+
+With 1 and 2 done, sixteen slots is a memory question that has been answered
+rather than a memory question that has not.
+
+#### 3. Two fixed waits, worth about six minutes between them
+
+Durations cluster where a timeout is, and two clusters are visible:
+
+- **100–120 s, fourteen cases.** The signature of `server_monitor_task`'s eleven
+  attempts over ten one-second polls each — B-T14's neighbour, recorded under
+  "Where the long cases spend their time" above. `// TODO: parameterize this` sits
+  over the constant.
+- **306–319 s, six cases.** A 300-second wall somewhere, not yet identified.
+  `_02_sqlx_init/_19_index_scan_in_oid_order/itrack_10001` at 319 s,
+  `_06_issues/_14_1h/bug_bts_12628` at 310, and four more within four seconds of
+  each other. Finding it is one afternoon and worth roughly 1,500 case-seconds.
+
+#### 4. The fixed cost, which half the corpus is made of
+
+716 cases — **52% of them** — take between 2 and 10 seconds, and are 17% of the
+time. A case that short is mostly setup: create a database, start a server, stop
+it, delete it. `createdb` is already 0.24 s on tmpfs, and B-T9 took `server
+start` from 3.02 s to 1.16. **`server stop` has not been touched**, and it is the
+last piece of the same envelope. A second off each of those 716 is 716
+case-seconds; a second off all 3,444 is nearly an hour of serial work.
+
+| First | 1 and 2 together, then sixteen slots and measure. They are the only two that change the bound rather than the load |
+| Then | 4, because it is the one that shrinks the work rather than dividing it, and half the corpus is in its range |
+| Not yet | 3's second cluster, which needs finding before it can be costed |
+| Evidence | this run's `case_plan`, which is the first per-case duration record for the whole corpus and the input every one of these needs |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

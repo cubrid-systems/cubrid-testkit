@@ -125,7 +125,7 @@ func (l laneSplit) laneOf(i int) dispatch.Lane {
 // decision an operator has to be able to check.
 func (l laneSplit) describe(slowSecs int) string {
 	return fmt.Sprintf(
-		"[INFO] lanes at %ds: ram %d slots for %d cases (%.0f case-s), disk %d slots for %d cases (%.0f case-s)",
+		"[INFO] lanes at %ds: tmpfs %d slots for %d cases (%.0f case-s), disk %d slots for %d cases (%.0f case-s)",
 		slowSecs, l.FastSlots, l.FastCases, l.FastWork, l.SlowSlots, l.SlowCases, l.SlowWork)
 }
 

@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -211,8 +214,8 @@ func TestTiesDoNotMove(t *testing.T) {
 // spent where it does not pay, which is the whole reason to split the lanes.
 func TestLanesAddTheRunUpByWhereTheWritesGo(t *testing.T) {
 	b := New(4)
-	b.Lane("slot0", "ram")
-	b.Lane("slot1", "ram")
+	b.Lane("slot0", "tmpfs")
+	b.Lane("slot1", "tmpfs")
 	b.Lane("slot2", "disk")
 
 	run := func(slot, name string, secs int, ok bool) {
@@ -243,7 +246,7 @@ func TestLanesAddTheRunUpByWhereTheWritesGo(t *testing.T) {
 		t.Errorf("lanes do not name their slots: %q and %q", v.Lanes[0].Slots, v.Lanes[1].Slots)
 	}
 	if v.Lanes[1].Done != 2 || v.Lanes[1].NOK != 1 {
-		t.Errorf("the ram lane's cases were not counted: %+v", v.Lanes[1])
+		t.Errorf("the tmpfs lane's cases were not counted: %+v", v.Lanes[1])
 	}
 	if v.Lanes[0].Share+v.Lanes[1].Share < 99 {
 		t.Errorf("the shares do not add up: %+v", v.Lanes)
@@ -254,7 +257,7 @@ func TestLanesAddTheRunUpByWhereTheWritesGo(t *testing.T) {
 	// And the slot that is running says which lane it is in, because the
 	// question asked of the rail is whether the stuck slot holds memory.
 	b.Begin("slot0", "/x/_01_a/f/cases/f.sh")
-	if s := b.snapshot().Slots; len(s) != 1 || s[0].Lane != "ram" {
+	if s := b.snapshot().Slots; len(s) != 1 || s[0].Lane != "tmpfs" {
 		t.Errorf("a running slot did not report its lane: %+v", s)
 	}
 }
@@ -362,7 +365,8 @@ func TestThePageIsWiredToWhatTheAPISends(t *testing.T) {
 	}
 	page := string(body)
 
-	for _, id := range []string{"lanes", "hist", "family", "slot", "slots", "machine", "recent"} {
+	for _, id := range []string{"lanes", "hist", "family", "slot", "slots", "machine", "recent",
+		"tplpanel", "tplkv", "tpltop", "tplwhere"} {
 		if !strings.Contains(page, "id="+id) {
 			t.Errorf("the script writes into %q but the markup has no such element", id)
 		}
@@ -389,7 +393,7 @@ func TestThePageIsWiredToWhatTheAPISends(t *testing.T) {
 func TestEverySlotIsInTheTableBeforeItFinishesAnything(t *testing.T) {
 	b := New(10)
 	for _, s := range []string{"slot0", "slot1"} {
-		b.Lane(s, "ram")
+		b.Lane(s, "tmpfs")
 	}
 	b.Lane("slot2", "disk")
 	b.Begin("slot2", "/x/_15_backupdb/c/cases/c.sh") // a long case, nothing finished
@@ -406,7 +410,7 @@ func TestEverySlotIsInTheTableBeforeItFinishesAnything(t *testing.T) {
 		}
 	}
 	// And each row says which lane it is in.
-	if v.Slot[0].Lane != "ram" || v.Slot[2].Lane != "disk" {
+	if v.Slot[0].Lane != "tmpfs" || v.Slot[2].Lane != "disk" {
 		t.Errorf("the by-slot rows do not carry their lane: %+v", v.Slot)
 	}
 	if v.Slot[2].Done != 0 {
@@ -419,7 +423,7 @@ func TestEverySlotIsInTheTableBeforeItFinishesAnything(t *testing.T) {
 func TestALaneNamesItsSlots(t *testing.T) {
 	b := New(10)
 	for _, s := range []string{"slot0", "slot1", "slot2", "slot3", "slot4"} {
-		b.Lane(s, "ram")
+		b.Lane(s, "tmpfs")
 	}
 	for _, s := range []string{"slot5", "slot6", "slot7"} {
 		b.Lane(s, "disk")
@@ -431,8 +435,8 @@ func TestALaneNamesItsSlots(t *testing.T) {
 	for _, l := range b.snapshot().Lanes {
 		byName[l.Name] = l
 	}
-	if got := byName["ram"].Slots; got != "slot0-slot4" {
-		t.Errorf("the ram lane names its slots as %q, want slot0-slot4", got)
+	if got := byName["tmpfs"].Slots; got != "slot0-slot4" {
+		t.Errorf("the tmpfs lane names its slots as %q, want slot0-slot4", got)
 	}
 	if got := byName["disk"].Slots; got != "slot5-slot7" {
 		t.Errorf("the disk lane names its slots as %q, want slot5-slot7", got)
@@ -460,5 +464,70 @@ func TestCompactSlots(t *testing.T) {
 		if got := compactSlots(c.in); got != c.want {
 			t.Errorf("compactSlots(%v) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// The template cache lives on the shell side and leaves everything needed to
+// describe itself in its own store, so the page reads the store and the two
+// cannot disagree.
+func TestTheTemplateCachePanelReadsTheStore(t *testing.T) {
+	store := t.TempDir()
+	mk := func(key string, refs int, origin string, bytes int) {
+		d := filepath.Join(store, key)
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(d, ".refs"), []byte(strconv.Itoa(refs)+"\n"), 0o644)
+		os.WriteFile(filepath.Join(d, ".origin"), []byte(origin+"\n"), 0o644)
+		os.WriteFile(filepath.Join(d, "db"), make([]byte, bytes), 0o644)
+	}
+	mk("aaaa1111", 7, "/x/scenario/_06_createdb/itrack_10001/cases", 3<<20)
+	mk("bbbb2222", 2, "/x/scenario/_17_loaddb/itrack_10007/cases", 1<<20)
+	// The store's own bookkeeping must not be counted as a template.
+	os.WriteFile(filepath.Join(store, ".plan"), []byte("aaaa1111\n"), 0o644)
+	os.WriteFile(filepath.Join(store, ".lk.aaaa1111"), nil, 0o644)
+	os.WriteFile(filepath.Join(store, ".used.123"), []byte("aaaa1111\nbbbb2222\naaaa1111\n"), 0o644)
+
+	b := New(1)
+	b.WatchTemplates(store, 1024)
+	// WatchTemplates samples once before its ticker, but that happens in a
+	// goroutine, so wait for it rather than racing it.
+	var v *templateView
+	for i := 0; i < 100 && (v == nil || v.Count == 0); i++ {
+		v = b.snapshot().Templates
+		time.Sleep(10 * time.Millisecond)
+	}
+	if v == nil {
+		t.Fatal("the panel is absent for a run that has a cache")
+	}
+	if v.Count != 2 {
+		t.Errorf("counted %d templates, want 2 -- the store's own dot files are not templates", v.Count)
+	}
+	if v.CapMB != 1024 || v.Dir != store {
+		t.Errorf("the panel does not name the store it read: %+v", v)
+	}
+	// Three lines in .used.123 are three restores this run.
+	if v.Restored != 3 {
+		t.Errorf("counted %d restores, want 3", v.Restored)
+	}
+	if v.MB < 3 {
+		t.Errorf("the store measures %d MB, and 4 MB of files were written", v.MB)
+	}
+	if len(v.Top) != 2 || v.Top[0].Key != "aaaa1111" || v.Top[0].Refs != 7 {
+		t.Errorf("most-used first is not what came back: %+v", v.Top)
+	}
+	// The origin is named the way the rest of the page names cases.
+	if v.Top[0].Origin != "_06_createdb/itrack_10001" {
+		t.Errorf("origin is %q, want the family and the case", v.Top[0].Origin)
+	}
+}
+
+// A run without a cache gets no panel at all, rather than a panel of zeroes
+// that reads as "nothing is hitting".
+func TestNoCacheMeansNoPanel(t *testing.T) {
+	b := New(1)
+	b.WatchTemplates("", 0)
+	if v := b.snapshot().Templates; v != nil {
+		t.Errorf("a run with no cache got a panel: %+v", v)
 	}
 }

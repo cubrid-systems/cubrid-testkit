@@ -670,10 +670,16 @@ func TestTheMachinePanelReportsRealNumbers(t *testing.T) {
 // convention it depends on.
 func TestFamilyOfFindsTheFamilyAtAnyDepth(t *testing.T) {
 	for in, want := range map[string]string{
-		"/x/shell/_06_issues/_14_1h/bug_bts_12352/cases/bug_bts_12352.sh": "_06_issues",
-		"/x/scenario/_38_csql/csql2/cases/csql2.sh":                       "_38_csql",
-		"/x/shell/_01_utility/_16_restoredb/itrack_10001/cases/i.sh":      "_01_utility",
-		"/no/family/here/cases/x.sh":                                      "(other)",
+		// Two levels: _06_issues is half the corpus, so the sub-family is the
+		// grouping that says anything.
+		"/x/shell/_06_issues/_14_1h/bug_bts_12352/cases/bug_bts_12352.sh": "_06_issues/_14_1h",
+		"/x/shell/_01_utility/_16_restoredb/itrack_10001/cases/i.sh":      "_01_utility/_16_restoredb",
+		// One level, which is what a run rooted at a family looks like.
+		"/x/scenario/_38_csql/csql2/cases/csql2.sh": "_38_csql",
+		// It must not descend into a case: these two look like families and are
+		// directories inside bug_bts_13649.
+		"/x/shell/_06_issues/_14_1h/bug_bts_13649/_01_show_log_header/_01_basic_log/cases/_01_basic_log.sh": "_06_issues/_14_1h",
+		"/no/family/here/cases/x.sh": "(other)",
 	} {
 		if got := familyOf(in); got != want {
 			t.Errorf("familyOf(%q) = %q, want %q", in, got, want)

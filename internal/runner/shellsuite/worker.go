@@ -31,6 +31,10 @@ type Worker struct {
 	// for a status page. Every method on it tolerates nil, so no call site here
 	// has to check.
 	Board *status.Board
+	// LaneID is which pool of slots this worker belongs to: the fast lane's
+	// corpus writes go to memory, the slow lane's to disk. dispatch.LaneAny when
+	// lanes are off, which is every case the queue has.
+	LaneID dispatch.Lane
 	// Corpus is the overlay a run's writes go to, or nil when they go to disk.
 	// A case's directory is reclaimed through it when the case retires, which is
 	// why the worker and not the queue owns the call: the worker is the one that
@@ -96,7 +100,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	}()
 
 	for {
-		ticket, ok := w.Queue.Claim()
+		ticket, ok := w.Queue.ClaimFor(w.SlotID, w.LaneID)
 		if !ok {
 			return nil
 		}
@@ -243,7 +247,7 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 
 	ev.LastPassResultCont = ev.ResultText
 	if c, err := Split(ticket.Case); err == nil {
-		w.Corpus.Retire(c.Dir)
+		w.Corpus.Retire(w.SlotID, c.Dir)
 	}
 	w.Plan.Add(ticket.Case, elapsed)
 	w.Board.End(w.SlotID, ticket.Case, v.Success)

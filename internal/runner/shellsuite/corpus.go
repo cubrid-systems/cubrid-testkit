@@ -50,11 +50,25 @@ type Corpus struct {
 	// ram is the tmpfs holding up/ and work/, and the thing whose fullness is
 	// the ceiling.
 	ram string
-	// pristine is a read-only bind of the tree as the repository has it, taken
-	// before the overlay went on top of root. Without it there is no way to tell
-	// a file this run created from a file it modified, and the difference decides
-	// whether removing it is a reclaim or a whiteout.
+	// pristine is where the tree as the repository has it can be read.
+	//
+	// Without it there is no way to tell a file this run created from a file it
+	// modified, and the difference decides whether removing it is a reclaim or a
+	// whiteout. In shared mode it is a read-only bind taken before the overlay
+	// went on top of root; with lanes nothing is mounted over root in this
+	// process's namespace, so root itself is the pristine tree and no bind is
+	// needed.
 	pristine string
+	// shared is the one-overlay-for-every-slot arrangement: mounted here, before
+	// the slots exist, so they inherit it. It is what a run without lanes gets,
+	// unchanged.
+	shared bool
+	// disk is where slow-lane slots put their upper layers. Empty without lanes.
+	disk string
+	// slots is each slot's upper root and the way to run a command in its
+	// namespace -- needed because a reclaim has to delete through the slot's own
+	// overlay: overlayfs does not allow its layers to change underneath it.
+	slots map[string]*slotStore
 
 	mu sync.Mutex
 	// pending counts, per case directory, the cases that have yet to retire.
@@ -69,13 +83,24 @@ type Corpus struct {
 	mb   int
 }
 
+// slotStore is one slot's place to write and the way to reach it.
+type slotStore struct {
+	upperRoot string
+	onRAM     bool
+	run       func(script string) error
+}
+
 // OpenCorpus puts root behind an overlay whose upper layer is a tmpfs of mb
 // megabytes.
 //
-// It has to happen before the slots are opened so that they inherit one overlay
-// rather than each mounting its own, and the case list does not exist yet at
-// that point -- so what to reclaim arrives later, through Plan.
-func OpenCorpus(root string, mb int) (*Corpus, error) {
+// Without lanes it mounts one overlay here, before the slots are opened, so that
+// they inherit it -- which is what B-T12 described and what a run gets unless it
+// asks for lanes. With lanes it mounts only the tmpfs, and each slot mounts an
+// overlay of its own over the corpus with an upper from Slot.
+//
+// Either way the case list does not exist yet at this point, so what to reclaim
+// arrives later, through Plan.
+func OpenCorpus(root string, mb int, lanes bool) (*Corpus, error) {
 	if root == "" {
 		return nil, fmt.Errorf("scenario_ram_mb needs scenario to be set")
 	}
@@ -87,31 +112,89 @@ func OpenCorpus(root string, mb int) (*Corpus, error) {
 		return nil, err
 	}
 	c := &Corpus{
-		root:     root,
-		ram:      ram,
-		pristine: filepath.Join(ram, "lower"),
-		pending:  map[string]int{},
-		stop:     make(chan struct{}),
-		mb:       mb,
+		root:    root,
+		ram:     ram,
+		pending: map[string]int{},
+		slots:   map[string]*slotStore{},
+		stop:    make(chan struct{}),
+		mb:      mb,
+		shared:  !lanes,
+		pristine: func() string {
+			if lanes {
+				// Nothing is mounted over root here, so this process reads the
+				// tree as the repository has it.
+				return root
+			}
+			return filepath.Join(ram, "lower")
+		}(),
 	}
-	// The bind before the overlay, because afterwards the path leads to the
-	// overlay and the tree underneath is no longer reachable by name.
-	if err := c.run(fmt.Sprintf(
-		"mount -t tmpfs -o size=%dm corpus %s && mkdir -p %s/up %s/work %s"+
-			" && mount --bind %s %s && mount -o remount,bind,ro %s",
-		mb, ram, ram, ram, c.pristine, root, c.pristine, c.pristine)); err != nil {
+	if lanes {
+		c.disk = filepath.Join(filepath.Dir(strings.TrimRight(root, "/")), ".testkit-slow-lane")
+		if err := os.MkdirAll(c.disk, 0o755); err != nil {
+			_ = os.Remove(ram)
+			return nil, err
+		}
+	}
+	if err := c.run(fmt.Sprintf("mount -t tmpfs -o size=%dm corpus %s", mb, ram)); err != nil {
 		_ = os.Remove(ram)
 		return nil, err
 	}
-	if err := c.run(fmt.Sprintf(
-		"mount -t overlay overlay -o lowerdir=%s,upperdir=%s/up,workdir=%s/work %s",
-		c.pristine, ram, ram, root)); err != nil {
-		_ = c.run("umount " + c.pristine + "; umount " + ram)
-		_ = os.Remove(ram)
-		return nil, err
+	if c.shared {
+		// The bind before the overlay, because afterwards the path leads to the
+		// overlay and the tree underneath is no longer reachable by name.
+		if err := c.run(fmt.Sprintf(
+			"mkdir -p %s/up %s/work %s && mount --bind %s %s && mount -o remount,bind,ro %s",
+			ram, ram, c.pristine, root, c.pristine, c.pristine)); err != nil {
+			_ = c.run("umount " + ram)
+			_ = os.Remove(ram)
+			return nil, err
+		}
+		if err := c.run(fmt.Sprintf(
+			"mount -t overlay overlay -o lowerdir=%s,upperdir=%s/up,workdir=%s/work %s",
+			c.pristine, ram, ram, root)); err != nil {
+			_ = c.run("umount " + c.pristine + "; umount " + ram)
+			_ = os.Remove(ram)
+			return nil, err
+		}
 	}
 	go c.watch()
 	return c, nil
+}
+
+// Slot says where one slot's corpus writes go, and returns the upper root the
+// caller hands to Namespace.Overlay.
+//
+// The fast lane's upper is a directory on the run's tmpfs -- one tmpfs, one
+// ceiling, an upper each. Two overlays cannot share an upperdir, but they can
+// take subdirectories of the same filesystem, which keeps the ceiling a single
+// flexible pool rather than N fixed reservations. Sized per slot it would need
+// the largest directory a slot might draw, 1,078 MB, so eight private ceilings
+// want 8.6 GB where one pool needed 6.
+//
+// The slow lane's upper is on disk beside the corpus, uncapped: a lane on disk
+// is a lane whose whole point is not to spend the ceiling.
+//
+// run is how a reclaim reaches this slot. It has to go through the slot's own
+// overlay, because overlayfs does not allow its layers to change underneath it.
+func (c *Corpus) Slot(slot string, onRAM bool, run func(script string) error) (string, error) {
+	if c == nil {
+		return "", nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.shared {
+		return "", fmt.Errorf("this corpus is mounted once for every slot; it has no per-slot upper")
+	}
+	base := c.ram
+	if !onRAM {
+		base = c.disk
+	}
+	root := filepath.Join(base, slot)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	c.slots[slot] = &slotStore{upperRoot: root, onRAM: onRAM, run: run}
+	return root, nil
 }
 
 // Plan tells the corpus how many cases each directory holds, which is what makes
@@ -143,7 +226,7 @@ func (c *Corpus) Ram() string {
 //
 // For good: a case going back for a retry has not finished, and reclaiming under
 // it would delete the state its next attempt is about to look for.
-func (c *Corpus) Retire(dir string) {
+func (c *Corpus) Retire(slot, dir string) {
 	if c == nil {
 		return
 	}
@@ -158,6 +241,23 @@ func (c *Corpus) Retire(dir string) {
 		return
 	}
 	delete(c.pending, dir)
+	if !c.shared {
+		st := c.slots[slot]
+		if st == nil {
+			return
+		}
+		before := c.used()
+		if before > c.peak {
+			c.peak = before
+		}
+		c.dropInSlot(st, dir)
+		if st.onRAM {
+			if freed := before - c.used(); freed > 0 {
+				c.freed += freed
+			}
+		}
+		return
+	}
 	// The high-water mark is read here as well as on the ticker: reclaiming is
 	// exactly when the tmpfs is at its fullest, and a two-second sample can miss
 	// a peak that a case reached and gave back between ticks.
@@ -172,11 +272,68 @@ func (c *Corpus) Retire(dir string) {
 }
 
 func (c *Corpus) pristineOf(dir string) string {
-	rel, err := filepath.Rel(c.root, dir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+	rel, ok := c.relOf(dir)
+	if !ok {
 		return ""
 	}
 	return filepath.Join(c.pristine, rel)
+}
+
+func (c *Corpus) relOf(dir string) (string, bool) {
+	rel, err := filepath.Rel(c.root, dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
+}
+
+// dropInSlot is the reclaim when each slot has an overlay of its own.
+//
+// Two views are needed and neither alone is enough. This process can read the
+// slot's *upper layer* directly -- it is a directory on the tmpfs or on disk --
+// which says what the slot wrote; and it can read the corpus at root, because
+// with lanes nothing is mounted over it here, which says what the repository
+// has. What it cannot do is delete: the file has to go through the slot's own
+// overlay, because overlayfs does not allow its layers to change underneath it.
+//
+// So: enumerate here, decide here, delete there. A name the pristine tree also
+// has is left alone -- removing it would write a whiteout and hide a corpus file
+// from every case that ran afterwards.
+func (c *Corpus) dropInSlot(st *slotStore, dir string) {
+	rel, ok := c.relOf(dir)
+	if !ok {
+		return
+	}
+	var gone []string
+	c.collectAdditions(filepath.Join(st.upperRoot, "upper", rel), filepath.Join(c.root, rel), dir, &gone)
+	if len(gone) == 0 {
+		return
+	}
+	args := make([]string, 0, len(gone))
+	for _, g := range gone {
+		args = append(args, "'"+strings.ReplaceAll(g, "'", `'''`)+"'")
+	}
+	_ = st.run("rm -rf -- " + strings.Join(args, " "))
+}
+
+// collectAdditions walks the upper layer and names, in the overlay's own
+// coordinates, everything the pristine tree does not have.
+func (c *Corpus) collectAdditions(upper, pristine, live string, out *[]string) {
+	entries, err := os.ReadDir(upper)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		p := filepath.Join(pristine, e.Name())
+		ps, err := os.Lstat(p)
+		if err != nil {
+			*out = append(*out, filepath.Join(live, e.Name()))
+			continue
+		}
+		if e.IsDir() && ps.IsDir() {
+			c.collectAdditions(filepath.Join(upper, e.Name()), p, filepath.Join(live, e.Name()), out)
+		}
+	}
 }
 
 // dropAdditions deletes everything under live that the pristine tree does not
@@ -271,10 +428,18 @@ func (c *Corpus) Close() {
 		fmt.Printf("[INFO] the corpus held at most %d MB of the %d MB it was allowed, "+
 			"and %d MB were reclaimed as directories finished\n", peak, c.mb, freed)
 	}
-	_ = c.run("umount " + c.root)
-	_ = c.run("umount " + c.pristine)
+	if c.shared {
+		_ = c.run("umount " + c.root)
+		_ = c.run("umount " + c.pristine)
+	}
 	_ = c.run("umount " + c.ram)
 	_ = os.Remove(c.ram)
+	// The slow lane's uppers are on disk and outlive the tmpfs, so they are the
+	// one thing here that has to be removed rather than unmounted. Leaving them
+	// would put back exactly the 20 GB of leftovers this exists to prevent.
+	if c.disk != "" {
+		_ = os.RemoveAll(c.disk)
+	}
 }
 
 func (c *Corpus) run(script string) error {

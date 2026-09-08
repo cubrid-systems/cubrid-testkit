@@ -1,11 +1,15 @@
 package shellsuite
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 )
 
 func contained(t *testing.T) {
@@ -46,7 +50,7 @@ func TestTheCorpusIsReadOnlyAndItsWritesAreMemory(t *testing.T) {
 	contained(t)
 	root, dir, _ := caseTree(t, "a")
 
-	c, err := OpenCorpus(root, 32)
+	c, err := OpenCorpus(root, 32, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +90,7 @@ func TestRetiringADirectoryGivesTheMemoryBack(t *testing.T) {
 	contained(t)
 	root, dir, cases := caseTree(t, "a")
 
-	c, err := OpenCorpus(root, 64)
+	c, err := OpenCorpus(root, 64, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +104,7 @@ func TestRetiringADirectoryGivesTheMemoryBack(t *testing.T) {
 		t.Fatalf("a 16 MB write left the tmpfs holding %d MB", used)
 	}
 
-	c.Retire(dir)
+	c.Retire("slot0", dir)
 
 	if used := c.used(); used > 4 {
 		t.Errorf("retiring the directory left %d MB behind", used)
@@ -123,7 +127,7 @@ func TestADirectoryIsReclaimedOnlyWhenItsLastCaseRetires(t *testing.T) {
 	contained(t)
 	root, dir, cases := caseTree(t, "a", "b")
 
-	c, err := OpenCorpus(root, 64)
+	c, err := OpenCorpus(root, 64, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,12 +139,12 @@ func TestADirectoryIsReclaimedOnlyWhenItsLastCaseRetires(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	c.Retire(dir)
+	c.Retire("slot0", dir)
 	if _, err := os.Stat(shared); err != nil {
 		t.Fatalf("the first of two cases took the directory with it: %v", err)
 	}
 
-	c.Retire(dir)
+	c.Retire("slot0", dir)
 	if _, err := os.Stat(shared); err == nil {
 		t.Error("the directory was not reclaimed after its last case")
 	}
@@ -154,7 +158,7 @@ func TestTheReclaimDoesNotWhiteOutTheCorpus(t *testing.T) {
 	contained(t)
 	root, dir, cases := caseTree(t, "a")
 
-	c, err := OpenCorpus(root, 64)
+	c, err := OpenCorpus(root, 64, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +169,7 @@ func TestTheReclaimDoesNotWhiteOutTheCorpus(t *testing.T) {
 	if err := os.WriteFile(edited, []byte("edited\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c.Retire(dir)
+	c.Retire("slot0", dir)
 
 	if _, err := os.Stat(edited); err != nil {
 		t.Errorf("a corpus file a case had edited is gone from the run: %v", err)
@@ -178,7 +182,7 @@ func TestNothingIsReclaimedWithoutAPlan(t *testing.T) {
 	contained(t)
 	root, dir, _ := caseTree(t, "a")
 
-	c, err := OpenCorpus(root, 64)
+	c, err := OpenCorpus(root, 64, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +192,7 @@ func TestNothingIsReclaimedWithoutAPlan(t *testing.T) {
 	if err := os.WriteFile(left, make([]byte, 4<<20), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c.Retire(dir)
+	c.Retire("slot0", dir)
 	if _, err := os.Stat(left); err != nil {
 		t.Error("an unplanned directory was reclaimed anyway")
 	}
@@ -199,9 +203,122 @@ func TestNothingIsReclaimedWithoutAPlan(t *testing.T) {
 func TestANilCorpusIsUsable(t *testing.T) {
 	var c *Corpus
 	c.Plan([]string{"/x/cases/x.sh"})
-	c.Retire("/x/cases")
+	c.Retire("slot0", "/x/cases")
 	c.Close()
 	if c.Ram() != "" {
 		t.Error("a nil corpus named an upper layer")
+	}
+}
+
+// With lanes each slot has an overlay of its own over the corpus, and where its
+// upper layer sits is what the lane means. Three things have to hold: the
+// corpus reads through in both lanes, a slot's writes are invisible to the
+// other, and only the fast lane's writes come out of the ceiling.
+func TestEachLanesWritesGoWhereItsLaneSays(t *testing.T) {
+	contained(t)
+	root, dir, cases := caseTree(t, "a")
+
+	c, err := OpenCorpus(root, 64, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Plan(cases)
+
+	// Two slots, one in each lane, each with a namespace and an overlay.
+	type slot struct {
+		ns   *contain.Namespace
+		name string
+	}
+	var slots []slot
+	for i, onRAM := range []bool{true, false} {
+		name := fmt.Sprintf("slot%d", i)
+		ns, err := contain.Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ns.Close()
+		upper, err := c.Slot(name, onRAM, func(script string) error {
+			out, err := ns.Channel("").Run(context.Background(), script)
+			if err != nil {
+				return fmt.Errorf("%v: %s", err, out.Output())
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if onRAM && !strings.HasPrefix(upper, c.Ram()) {
+			t.Errorf("the fast lane's upper is at %q, not on the tmpfs at %q", upper, c.Ram())
+		}
+		if !onRAM && strings.HasPrefix(upper, c.Ram()) {
+			t.Errorf("the slow lane's upper is on the tmpfs: %q", upper)
+		}
+		if err := ns.Overlay(root, upper); err != nil {
+			t.Fatal(err)
+		}
+		slots = append(slots, slot{ns, name})
+	}
+
+	sh := func(s slot, script string) string {
+		out, err := s.ns.Channel("").Run(context.Background(), script)
+		if err != nil {
+			t.Fatalf("%s: %s: %v: %s", s.name, script, err, out.Output())
+		}
+		return strings.TrimSpace(out.Output())
+	}
+
+	// The corpus reads through in both lanes.
+	for _, s := range slots {
+		if got := sh(s, "cat "+filepath.Join(dir, "a.sh")); got != "clean" {
+			t.Errorf("%s cannot read the corpus through its overlay: %q", s.name, got)
+		}
+	}
+
+	// A slot's writes are its own. Two slots writing the same path is exactly
+	// what two cases in two lanes do, and neither may see the other.
+	sh(slots[0], "dd if=/dev/zero of="+filepath.Join(dir, "db_lgat")+" bs=1M count=8 2>/dev/null")
+	sh(slots[1], "echo slow > "+filepath.Join(dir, "db_lgat"))
+	if got := sh(slots[1], "cat "+filepath.Join(dir, "db_lgat")); got != "slow" {
+		t.Errorf("the slow lane sees the fast lane's write: %q", got)
+	}
+	if got := sh(slots[0], "stat -c %s "+filepath.Join(dir, "db_lgat")); got != "8388608" {
+		t.Errorf("the fast lane's own 8 MB write reads back as %q bytes", got)
+	}
+	// And neither reached the corpus itself.
+	if _, err := os.Stat(filepath.Join(dir, "db_lgat")); err == nil {
+		t.Error("a slot's write landed in the corpus")
+	}
+
+	// Only the fast lane's writes are in the ceiling.
+	if used := c.used(); used < 8 {
+		t.Errorf("the fast lane's 8 MB is not in the ceiling: %d MB used", used)
+	}
+
+	// And the reclaim goes through the right slot's overlay.
+	c.Retire("slot0", dir)
+	if got := sh(slots[0], "ls "+dir); strings.Contains(got, "db_lgat") {
+		t.Errorf("retiring slot0's directory left its write behind: %q", got)
+	}
+	if got := sh(slots[1], "cat "+filepath.Join(dir, "db_lgat")); got != "slow" {
+		t.Errorf("retiring slot0 took slot1's write with it: %q", got)
+	}
+	if got := sh(slots[0], "cat "+filepath.Join(dir, "a.sh")); got != "clean" {
+		t.Errorf("the reclaim whited out a corpus file: %q", got)
+	}
+}
+
+// A corpus mounted once for every slot has no per-slot upper, and asking for
+// one is a mistake worth an error rather than a surprise later.
+func TestASharedCorpusHasNoPerSlotUpper(t *testing.T) {
+	contained(t)
+	root, _, _ := caseTree(t, "a")
+	c, err := OpenCorpus(root, 32, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Slot("slot0", true, func(string) error { return nil }); err == nil {
+		t.Error("a shared corpus handed out a per-slot upper")
 	}
 }

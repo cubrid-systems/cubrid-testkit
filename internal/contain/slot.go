@@ -49,18 +49,35 @@ const keeperScript = `while :; do sleep 3600 & wait $!; done`
 
 // Open creates a namespace and returns it. label names it in errors.
 //
-// Only mount, PID and IPC namespaces are asked for. A user namespace is not,
-// and that is a consequence of where this runs: the runner has already entered
-// one through Enter and is root inside it, so it holds CAP_SYS_ADMIN there and
-// can make the rest without another mapping. Asking for a second user namespace
-// would nest the uid maps for nothing.
+// Mount, PID, IPC and network namespaces are asked for. A user namespace is
+// not, and that is a consequence of where this runs: the runner has already
+// entered one through Enter and is root inside it, so it holds CAP_SYS_ADMIN
+// there and can make the rest without another mapping. Asking for a second user
+// namespace would nest the uid maps for nothing -- and it is not free, because
+// nsenter joining the user namespace it is already in fails rather than doing
+// nothing.
+//
+// The network namespace is what makes a slot cost nothing to configure. Two
+// slots collide on the master port, the two broker ports and whatever else a
+// case starts; a network namespace gives each of them the whole port space, so
+// every slot runs on 1523 and the shipped configuration is never rewritten.
+// That is not only simpler than allocating ports: a slotted run's conf files
+// and log lines stay byte-identical to a serial run's, which is the evidence
+// B-T3 has to produce.
+//
+// What it costs is the outside. Six of the 3,452 cases mention wget or curl and
+// one of them, _06_issues/_25_2h/cbrd_26350, fetches a URL that is genuinely
+// external; the rest are aimed at localhost or a broker. 201 cases say
+// localhost and 34 say 127.0.0.1, all of which work here, and the 126 that read
+// the hostname are unaffected because the UTS namespace is not among these.
 func Open(label string) (*Namespace, error) {
 	if !Active() {
 		return nil, fmt.Errorf("%s: slots need the runner to be contained first (%s=1)", label, Env)
 	}
 	cmd := osexec.Command(Shell, "-c", keeperScript)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Cloneflags: syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWIPC,
+		Cloneflags: syscall.CLONE_NEWNS | syscall.CLONE_NEWPID |
+			syscall.CLONE_NEWIPC | syscall.CLONE_NEWNET,
 	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, nil, nil
 	if err := cmd.Start(); err != nil {
@@ -71,10 +88,13 @@ func Open(label string) (*Namespace, error) {
 	// The keeper is PID 1 but nothing has mounted /proc for it, so `ps` in there
 	// would still report the machine. Doing it from outside, in the keeper's own
 	// mount namespace, is the same work Setup does for the runner.
+	// A fresh network namespace has a loopback interface and it is down, so
+	// nothing can reach 127.0.0.1 until it is brought up -- which is every
+	// connection a case makes.
 	if out, err := ns.run(context.Background(), 10*time.Second,
-		"mount --make-rprivate / && mount -t proc proc /proc"); err != nil {
+		"mount --make-rprivate / && mount -t proc proc /proc && ip link set lo up"); err != nil {
 		ns.Close()
-		return nil, fmt.Errorf("%s: mount /proc: %w: %s", label, err, strings.TrimSpace(out))
+		return nil, fmt.Errorf("%s: prepare: %w: %s", label, err, strings.TrimSpace(out))
 	}
 	return ns, nil
 }
@@ -104,7 +124,7 @@ func (n *Namespace) Channel(dir string, env ...string) exec.Channel {
 // denies. Not creating the second user namespace removes both.
 func (n *Namespace) enter(argv ...string) []string {
 	return append([]string{
-		"nsenter", "-t", strconv.Itoa(n.pid), "-p", "-i", "-m", "--",
+		"nsenter", "-t", strconv.Itoa(n.pid), "-p", "-i", "-m", "-n", "--",
 	}, argv...)
 }
 

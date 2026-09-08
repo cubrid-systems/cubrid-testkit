@@ -15,6 +15,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
+	"github.com/cubrid-systems/cubrid-testkit/internal/plan"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
@@ -266,6 +267,27 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// retires, which is what keeps the ceiling a size instead of a rate.
 	corpus.Plan(cases)
 
+	// ---- order ------------------------------------------------------------
+	// Longest case first, from what a previous run on this machine measured.
+	// Off unless case_plan names a file, because it changes the order cases are
+	// handed out in -- and a run that did not ask for that keeps the corpus
+	// order it has always had.
+	planPath := strings.TrimSpace(cfg.GetOr("case_plan", ""))
+	record := plan.NewRecord()
+	if planPath != "" {
+		known, err := plan.Read(planPath)
+		if err != nil {
+			return quit("cannot read case_plan %s: %v", planPath, err)
+		}
+		if len(known) > 0 {
+			cases = plan.Order(cases, known)
+			fmt.Printf("[INFO] cases ordered longest-first from %s (%d of %d measured)\n",
+				planPath, len(known), len(cases))
+		} else {
+			fmt.Printf("[INFO] no durations in %s yet; this run will write them\n", planPath)
+		}
+	}
+
 	// ---- deploy ----------------------------------------------------------
 	fmt.Println("============= DEPLOY ==================")
 	if err := s.deploy(ctx, machine, worker, sink); err != nil {
@@ -296,7 +318,13 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	}
 
 	fmt.Println("STARTED")
-	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus)
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record)
+
+	if planPath != "" {
+		if werr := record.Write(planPath); werr != nil {
+			fmt.Printf("[ERROR] cannot write case_plan %s: %v\n", planPath, werr)
+		}
+	}
 
 	report.TaskStop()
 
@@ -582,7 +610,8 @@ func (s *Shell) deploy(ctx context.Context, machine *topology.Instance,
 func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
-	buildID, bits string, local bool, board *status.Board, corpus *Corpus) error {
+	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
+	record *plan.Record) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -591,7 +620,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 		go func(i int, pair channelPair) {
 			defer wg.Done()
 			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg,
-				buildID, bits, local, board, corpus, fmt.Sprintf("slot%d", i))
+				buildID, bits, local, board, corpus, record, fmt.Sprintf("slot%d", i))
 		}(i, pair)
 	}
 	wg.Wait()
@@ -615,7 +644,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	slotID string) error {
+	record *plan.Record, slotID string) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
 	ssh := machine.SSH()
@@ -624,6 +653,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 		SlotID:    slotID,
 		Board:     board,
 		Corpus:    corpus,
+		Plan:      record,
 		Contained: contain.Active(),
 		Channel:   workerCh,
 		Queue:     queue,

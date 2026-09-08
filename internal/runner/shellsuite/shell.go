@@ -336,9 +336,25 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 		}
 		// The monitor needs a channel of its own into the same namespace: it has
 		// to reach the machine while the case is holding the worker's.
+		// cub_master listens on a Unix domain socket named after its port --
+		// $CUBRID_TMP/CUBRID<port>, and /tmp when that is unset. Every slot keeps
+		// the shipped port, because the network namespace lets it, so without
+		// this they would all want /tmp/CUBRID1523: four masters over one socket
+		// is four masters that do not start, and every case that wanted a server
+		// fails with "Could not connect to master server on localhost".
+		//
+		// The engine's own variable rather than a private /tmp. A mount would
+		// also take away the directory the scripts are written into, and it
+		// would isolate a /tmp that cases are entitled to share.
+		tmp := filepath.Join(root, label, "tmp")
+		if err := os.MkdirAll(tmp, 0o1777); err != nil {
+			closeAll()
+			return nil, nil, err
+		}
+		env := []string{"CUBRID_TMP=" + tmp}
 		pairs = append(pairs, channelPair{
-			worker:  ns.Channel(""),
-			monitor: ns.Channel(""),
+			worker:  ns.Channel("", env...),
+			monitor: ns.Channel("", env...),
 			close:   func() {},
 		})
 	}

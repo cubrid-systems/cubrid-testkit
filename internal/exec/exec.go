@@ -72,6 +72,12 @@ type Local struct {
 	Dir string
 	// Env replaces the environment when non-nil, and extends it otherwise.
 	Env []string
+	// ScriptDir is where the script file is written. Empty means the process's
+	// own temporary directory, which is what a local run has always used. A
+	// channel into a namespace has to name somewhere else: a slot gets a /tmp of
+	// its own, and a script written into this process's /tmp is not in the one
+	// the command will read.
+	ScriptDir string
 	// SourceProfile prepends Profile, as CTP's remote path always did and its
 	// local paths did not agree about: the shell task reached even a local machine
 	// through SSHConnect and got the profile, while unittest called LocalInvoker
@@ -128,7 +134,7 @@ func (l *Local) Run(ctx context.Context, script string) (Result, error) {
 // put the script somewhere other than this process's own namespaces without
 // this package learning what a namespace is. nil means run it here.
 func (l *Local) RunWith(ctx context.Context, script string, wrap func(argv ...string) []string) (Result, error) {
-	f, err := os.CreateTemp("", ".testkit-exec-*.sh")
+	f, err := os.CreateTemp(l.ScriptDir, ".testkit-exec-*.sh")
 	if err != nil {
 		return Result{}, fmt.Errorf("script file: %w", err)
 	}

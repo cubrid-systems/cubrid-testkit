@@ -50,8 +50,12 @@ type Worker struct {
 	// connection. Zero means no case is running.
 	mu      sync.Mutex
 	current time.Time
-	timedIn string
-	timeout bool
+	// buf holds this case's log lines until it ends, so that slots do not
+	// interleave one case's trace into another's.
+	buf       []string
+	buffering bool
+	timedIn   string
+	timeout   bool
 	// abort ends the case in flight. It is the monitor's last resort, and it is
 	// nil whenever no case is running.
 	abort context.CancelFunc
@@ -92,6 +96,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		w.Report.CaseStart(ticket.Case, w.envIdentify())
+		w.hold()
 		w.log("[TESTCASE] " + ticket.Case)
 
 		// The case gets a context of its own so the monitor has something to pull
@@ -213,6 +218,7 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 	if retrying {
 		w.Report.CaseStopRetry(ev)
 		w.log("")
+		w.flush()
 		return
 	}
 
@@ -223,6 +229,7 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 		w.log("[ERROR] cannot record the case as finished: " + err.Error())
 	}
 	w.log("")
+	w.flush()
 }
 
 // consoleBanner separates a failing case's result lines from the console output
@@ -272,10 +279,42 @@ func (w *Worker) diskSpace(ctx context.Context) {
 		w.Channel.Describe(), int(time.Since(start).Seconds())))
 }
 
+// log collects a line, and while a case is running it collects rather than
+// writes. The case's whole trace goes out at once in flush, because slots make
+// the worker log something more than one worker appends to.
 func (w *Worker) log(line string) {
+	w.mu.Lock()
+	if w.buffering {
+		w.buf = append(w.buf, line)
+		w.mu.Unlock()
+		return
+	}
+	w.mu.Unlock()
 	if err := w.Sink.Worker(w.EnvID, line); err != nil {
 		// The worker log is where a failure is explained. Losing it is worth
 		// saying out loud, but not worth abandoning the run for.
+		fmt.Printf("[ERROR] cannot write the worker log for %s: %v\n", w.EnvID, err)
+	}
+}
+
+// hold starts collecting this case's lines, and flush writes them as one block.
+func (w *Worker) hold() {
+	w.mu.Lock()
+	w.buffering = true
+	w.buf = w.buf[:0]
+	w.mu.Unlock()
+}
+
+func (w *Worker) flush() {
+	w.mu.Lock()
+	lines := append([]string(nil), w.buf...)
+	w.buf = w.buf[:0]
+	w.buffering = false
+	w.mu.Unlock()
+	if len(lines) == 0 {
+		return
+	}
+	if err := w.Sink.WorkerLines(w.EnvID, lines); err != nil {
 		fmt.Printf("[ERROR] cannot write the worker log for %s: %v\n", w.EnvID, err)
 	}
 }

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
@@ -130,6 +132,20 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	defer worker.Close()
 	defer monitor.Close()
 
+	// Slot 0 is the channel pair that has always existed, used exactly as it
+	// has always been used. Slots beyond it are the new thing, and they are
+	// the only ones that need a namespace -- so a run of one is not a run of
+	// N with N=1, it is the old path.
+	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
+	if n := cfg.Int("parallel_slots", 1); n > 1 {
+		extra, closeSlots, err := openSlots(n-1, opener, machine)
+		if err != nil {
+			return quit("%v", err)
+		}
+		defer closeSlots()
+		pairs = append(pairs, extra...)
+	}
+
 	buildInfo, err := runIn(ctx, worker, versionScript)
 	if err != nil {
 		return quit("Please confirm your build installation for local test! (%v)", err)
@@ -224,7 +240,8 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// ---- test ------------------------------------------------------------
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, cfg.Int("testcase_retry_num", 0))
-	err = s.test(ctx, machine, worker, monitor, queue, sink, report, cfg, buildID, bits, local)
+	fmt.Println("STARTED")
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local)
 
 	report.TaskStop()
 
@@ -261,6 +278,67 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 //
 // Two, not one. A worker spends most of its life blocked inside a case, and the
 // timeout monitor has to reach the same machine while that is happening.
+// openSlots opens n more places to run a case, each in namespaces of its own.
+//
+// What a slot needs to differ in used to be a list -- ports, shared-memory ids,
+// the install, the registry -- and each entry was somewhere the suite already
+// wrote. Namespaces answer all of them at once and without writing anything: a
+// network namespace gives every slot the whole port space so each runs on the
+// shipped 1523, an IPC namespace keeps the segments apart, a PID namespace makes
+// `ps -e` mean this slot, and an overlay makes $CUBRID writable per slot without
+// copying its 323 MB.
+//
+// Nothing is reconfigured, which is the point. A slotted run's conf files and
+// log lines are the ones a serial run produces.
+func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channel, error),
+	machine *topology.Instance) ([]channelPair, func(), error) {
+
+	if !contain.Active() {
+		return nil, nil, fmt.Errorf("parallel_slots needs the runner contained; set %s=1", contain.Env)
+	}
+	root := os.Getenv("TESTKIT_SLOT_ROOT")
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "testkit-slots")
+	}
+
+	var pairs []channelPair
+	var opened []*contain.Namespace
+	closeAll := func() {
+		for _, ns := range opened {
+			ns.Close()
+		}
+	}
+	for i := 1; i <= n; i++ {
+		label := fmt.Sprintf("slot%d", i)
+		ns, err := contain.Open(label)
+		if err != nil {
+			closeAll()
+			return nil, nil, err
+		}
+		opened = append(opened, ns)
+
+		// $CUBRID and the registry are the two trees a case writes to, and the
+		// registry is outside the install, so it takes an overlay of its own.
+		for _, dir := range []string{os.Getenv("CUBRID"), os.Getenv("CUBRID_DATABASES")} {
+			if dir == "" {
+				continue
+			}
+			if err := ns.Overlay(dir, filepath.Join(root, label, filepath.Base(dir))); err != nil {
+				closeAll()
+				return nil, nil, err
+			}
+		}
+		// The monitor needs a channel of its own into the same namespace: it has
+		// to reach the machine while the case is holding the worker's.
+		pairs = append(pairs, channelPair{
+			worker:  ns.Channel(""),
+			monitor: ns.Channel(""),
+			close:   func() {},
+		})
+	}
+	return pairs, closeAll, nil
+}
+
 func openChannels(inst *topology.Instance) (worker, monitor exec.Channel, err error) {
 	if inst.IsLocal() {
 		// CTP reached even the local machine through SSHConnect, so a local run
@@ -398,11 +476,51 @@ func (s *Shell) deploy(ctx context.Context, machine *topology.Instance,
 // The monitor gets its own goroutine and its own channel, because the worker is
 // blocked inside a case for as long as the case takes and the timeout has to
 // reach the machine anyway.
+// test runs the cases and waits for the queue to drain.
+//
+// The pairs are one per slot, and one pair is the behaviour there has always
+// been. Every slot works the same shared queue and reports under the same
+// EnvID: a parallel run then writes the same files, with the same membership,
+// as a serial one -- in a different order, which ADR-013 already sorts away.
+// Giving each slot its own EnvID would have split dispatch_tc_FIN_<env> and
+// made the two runs incomparable, which is the evidence B-T3 exists to produce.
 func (s *Shell) test(ctx context.Context, machine *topology.Instance,
-	workerCh, monitorCh exec.Channel, queue *dispatch.Queue,
+	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool) error {
 
+	var wg sync.WaitGroup
+	errs := make([]error, len(pairs))
+	for i, pair := range pairs {
+		wg.Add(1)
+		go func(i int, pair channelPair) {
+			defer wg.Done()
+			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg, buildID, bits, local)
+		}(i, pair)
+	}
+	wg.Wait()
+	for _, err := range errs {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// channelPair is what one slot needs: a channel for the case and a second one
+// for the monitor, because the monitor has to be able to talk to the machine
+// while the case is holding the first.
+type channelPair struct {
+	worker, monitor exec.Channel
+	close           func()
+}
+
+func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
+	pair channelPair, queue *dispatch.Queue,
+	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
+	buildID, bits string, local bool) error {
+
+	workerCh, monitorCh := pair.worker, pair.monitor
 	ssh := machine.SSH()
 	w := &Worker{
 		EnvID:     machine.EnvID(),
@@ -437,6 +555,5 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 		Contained: contain.Active(),
 	}).Watch(monitorCtx)
 
-	fmt.Println("STARTED")
 	return w.Run(ctx)
 }

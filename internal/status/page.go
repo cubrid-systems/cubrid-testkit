@@ -65,6 +65,21 @@ const page = `<!doctype html>
  .num{text-align:right;width:5rem;color:var(--ink-dim)}
  .empty{color:var(--ink-faint);padding:.4rem 0}
 
+ /* What is interactive looks interactive: the toggle reads as a control at
+    rest, not only once the pointer is over it. */
+ .seg{display:flex;gap:0;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+ .seg button{appearance:none;background:none;border:0;color:var(--ink-dim);cursor:pointer;
+   font:inherit;font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;
+   padding:.15rem .6rem}
+ .seg button+button{border-left:1px solid var(--line)}
+ .seg button[aria-pressed=true]{background:var(--line);color:var(--ink)}
+ .seg button:focus-visible,th.sortable:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+ th.sortable{cursor:pointer;user-select:none}
+ th.sortable:hover{color:var(--ink-dim)}
+ th.sortable[aria-sort]:not([aria-sort=none]){color:var(--accent)}
+ th .caret{opacity:.55;font-size:.85em}
+ .count{letter-spacing:0;text-transform:none;color:var(--ink-faint)}
+
  /* A slot that has held a case a long time is the thing this page exists to
     surface, so it is marked in shape as well as colour: the row gains a rail. */
  tr.held td:first-child{box-shadow:inset 3px 0 0 var(--warn);padding-left:.55rem}
@@ -104,9 +119,19 @@ const page = `<!doctype html>
 </section>
 
 <section>
-  <h2>finished</h2>
+  <h2>finished
+    <span class=seg role=group aria-label="which cases">
+      <button id=fAll aria-pressed=true>recent</button><button id=fBad aria-pressed=false>failed</button>
+    </span>
+    <span class=count id=fcount></span>
+  </h2>
   <div class=scroll><table>
-    <thead><tr><th class=slot>slot<th class=case>case<th class=num>verdict<th class=num>took</tr></thead>
+    <thead><tr>
+      <th class=slot>slot
+      <th class="case sortable" tabindex=0 data-k=case aria-sort=none>case
+      <th class=num>verdict
+      <th class="num sortable" tabindex=0 data-k=took aria-sort=none>took
+    </tr></thead>
     <tbody id=recent><tr><td colspan=4 class=empty>nothing yet</tr></tbody>
   </table></div>
 </section>
@@ -145,6 +170,51 @@ function spark(series, span) {
     '" r="2.4" fill="var(--accent)"/>'
 }
 
+// The table is either the tail of the run or its failures, and it is sorted by
+// what the reader picked -- both held across refreshes, or a list would reorder
+// itself under the pointer once a second.
+let showFailed = false, sortKey = null, sortDir = -1
+let lastView = null
+
+function pick(failed) {
+  showFailed = failed
+  $('fAll').setAttribute('aria-pressed', String(!failed))
+  $('fBad').setAttribute('aria-pressed', String(failed))
+  if (lastView) draw(lastView)
+}
+$('fAll').onclick = () => pick(false)
+$('fBad').onclick = () => pick(true)
+
+function sortBy(k) {
+  sortDir = sortKey === k ? -sortDir : -1
+  sortKey = k
+  for (const th of document.querySelectorAll('th.sortable')) {
+    th.setAttribute('aria-sort', th.dataset.k !== k ? 'none' : (sortDir < 0 ? 'descending' : 'ascending'))
+    const base = th.dataset.k
+    th.innerHTML = base + (th.dataset.k === k ? ' <span class=caret>' + (sortDir < 0 ? '\u25be' : '\u25b4') + '</span>' : '')
+  }
+  if (lastView) draw(lastView)
+}
+for (const th of document.querySelectorAll('th.sortable')) {
+  th.onclick = () => sortBy(th.dataset.k)
+  th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th.dataset.k) } }
+}
+
+function draw(v) {
+  const rows = (showFailed ? v.failed : v.recent) || []
+  const list = sortKey ? rows.slice().sort((a, b) =>
+    sortDir * (sortKey === 'took' ? a.took - b.took : short(a.case).localeCompare(short(b.case)))) : rows
+  $('fcount').textContent = showFailed
+    ? (v.failed || []).length + ' of ' + v.done
+    : 'last ' + Math.min(rows.length, 40)
+  $('recent').innerHTML = list.length ? list.map(r =>
+    '<tr><td class=slot>' + r.slot +
+    '<td class=case title="' + r.case + '">' + short(r.case) +
+    '<td class=num><span class="v ' + (r.ok?'ok':'no') + '">' + (r.ok?'OK':'NOK') + '</span>' +
+    '<td class=num>' + secs(r.took) + '</tr>').join('')
+    : '<tr><td colspan=4 class=empty>' + (showFailed ? 'nothing has failed' : 'nothing yet') + '</tr>'
+}
+
 async function tick() {
   let v
   try { v = await (await fetch('api')).json() } catch (e) { $('state').textContent = 'no answer'; return }
@@ -168,13 +238,8 @@ async function tick() {
     '<td class=num>' + secs(s.held) + '</tr>').join('')
     : '<tr><td colspan=3 class=empty>' + (v.finished ? 'all slots idle' : 'waiting for the first case') + '</tr>'
 
-  const rec = v.recent||[]
-  $('recent').innerHTML = rec.length ? rec.map(r =>
-    '<tr><td class=slot>' + r.slot +
-    '<td class=case title="' + r.case + '">' + short(r.case) +
-    '<td class=num><span class="v ' + (r.ok?'ok':'no') + '">' + (r.ok?'OK':'NOK') + '</span>' +
-    '<td class=num>' + secs(r.took) + '</tr>').join('')
-    : '<tr><td colspan=4 class=empty>nothing yet</tr>'
+  lastView = v
+  draw(v)
 }
 tick(); setInterval(tick, 1000)
 </script>

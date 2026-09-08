@@ -127,3 +127,49 @@ func TestAddr(t *testing.T) {
 		t.Errorf("the default address is not loopback: %q", DefaultAddr)
 	}
 }
+
+// A run of 217 with 56 failures is a run where the list of failures is the
+// thing being watched, so it has to be every failure -- not the failures among
+// the last few, which answers a different question.
+func TestEveryFailureIsKept(t *testing.T) {
+	b := New(recentMax * 3)
+	for i := 0; i < recentMax*3; i++ {
+		name := "c" + string(rune('a'+i%26))
+		b.Begin("slot0", name)
+		b.End("slot0", name, i%3 != 0) // every third one fails
+	}
+	v := b.snapshot()
+	if len(v.Recent) != recentMax {
+		t.Errorf("the tail holds %d, not the %d it is capped at", len(v.Recent), recentMax)
+	}
+	want := 0
+	for i := 0; i < recentMax*3; i++ {
+		if i%3 == 0 {
+			want++
+		}
+	}
+	if len(v.Failed) != want {
+		t.Errorf("the failure list holds %d of %d failures", len(v.Failed), want)
+	}
+	for _, f := range v.Failed {
+		if f.OK {
+			t.Error("a passing case is in the failure list")
+		}
+	}
+	if got := len(b.snapshot().Failed); got != want {
+		t.Errorf("reading the board changed the failure list: %d then %d", want, got)
+	}
+}
+
+// The list is bounded too: a run failing a thousand cases is read in the result
+// tree, not here.
+func TestTheFailureListIsBounded(t *testing.T) {
+	b := New(failedMax * 2)
+	for i := 0; i < failedMax+50; i++ {
+		b.Begin("slot0", "c")
+		b.End("slot0", "c", false)
+	}
+	if got := len(b.snapshot().Failed); got != failedMax {
+		t.Errorf("the failure list holds %d, not the %d it is capped at", got, failedMax)
+	}
+}

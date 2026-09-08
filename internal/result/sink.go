@@ -50,6 +50,10 @@ type Sink struct {
 	checks  map[string]*os.File // check_<envId>.log
 	fin     map[string]*os.File // dispatch_tc_FIN_<envId>.txt
 	append  bool                // continue mode reopens rather than truncates
+	// lock is this run's claim on the result tree. Nil when the tree could not
+	// be locked at all -- a read-only CTP_HOME, say -- which is not a reason to
+	// refuse to run.
+	lock *runLock
 }
 
 // Open prepares the run directory: <CTP_HOME>/result/<category>/current_runtime_logs
@@ -60,7 +64,14 @@ func Open(home *conf.Home, category string, continueMode bool) (*Sink, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("result directory %s: %w", dir, err)
 	}
+	// One run at a time per result tree -- see lock.go for why this is a refusal
+	// rather than a queue.
+	lock, err := lockRun(home.Path, category, filepath.Dir(dir))
+	if err != nil {
+		return nil, err
+	}
 	return &Sink{
+		lock:    lock,
 		dir:     dir,
 		root:    filepath.Dir(dir),
 		stdout:  os.Stdout,
@@ -302,6 +313,7 @@ func (s *Sink) file(cache map[string]*os.File, name string, appendMode bool) (*o
 func (s *Sink) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.lock.release()
 	var firstErr error
 	for _, cache := range []map[string]*os.File{s.workers, s.monitor, s.checks, s.fin} {
 		for _, f := range cache {

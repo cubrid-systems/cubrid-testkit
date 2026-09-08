@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	osexec "os/exec"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -170,6 +172,49 @@ func (n *Namespace) Alive() bool {
 		return false
 	}
 	return syscall.Kill(n.pid, 0) == nil
+}
+
+// Overlay makes target writable for this slot alone, and costs nothing to set
+// up.
+//
+// $CUBRID is 323 MB and a run writes to five places in it: conf/ because cases
+// edit cubrid.conf, log/ and var/, locales/loclib/ where make_locale builds, and
+// lib/ where it puts the result. Copying the install per slot to isolate that is
+// 323 MB a slot; binding a copy of each writable directory is five mounts and a
+// list that has already been wrong once -- it named lib/ and not
+// locales/loclib/, which make_locale writes first.
+//
+// An overlay needs neither. The install is the lower layer, shared and untouched,
+// and everything a slot writes lands in its own upper layer. There is no list to
+// keep correct: whatever a case writes anywhere under target is this slot's.
+//
+// Unprivileged overlayfs is what makes it possible and it is measured here
+// rather than assumed: inside the runner's user namespace a lower layer reads
+// through, a write lands in the upper, and the lower is unchanged.
+func (n *Namespace) Overlay(target, upperRoot string) error {
+	if !n.Alive() {
+		return fmt.Errorf("%s: the namespace is gone", n.label)
+	}
+	upper := filepath.Join(upperRoot, "upper")
+	work := filepath.Join(upperRoot, "work")
+	for _, d := range []string{upper, work} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return fmt.Errorf("%s: %w", n.label, err)
+		}
+	}
+	// A comma in any of these would be read as an option separator, and the
+	// mount would fail somewhere less obvious than here.
+	for _, d := range []string{target, upper, work} {
+		if strings.ContainsAny(d, ",:") {
+			return fmt.Errorf("%s: %q cannot be an overlay directory: the option string is comma-separated", n.label, d)
+		}
+	}
+	script := fmt.Sprintf("mount -t overlay overlay -o lowerdir=%s,upperdir=%s,workdir=%s %s",
+		target, upper, work, target)
+	if out, err := n.run(context.Background(), 20*time.Second, script); err != nil {
+		return fmt.Errorf("%s: overlay %s: %w: %s", n.label, target, err, strings.TrimSpace(out))
+	}
+	return nil
 }
 
 type nsChannel struct {

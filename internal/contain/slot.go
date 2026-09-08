@@ -90,11 +90,22 @@ func Open(label string) (*Namespace, error) {
 	// The keeper is PID 1 but nothing has mounted /proc for it, so `ps` in there
 	// would still report the machine. Doing it from outside, in the keeper's own
 	// mount namespace, is the same work Setup does for the runner.
-	// A fresh network namespace has a loopback interface and it is down, so
-	// nothing can reach 127.0.0.1 until it is brought up -- which is every
-	// connection a case makes.
+	// Three things the namespaces do not give a slot on their own.
+	//
+	// /proc, because the keeper is PID 1 of a new PID namespace but nothing has
+	// mounted a /proc that reports it, so `ps` would still show the machine.
+	//
+	// /dev/shm, because an IPC namespace separates System V shared memory and
+	// POSIX shared memory is a *file* on a tmpfs -- and the tmpfs a mount
+	// namespace inherits is the one it was cloned from. cub_broker and cub_cas
+	// call both shmget and shm_open, so without this the slots' brokers share
+	// their segments and a case fails to connect to a database that is running.
+	//
+	// Loopback, because it comes up down in a fresh network namespace and every
+	// connection a case makes goes through it.
 	if out, err := ns.run(context.Background(), 10*time.Second,
-		"mount --make-rprivate / && mount -t proc proc /proc && ip link set lo up"); err != nil {
+		"mount --make-rprivate / && mount -t proc proc /proc && "+
+			"mount -t tmpfs -o mode=1777 shm /dev/shm && ip link set lo up"); err != nil {
 		ns.Close()
 		return nil, fmt.Errorf("%s: prepare: %w: %s", label, err, strings.TrimSpace(out))
 	}

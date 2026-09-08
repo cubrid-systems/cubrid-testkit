@@ -189,3 +189,18 @@ func TestSlotsWriteIntoTheInstallWithoutSeeingEachOther(t *testing.T) {
 		t.Error("a slot's write reached the install itself")
 	}
 }
+
+// POSIX shared memory is a file on a tmpfs, and a mount namespace inherits the
+// tmpfs it was cloned from -- so an IPC namespace, which separates System V
+// segments, leaves /dev/shm shared. cub_broker and cub_cas use both.
+func TestSlotsDoNotShareDevShm(t *testing.T) {
+	a, b := namespace(t), namespace(t)
+
+	run(t, a, "echo mine > /dev/shm/probe")
+	if got := run(t, b, "cat /dev/shm/probe 2>&1 || echo absent"); !strings.Contains(got, "absent") {
+		t.Errorf("the other slot sees this slot's POSIX shared memory: %q", got)
+	}
+	if _, err := os.Stat("/dev/shm/probe"); err == nil {
+		t.Error("a slot's POSIX shared memory reached the machine's /dev/shm")
+	}
+}

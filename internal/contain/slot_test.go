@@ -125,3 +125,36 @@ func TestASlotOutsideAContainedRunnerIsRefused(t *testing.T) {
 		t.Error("a namespace was opened from an uncontained runner")
 	}
 }
+
+// The port space is what two slots collide on -- the master, the two brokers,
+// and whatever a case starts on its own. A network namespace each means every
+// slot runs on the shipped 1523 and nothing has to be reallocated, which is what
+// keeps a slotted run's configuration byte-identical to a serial one's.
+func TestTwoSlotsHoldTheSamePort(t *testing.T) {
+	a, b := namespace(t), namespace(t)
+
+	// -u because the listener writes to a file and then sleeps: block-buffered,
+	// its output would arrive only when it exits, which is after the check.
+	hold := func(tag string) string {
+		return `setsid python3 -u -c 'import socket,time
+s=socket.socket(); s.bind(("127.0.0.1",1523)); s.listen(1)
+print("bound"); time.sleep(5)' >/tmp/port-` + tag + `.out 2>&1 </dev/null &
+sleep 1; cat /tmp/port-` + tag + `.out`
+	}
+
+	if got := run(t, a, hold("a")); !strings.Contains(got, "bound") {
+		t.Fatalf("the first slot could not take 1523: %q", got)
+	}
+	if got := run(t, b, hold("b")); !strings.Contains(got, "bound") {
+		t.Errorf("the second slot could not take 1523 while the first held it: %q", got)
+	}
+}
+
+// Loopback is down in a fresh network namespace, and every connection a case
+// makes goes through it.
+func TestLoopbackIsUp(t *testing.T) {
+	ns := namespace(t)
+	if got := run(t, ns, "ip -o link show lo"); !strings.Contains(got, "UP") {
+		t.Errorf("loopback is not up: %q", got)
+	}
+}

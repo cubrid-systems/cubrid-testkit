@@ -63,6 +63,11 @@ type Board struct {
 	done    int
 	ok      int
 	recent  []finished
+	// failed is every case that failed, not the failures among the last few.
+	// A run of 217 with 56 failures is a run where the list of failures is the
+	// thing being watched, and filtering a recency window would answer a
+	// different question.
+	failed []finished
 	// buckets counts completions per bucketSpan, so the page can show whether
 	// the run is keeping pace. With slots that is the question the numbers alone
 	// do not answer: ten workers finishing nothing looks like one worker on a
@@ -92,9 +97,14 @@ type finished struct {
 	At   time.Time
 }
 
-// recentMax is how much history the page keeps. Enough to see what just
-// happened; the log is where the run is actually recorded.
+// recentMax is how much of the run's tail the page keeps. Enough to see what
+// just happened; the log is where the run is actually recorded.
 const recentMax = 40
+
+// failedMax bounds the failure list. Above this the page is not the tool for
+// the job -- a run failing a thousand cases is read in the result tree -- but
+// it is far enough above a bad day that the list stays complete on one.
+const failedMax = 500
 
 func New(total int) *Board {
 	return &Board{started: time.Now(), total: total, running: map[string]inflight{}}
@@ -128,6 +138,12 @@ func (b *Board) End(slot, name string, ok bool) {
 	if len(b.recent) > recentMax {
 		b.recent = b.recent[len(b.recent)-recentMax:]
 	}
+	if !ok {
+		b.failed = append(b.failed, finished{Slot: slot, Case: name, Took: took, At: time.Now()})
+		if len(b.failed) > failedMax {
+			b.failed = b.failed[len(b.failed)-failedMax:]
+		}
+	}
 	b.count(time.Now())
 }
 
@@ -159,6 +175,7 @@ type view struct {
 	Remain   int        `json:"remain"`
 	Slots    []slotView `json:"slots"`
 	Recent   []doneView `json:"recent"`
+	Failed   []doneView `json:"failed"`
 	Rate     []int      `json:"rate"`
 	RateSpan int        `json:"rateSpan"`
 	Finished bool       `json:"finished"`
@@ -203,6 +220,12 @@ func (b *Board) snapshot() view {
 	// as it happens rather than only once something finishes.
 	b.count(time.Now())
 	b.buckets[len(b.buckets)-1]--
+	for i := len(b.failed) - 1; i >= 0; i-- {
+		f := b.failed[i]
+		v.Failed = append(v.Failed, doneView{
+			Slot: f.Slot, Case: f.Case, OK: false, Took: int(f.Took.Seconds()),
+		})
+	}
 	v.Rate = append([]int(nil), b.buckets...)
 	v.RateSpan = int(bucketSpan.Seconds())
 	for i := len(b.recent) - 1; i >= 0; i-- {

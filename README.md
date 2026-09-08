@@ -297,7 +297,16 @@ Namespaces are what make a slot cost nothing to configure, and they need the run
 TESTKIT_CONTAIN=1 TESTKIT_NATIVE_SHELL=1 testkit shell -c shell.conf
 ```
 
-`TESTKIT_SLOT_ROOT` says where the per-slot overlays go, `/var/tmp/testkit-slots` by default.
+`TESTKIT_SLOT_ROOT` says where the per-slot overlays go, `/var/tmp/testkit-slots/<pid>` by default.
+
+**Two runs at once are refused**, and only for one reason: they would share
+`<CTP_HOME>/result/<category>`, which holds one `feedback.log` and one
+`test_status.data` between them, so the result would describe neither and nothing
+about it would say so. Everything else a run makes is already its own — the
+corpus overlay, the slot namespaces, `CUBRID_TMP`, and the status port, which
+moves along when the default is taken. So a second run on the same tree stops
+before it has done anything, naming the run that has it; give it a different
+`CTP_HOME` and the two coexist.
 
 **How many slots, and how big a ceiling.** `tools/sizing.sh` answers both from the machine and the
 engine's own configuration, and says what every number rests on:

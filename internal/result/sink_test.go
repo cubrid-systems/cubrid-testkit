@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -192,5 +193,66 @@ func TestRemainingIsEmptyWhenThereIsNothingToResume(t *testing.T) {
 	}
 	if len(left) != 0 {
 		t.Errorf("got %v, want nothing", left)
+	}
+}
+
+// Two runs can share almost everything on a machine safely. What they cannot
+// share is where the verdicts go: one feedback.log and one test_status.data
+// between them produce a result that describes neither, and nothing about that
+// announces itself.
+func TestASecondRunIsRefusedTheResultTree(t *testing.T) {
+	home := &conf.Home{Path: t.TempDir()}
+
+	first, err := Open(home, "shell", false)
+	if err != nil {
+		t.Fatalf("the first run could not open the tree: %v", err)
+	}
+
+	_, err = Open(home, "shell", false)
+	if err == nil {
+		t.Fatal("a second run was given the same result tree")
+	}
+	for _, want := range []string{"another run already has", "CTP_HOME"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not mention %q:\n%v", want, err)
+		}
+	}
+	// It says who has it, so the message points at something.
+	if !strings.Contains(err.Error(), strconv.Itoa(os.Getpid())) {
+		t.Errorf("the refusal does not name the holder:\n%v", err)
+	}
+
+	// A different task is a different tree, so it is not blocked.
+	other, err := Open(home, "unittest", false)
+	if err != nil {
+		t.Errorf("a different category was refused: %v", err)
+	} else {
+		other.Close()
+	}
+
+	// And the tree comes back when the first run is done.
+	first.Close()
+	again, err := Open(home, "shell", false)
+	if err != nil {
+		t.Fatalf("the tree was not released: %v", err)
+	}
+	again.Close()
+}
+
+// The lock lives beside result/ rather than inside it: the first thing a run
+// often does with that directory is rm -rf, and a lock the next run deletes is
+// not a lock.
+func TestTheLockSurvivesTheResultTreeBeingWiped(t *testing.T) {
+	home := &conf.Home{Path: t.TempDir()}
+	s, err := Open(home, "shell", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := os.RemoveAll(filepath.Join(home.Path, "result")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(home, "shell", false); err == nil {
+		t.Error("wiping the result tree released the lock")
 	}
 }

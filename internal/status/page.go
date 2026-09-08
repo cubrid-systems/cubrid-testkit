@@ -71,8 +71,8 @@ const page = `<!doctype html>
  tr.held .num{color:var(--warn)}
  .v{display:inline-block;min-width:2.6rem;font-size:.72rem;letter-spacing:.07em;
     padding:.02rem .35rem;border-radius:2px;text-align:center}
- .v.ok{color:var(--pass);background:color-mix(in srgb,var(--pass) 14%,transparent)}
- .v.no{color:var(--fail);background:color-mix(in srgb,var(--fail) 16%,transparent)}
+ .v.ok{color:var(--pass);background:rgba(99,179,137,.13)}
+ .v.no{color:var(--fail);background:rgba(211,118,110,.15)}
  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 

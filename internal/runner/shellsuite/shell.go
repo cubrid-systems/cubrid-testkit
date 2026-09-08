@@ -6,6 +6,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -367,7 +368,44 @@ func ramOverlay(dir string, mb int) (func(), error) {
 		mb, ram, ram, ram)); err != nil {
 		return nil, err
 	}
+	// The peak, and whether it ever reached the ceiling.
+	//
+	// A ceiling below what a run needs does not stop the run and does not put
+	// ENOSPC anywhere a reader will find it: the cases simply fail. One arm of
+	// this suite's own measurements gave 47 OK against 170 NOK for exactly that
+	// reason, and nothing in the output said why. So the run watches its own
+	// ceiling and says on the way out whether it hit it.
+	peak := 0
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				out, err := osexec.Command(contain.Shell, "-c",
+					"df -m --output=used "+ram+" | tail -1").Output()
+				if err != nil {
+					continue
+				}
+				if v, err := strconv.Atoi(strings.TrimSpace(string(out))); err == nil && v > peak {
+					peak = v
+				}
+			}
+		}
+	}()
+
 	undo := func() {
+		close(stop)
+		if peak*100 >= mb*90 {
+			fmt.Printf("[ERROR] the corpus used %d MB of its %d MB ceiling. "+
+				"Cases that ran out of space fail without saying so; raise scenario_ram_mb "+
+				"or lower log_volume_size, and treat this run's verdicts as unusable.\n", peak, mb)
+		} else {
+			fmt.Printf("[INFO] the corpus wrote at most %d MB of the %d MB it was allowed\n", peak, mb)
+		}
 		_ = run("umount " + dir)
 		_ = run("umount " + ram)
 		_ = os.Remove(ram)

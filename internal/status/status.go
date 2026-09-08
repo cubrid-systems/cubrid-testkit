@@ -300,16 +300,41 @@ func bucketOf(secs int) int {
 	return len(histEdges)
 }
 
-// familyOf is the corpus's own grouping: the first path segment named the way
-// the families are, _NN_something. A case two levels down -- _06_issues/_11_1h
-// -- counts under the family, because that is the unit anyone asks about.
+// familyOf is the corpus's own grouping: the leading path segments named the way
+// the families are, _NN_something.
+//
+// All of them, not the first. The corpus nests two deep in places -- _06_issues
+// holds _10_2h, _11_1h, _11_2h and twenty more -- and _06_issues is half of
+// everything, so grouping by the first segment produced one row covering half
+// the run and said nothing about where inside it the time went. Ninety-nine
+// groups is a longer table and a useful one; the panel is sorted slowest-first,
+// so the rows that matter are at the top.
+//
+// Consecutive from the start, which is what stops it descending into a case: in
+// _06_issues/_14_1h/bug_bts_13649/_01_show_log_header/_01_basic_log the last two
+// look like families and are directories inside one case, and the run stops at
+// bug_bts_13649 because that segment does not match.
 func familyOf(path string) string {
-	for _, seg := range strings.Split(path, "/") {
-		if len(seg) > 3 && seg[0] == '_' && seg[1] >= '0' && seg[1] <= '9' {
-			return seg
+	parts := strings.Split(path, "/")
+	first := -1
+	for i, seg := range parts {
+		if isFamilySegment(seg) {
+			first = i
+			break
 		}
 	}
-	return "(other)"
+	if first < 0 {
+		return "(other)"
+	}
+	last := first
+	for last+1 < len(parts) && isFamilySegment(parts[last+1]) {
+		last++
+	}
+	return strings.Join(parts[first:last+1], "/")
+}
+
+func isFamilySegment(seg string) bool {
+	return len(seg) > 3 && seg[0] == '_' && seg[1] >= '0' && seg[1] <= '9'
 }
 
 // count puts one completion in its bucket, filling the empty buckets in

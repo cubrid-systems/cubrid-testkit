@@ -55,6 +55,9 @@ const page = `<!doctype html>
  h2{font-size:.7rem;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
     color:var(--ink-faint);margin:0 0 .5rem;display:flex;gap:.6rem;align-items:baseline}
  .scroll{overflow-x:auto}
+ /* A grouping table can be ninety-nine rows once the corpus is the whole tree.
+    It scrolls inside its panel rather than pushing everything below it away. */
+ .scroll.tall{max-height:22rem;overflow-y:auto}
  table{border-collapse:collapse;width:100%;min-width:34rem}
  th{text-align:left;font-weight:400;font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;
     color:var(--ink-faint);padding:0 .9rem .35rem 0;border-bottom:1px solid var(--line)}
@@ -204,15 +207,15 @@ const page = `<!doctype html>
     </table></div>
   </section>
   <section class=panel>
-    <h2>by family <span class=count>slowest first</span></h2>
-    <div class=scroll><table>
+    <h2>by family <span class=count id=nfamily>slowest first</span></h2>
+    <div class="scroll tall"><table>
       <thead><tr><th>family<th class=num>done<th class=num>nok<th class=num>total<th class=num>worst</tr></thead>
       <tbody id=family></tbody>
     </table></div>
   </section>
   <section class=panel>
     <h2>by slot <span class=count>every slot, from the moment it opens</span></h2>
-    <div class=scroll><table>
+    <div class="scroll tall"><table>
       <thead><tr><th>slot<th class=lanecol>lane<th class=num>done<th class=num>nok<th class=num>total<th class=num>worst</tr></thead>
       <tbody id=slot></tbody>
     </table></div>
@@ -387,6 +390,7 @@ async function tick() {
   $('machinewrap').hidden = !!v.replaying
   machine(v.machine || {})
   hist(v.hist || [], v.histSecs || [], v.histEdge || [])
+  $('nfamily').textContent = (v.family || []).length + ' groups, slowest first'
   groups('family', v.family || [], false)
   groups('slot', v.slot || [], true)
   document.body.classList.toggle('onelane', (v.lanes || []).length < 2)

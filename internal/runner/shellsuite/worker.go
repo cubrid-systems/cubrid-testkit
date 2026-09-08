@@ -10,6 +10,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
+	"github.com/cubrid-systems/cubrid-testkit/internal/plan"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 )
@@ -34,7 +35,10 @@ type Worker struct {
 	// A case's directory is reclaimed through it when the case retires, which is
 	// why the worker and not the queue owns the call: the worker is the one that
 	// knows a retry is not a retirement.
-	Corpus  *Corpus
+	Corpus *Corpus
+	// Plan is where this worker records what each case took, so the next run can
+	// hand the long ones out first. Nil when no plan was asked for.
+	Plan    *plan.Record
 	Channel exec.Channel
 	Queue   *dispatch.Queue
 	Sink    *result.Sink
@@ -241,6 +245,7 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 	if c, err := Split(ticket.Case); err == nil {
 		w.Corpus.Retire(c.Dir)
 	}
+	w.Plan.Add(ticket.Case, elapsed)
 	w.Board.End(w.SlotID, ticket.Case, v.Success)
 	w.Report.CaseStop(ev)
 	w.Sink.TestCase(ticket.Case, w.EnvID, v.Success, w.MaxRetry, ticket.Retry)

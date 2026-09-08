@@ -173,8 +173,40 @@ by running that one alone. `Parameters` is keyed by the file and section
 `deploy.go` already names, so the allocator decides the values and nothing
 between it and the file gets to invent one.
 
-**What is left is execution: N workers on the shared queue, and an install each.**
-The first is mechanical. The second has a design, below.
+**A network namespace made most of that table unnecessary.** Every line above
+except the last two is a number two slots would collide on, and a network
+namespace hands each slot the whole port space instead: every slot runs on the
+shipped 1523, and the configuration is never rewritten. That is not only less
+code than allocating blocks -- it is what keeps a slotted run's conf files and
+log lines byte-identical to a serial run's, which is the evidence this entry has
+to produce. `internal/slot`'s port and shared-memory arithmetic is no longer on
+the path; the IPC namespace covers the segments the same way.
+
+What it costs is the outside, and the cost is nameable: six of the 3,452 cases
+mention wget or curl and only one, `_06_issues/_25_2h/cbrd_26350`, fetches a URL
+that is genuinely external. The 201 cases that say `localhost`, the 34 that say
+`127.0.0.1` and the 126 that read the hostname are all unaffected.
+
+**Five things had to be isolated, and the list was not obvious.** Each was found
+by running four slots and reading what broke, and each is written down because
+the next person to try this will meet them in the same order:
+
+| | why the obvious namespace was not enough |
+|---|---|
+| the reset | slot 0 was left outside the namespaces, to keep one slot on the old path. A worker outside sees into all of them, so its `ps -e` sweep killed three keepers, two other slots' cases and another slot's `cub_server` |
+| the worker log | a case's trace went out a line at a time, so two cases interleaved -- a `[TESTCASE]` header followed by another case's trace |
+| `/dev/shm` | an IPC namespace separates System V segments. `cub_broker` and `cub_cas` call `shm_open` too, and POSIX shared memory is a file on a tmpfs the mount namespace inherits |
+| the master's socket | `cub_master` listens on `$CUBRID_TMP/CUBRID<port>`, `/tmp` when unset -- and the network namespace that lets every slot keep 1523 is exactly what made them all want one path. Four masters over one socket is four that do not start |
+| that socket's length | `sockaddr_un.sun_path` is 108 bytes, and a `CUBRID_TMP` under the slot root was 127. The engine says "The $CUBRID_TMP is too long" on every command, and the case then fails on a comparison |
+
+The fourth is the one worth pausing on: it is the *cost* of the network
+namespace's simplification. Removing the need to allocate ports is what made
+every slot want the same socket path.
+
+**What is left is the plan the queue is ordered by.** N workers on the shared
+queue is done; ordering that queue longest-first is not, and it is worth 18% at
+ten slots and 31% at sixteen -- measured over the smoke corpus's own durations,
+which `test-shell.xml` already records.
 
 ### A mount namespace per slot
 
@@ -210,18 +242,33 @@ already costs), or bind only the generated `libcubrid_*.so` names over a shared
 read-only `lib/` and accept that a case which writes something else there is
 outside the design.
 
-**And it cannot be settled on this machine.** `make_locale` is not on `PATH`
-here at all -- only `make_locale.sh`, which fails with `Command cubrid genlocale
-force failed`. So nothing on this sandbox writes to `lib/`, the cost of the 206
-cases that would is unmeasured, and whether their output is worth caching the
-way `cubrid_createdb` now is remains a question rather than a plan. Choosing
-between the two bindings, or building a template for the locale libraries, needs
-a machine where the thing runs.
+**That paragraph used to say this could not be settled here, and it was a
+misreading.** No case calls `make_locale`: 196 of them call `do_make_locale`,
+which is a function in `init.sh` that calls the `make_locale.sh` this machine
+has. The count that said otherwise came from a pattern that matched the tail of
+the longer name. What is true is that `make_locale.sh` needs
+`cubrid_locales.txt` to name a locale, and 172 of the 206 cases copy
+`cubrid_locales.all.txt` over it first -- so the thing runs, and its cost is
+measurable here.
 
-*What this is not.* Not overlayfs -- there is nothing to stack when the writable
-set is four directories. Not a copy of the install -- 321 MB a slot to isolate
-76 KB. The namespace is doing the work that copying would otherwise do, and it
-is available only because B-T2 exists.
+**And the writable set was wrong as well.** `make_locale.sh` builds into
+`$CUBRID/locales/loclib/` and *then* moves the result to `$CUBRID/lib/`. This
+entry named only the second. Both are per-slot, and the first is 12 KB.
+
+*What this turned out to be: overlayfs after all.* This entry ruled it out on
+the grounds that there was nothing to stack when the writable set was four
+directories. The set was five, one of them 241 MB, and the list had already been
+wrong once -- so the argument was resting on a list that could not be trusted to
+stay right. Unprivileged overlayfs works inside the runner's user namespace,
+measured, and it needs no list: the install is a shared lower layer and whatever
+a slot writes anywhere under `$CUBRID` lands in its own upper.
+
+Reading through it costs nothing that can be measured -- executing a binary,
+reading a large file and listing a directory all come out the same on the
+overlay as off it, because an unmodified file is opened straight through to the
+lower layer. The one cost is the first write to a file, which copies it up:
+6.8 ms for `cubrid.conf`, 0.1 ms for every write after. And N slots sharing one
+lower layer share its page cache, which N copies would not.
 
 *Where it lands.* `contain` currently re-executes the runner once, for the whole
 process. A slot needs the same thing per worker, so `contain` grows the ability

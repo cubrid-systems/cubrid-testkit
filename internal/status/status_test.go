@@ -661,3 +661,22 @@ func TestTheMachinePanelReportsRealNumbers(t *testing.T) {
 		t.Errorf("a negative disk rate: %+v", m)
 	}
 }
+
+// The page names a case from its family down. "The last two segments" was right
+// only while the scenario root was _01_utility, and it silently dropped the
+// family the moment the whole corpus was run -- _06_issues/_14_1h/bug_bts_12352
+// rendered as "_14_1h/bug_bts_12352", and a sub-family on its own says nothing
+// about which family it is in. The rule is in the page's script; this pins the
+// convention it depends on.
+func TestFamilyOfFindsTheFamilyAtAnyDepth(t *testing.T) {
+	for in, want := range map[string]string{
+		"/x/shell/_06_issues/_14_1h/bug_bts_12352/cases/bug_bts_12352.sh": "_06_issues",
+		"/x/scenario/_38_csql/csql2/cases/csql2.sh":                       "_38_csql",
+		"/x/shell/_01_utility/_16_restoredb/itrack_10001/cases/i.sh":      "_01_utility",
+		"/no/family/here/cases/x.sh":                                      "(other)",
+	} {
+		if got := familyOf(in); got != want {
+			t.Errorf("familyOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

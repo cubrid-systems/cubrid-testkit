@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -125,18 +126,53 @@ func Setup() error {
 		return fmt.Errorf("mount /proc: %w", err)
 	}
 
-	// ShellEnv exists for machines this suite was never meant to run on. The
-	// shell task has always required a bash-compatible /bin/sh -- CTP's own
-	// unittest plug-in is written with `function init { }` and sources files --
-	// and on distributions where /bin/sh is dash every case dies on init.sh's
-	// first line. A QA machine does not need this; a developer's laptop does,
-	// and containment is what took away the ability to arrange it outside.
-	if sh := os.Getenv(ShellEnv); sh != "" {
+	// A bash-compatible /bin/sh, inside this namespace only.
+	//
+	// The shell task has always required one: CTP's init.sh line 51 is
+	// `function get_os(){`, its unittest plug-in is written with
+	// `function init { }` and sources files, and on a distribution where
+	// /bin/sh is dash every case dies on init.sh's first line and reports a
+	// blank result. Measured: CTP run on this machine outside the bind failed
+	// all seventeen cases that way, and every one of them was
+	// "Syntax error: \"(\" unexpected".
+	//
+	// It is a default rather than a setting because the requirement is not
+	// optional and the machine is not asked to change: the bind lives in this
+	// run's mount namespace and nothing outside it sees a different /bin/sh.
+	// ShellEnv still overrides, for a machine whose bash-compatible shell is
+	// somewhere else or is called something else.
+	if sh := shellForSh(); sh != "" {
 		if err := syscall.Mount(sh, "/bin/sh", "", syscall.MS_BIND, ""); err != nil {
 			return fmt.Errorf("bind %s over /bin/sh: %w", sh, err)
 		}
 	}
 	return nil
+}
+
+// shellForSh is what should be bound over /bin/sh, or "" for leaving it alone.
+//
+// Nothing is bound when /bin/sh already resolves to the same file -- which is
+// every QA machine, so the common case does no work and the mount table stays
+// as it was. And nothing is bound when no bash can be found: a machine whose sh
+// is ksh runs this suite fine, and failing the run there would be worse than
+// letting a case report the real error.
+func shellForSh() string {
+	want := os.Getenv(ShellEnv)
+	if want == "" {
+		found, err := exec.LookPath(Shell)
+		if err != nil {
+			return ""
+		}
+		want = found
+	}
+	wantReal, err := filepath.EvalSymlinks(want)
+	if err != nil {
+		return ""
+	}
+	if shReal, err := filepath.EvalSymlinks("/bin/sh"); err == nil && shReal == wantReal {
+		return ""
+	}
+	return want
 }
 
 // Reap collects orphans for as long as the process runs.

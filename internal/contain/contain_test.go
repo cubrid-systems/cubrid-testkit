@@ -3,6 +3,7 @@ package contain
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -166,5 +167,51 @@ func TestInsideSaysWhoTheProcessesActuallyAre(t *testing.T) {
 	// live, and they belong to the user outside.
 	if home != 1 {
 		t.Error("HOME was changed; it points at directories the run shares with the machine")
+	}
+}
+
+// The bind over /bin/sh is a default rather than a setting, because the
+// requirement is not optional: CTP's init.sh line 51 is `function get_os(){`,
+// and where /bin/sh is dash every case dies on the first line with
+// "Syntax error: \"(\" unexpected". But it must do nothing on the machines that
+// already have it right, which is every QA machine.
+func TestTheShellBindDoesNothingWhenShIsAlreadyRight(t *testing.T) {
+	t.Setenv(ShellEnv, "/bin/sh")
+	if got := shellForSh(); got != "" {
+		t.Errorf("shellForSh() = %q; /bin/sh is already itself, so there is nothing to bind", got)
+	}
+}
+
+// An explicit setting still wins, for a machine whose bash-compatible shell is
+// somewhere else or is called something else.
+func TestTheShellBindHonoursTheSetting(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("no bash on this machine")
+	}
+	t.Setenv(ShellEnv, bash)
+	got := shellForSh()
+	sh, shErr := filepath.EvalSymlinks("/bin/sh")
+	want, wantErr := filepath.EvalSymlinks(bash)
+	if shErr == nil && wantErr == nil && sh == want {
+		// /bin/sh is bash here, so nothing to do.
+		if got != "" {
+			t.Errorf("shellForSh() = %q where /bin/sh is already bash", got)
+		}
+		return
+	}
+	if got != bash {
+		t.Errorf("shellForSh() = %q, want %q", got, bash)
+	}
+}
+
+// A machine with no bash is left alone rather than failed: its sh may be ksh,
+// which runs this suite, and failing the run would be worse than letting a case
+// report the real error.
+func TestNoBashLeavesShAlone(t *testing.T) {
+	t.Setenv(ShellEnv, "")
+	t.Setenv("PATH", t.TempDir())
+	if got := shellForSh(); got != "" {
+		t.Errorf("shellForSh() = %q with no bash on PATH", got)
 	}
 }

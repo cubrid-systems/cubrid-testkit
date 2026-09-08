@@ -52,6 +52,64 @@ go test ./... -count=1
 The tests under `internal/cli` are the frozen command line written down, so a failure there is a
 contract change rather than a broken refactor. CI runs gofmt, `go vet`, the tests and the build.
 
+## From `ctp.sh` to `testkit`
+
+The compatibility is not a promise made in prose; it is where the binary sits. The endpoint is that
+a QA machine keeps calling `bin/ctp.sh` and gets this runner, and nothing that reads the output can
+tell.
+
+**The shim is not in place yet.** `bin/ctp.sh` in `cubrid-testtools` is still the original, and it
+should stay that way until the corpus comparison clears — the gate is what earns the swap. Today you
+reach this runner by invoking it directly, which is what the comparison harness does when it runs
+both sides on the same shard. Everything below the shim is built and running; the diagram is the
+design ([`design/architecture.md`](docs/design/architecture.md)) with the top line marked as the
+part that is still ahead.
+
+```
+        what a QA machine runs                what actually happens
+                                              (── shim: not yet ──)
+        ──────────────────────                ─────────────────────
+        $ ctp.sh shell -c shell.conf   ──┐
+        $ ctp.sh unittest -c u.conf    ──┤    a shim: exec testkit "$@"
+        $ ctp.sh sql medium -c s.conf  ──┘              │
+                                                        ▼
+                                              ┌───────────────────┐
+                                              │  one registry     │   task name → runner
+                                              └─────────┬─────────┘
+                                        rewritten ──────┴────── not yet
+                                            │                     │
+                                    ┌───────▼──────┐      ┌───────▼────────┐
+                                    │ native (Go)  │      │ CTP, as a      │
+                                    │ shell·unittest│      │ subprocess     │
+                                    └───────┬──────┘      └───────┬────────┘
+                                            └──────────┬──────────┘
+                                                       ▼
+                                        the same files, the same stdout markers,
+                                        the same exit codes — the frozen surface
+```
+
+Three things follow, and they are the whole design.
+
+**The entry scripts stay.** `bin/ctp.sh` becomes a shim that hands its arguments over unchanged, so
+every Jenkins job, every `docker-entrypoint.sh`, every habit keeps working — no caller is edited and
+nothing has to be migrated on a schedule. The command line is already frozen and tested as such:
+`internal/cli` is that contract written down, which is what makes the eventual swap a one-line
+change rather than a negotiation.
+
+**A task is routed, not converted.** One registry turns a name into either a native runner or the
+legacy one, and the legacy path reproduces CTP's argv and environment byte for byte. `shell` and
+`unittest` run natively; the other twelve are handed to the original CTP.
+
+**The output belongs to neither.** Both paths write through the same result layer, because the
+surface is a property of the output rather than of whichever implementation ran
+([ADR-003](docs/adr/ADR-003-external-surface-freeze.md)). That is what lets a task move from one
+side to the other without anything downstream noticing — and what makes the equivalence gate
+meaningful, since it compares two runners' files rather than two runners' intentions.
+
+So the usage below is the usage `ctp.sh` has always had: same task names, same `-c`, same exit
+codes. `testkit` is what you type today; `ctp.sh` is what a machine will type, and the point of
+freezing the command line first is that the two are the same words.
+
 ## Using it
 
 ```
@@ -107,6 +165,114 @@ them: `dispatch_tc_ALL.txt` and `dispatch_tc_FIN_local.txt` (the cases found and
 and `summary_info`.
 
 ![Animated: a shell run checks the machine, finds the cases, runs each one after a process reset, judges the result file, and writes the verdicts down. Four real cases: three OK and one NOK. Every stage leaves a file that is part of the frozen surface.](docs/assets/anim-shell-run.svg)
+
+## The shell task in detail
+
+`shell` is the task this project has rewritten, and it is the one with options. What a run does, in
+order:
+
+```
+  check the machine      commands, variables, directories — once, so that a machine
+        │                that cannot run cases says so here rather than 3,444 times
+        ▼
+  prepare the workspace  the corpus as the conf points at it
+        │
+        ▼
+  find the cases         <scenario>/**/<name>/cases/<name>.sh, then the two exclusions
+        │
+        ▼
+  order them             longest first, if a plan from an earlier run is available
+        │
+        ▼
+  deploy                 the shell helpers CTP's cases source
+        │
+        ▼
+  run                    N slots pull from one queue ── for each case:
+        │                  reset processes → run it → check for more errors →
+        │                  read its .result → record the verdict
+        ▼
+  retries                only when nothing else is running
+        │
+        ▼
+  write everything down  the frozen files, and the durations for next time
+```
+
+### Configuration
+
+Everything is a key in the conf file `-c` points at. The first group is CTP's and behaves as it
+always did; the second is this runner's and is off unless set.
+
+| CTP's keys | default | |
+|---|---|---|
+| `scenario` | — | the corpus root. Required |
+| `test_category` | — | `shell` |
+| `testcase_retry_num` | `0` | attempts after the first failure |
+| `testcase_timeout_in_secs` | `0` | 0 is no timeout. CI uses 720 |
+| `testcase_exclude_by_macro` | — | skip any case whose text contains this. CI uses `LINUX_NOT_SUPPORTED`, which is 21 cases |
+| `testcase_exclude_from_file` | — | a file of path fragments to skip. CI uses the corpus's own `daily_regression_test_excluded_list_linux.conf`, which is 9 cases |
+| `testcase_workspace_dir` | — | where the corpus is prepared |
+| `test_continue_yn` | `false` | resume, skipping what already has a verdict |
+| `cubrid_db_charset` | `en_US` | passed to every `createdb` |
+| `enable_check_disk_space_yn` | `false` | check free space before each case |
+| `reserve_disk_space_size` | `2G` | how much that check demands |
+| `large_space_dir` | — | `$TEST_BIG_SPACE` for cases that need room |
+| `ignore_core_by_keywords` | — | core dumps to disregard |
+| `feedback_type` | — | `file` |
+
+| this runner's keys | default | |
+|---|---|---|
+| `parallel_slots` | `1` | how many cases run at once |
+| `scenario_ram_mb` | off | put the corpus behind an overlay whose upper layer is a tmpfs of this size |
+| `status_http` | off | serve the progress page |
+| `case_plan` | off | a file of per-case durations, read to order the run and written from what it measured |
+| `lane_slow_secs` | off | split the slots into a tmpfs lane and a disk lane at this duration |
+
+And the environment:
+
+| | |
+|---|---|
+| `TESTKIT_NATIVE_SHELL=1` | run `shell` here rather than handing it to CTP. The opt-in gate, until the corpus comparison clears |
+| `TESTKIT_CONTAIN=1` | put the run in namespaces of its own. Required by slots and by `scenario_ram_mb` |
+| `TESTKIT_CONTAIN_SH` | which shell to bind over `/bin/sh`; `bash` if it can be found |
+| `TESTKIT_SLOT_ROOT` | where per-slot overlays go. `/var/tmp/testkit-slots` |
+
+CTP's own environment still applies — `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` — and
+so do the shell suite's switches, `SKIP_CHECK_RECOVERY_ERROR`, `SKIP_CHECK_FATAL_ERROR` and
+`CTP_ERROR_BACKUP`.
+
+### Watching a run
+
+```bash
+# in the conf
+status_http=on              # 127.0.0.1:51523
+status_http=8123            # every interface, port 8123
+status_http=0.0.0.0:51523   # spelled out
+```
+
+```bash
+TESTKIT_CONTAIN=1 TESTKIT_NATIVE_SHELL=1 testkit shell -c shell.conf
+# [INFO] status page at http://127.0.0.1:51523/
+```
+
+Open it and the page says, once a second: how far the run is and how fast, which slot is on which
+case and for how long, how long cases take by duration bucket and where the seconds go, totals by
+family and by slot, what the machine is doing, and every failure so far. Nothing is written to
+standard output, because what the runner prints there is frozen and the comparison reads it — a
+screen drawn over it would be drawn over the evidence.
+
+**A finished run can be played back through the same page**, which is the only way to see the shape
+of one after it ends — which slots were busy together, where they went idle, which family owned the
+time:
+
+```bash
+testkit replay --speed 60 <result-dir-or-feedback.log>
+testkit replay --speed 3600 --http 8123 ~/CTP/result/shell/current_runtime_logs/feedback.log
+```
+
+Nothing is recorded for this. A run already writes the slot, the case, the verdict, the elapsed time
+and the wall clock each case finished at, into `feedback.log`, which every runner produces — so a
+replay works on runs that finished before the feature existed. The wall clock is compressed; the
+durations reported are the real ones.
 
 ## Running the shell suite in parallel
 
@@ -171,16 +337,79 @@ nothing at all. Lanes are for a machine where memory is the binding constraint; 
 not. The reasoning is in [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T12 and B-T13,
 including the numbers that contradict it.
 
-### Watching a run
+### What a slot is
 
-`status_http` serves one page, no dependencies, that answers what a log of ten workers cannot:
-which slot is stuck and on what. Per-slot progress with a held-slot rail, the completion rate,
-where the time goes by duration bucket, per-family and per-slot totals, a machine panel, a
-failed-only filter and sortable columns.
+A slot is not a process or a thread. It is a set of namespaces held open for the whole run, with a
+worker pulling cases through it:
 
-It is deliberately **not** on standard output. What the runner prints there is frozen
-([ADR-003](docs/adr/ADR-003-external-surface-freeze.md)) and the comparison that proves this system
-equivalent reads it, so a screen drawn over it would be drawn over the evidence.
+```
+  runner (its own user, mount, PID and IPC namespaces)
+    │
+    ├── the corpus, read-only, behind an overlay whose upper layer is a tmpfs
+    │
+    ├── slot0 ── namespaces: mount · PID · IPC · NET
+    │             ├── $CUBRID          an overlay of its own — writable, nothing copied
+    │             ├── $CUBRID_DATABASES  likewise: the registry is per slot
+    │             ├── /dev/shm         its own, so POSIX segments do not collide
+    │             ├── CUBRID_TMP       its own, so the master sockets do not collide
+    │             └── port 1523        its own, because the network namespace says so
+    │
+    ├── slot1 ── the same, and it cannot see any of slot0's
+    ⋮
+    └── slotN
+```
+
+**The network namespace is what makes a slot free.** Two slots would otherwise collide on the master
+port, the two broker ports, and whatever else a case starts. A namespace gives each of them the whole
+port space, so every slot runs on the shipped 1523 and **no configuration is rewritten** — which is
+the point, because a slotted run's conf files and log lines then stay byte-identical to a serial
+run's, and that is the evidence this project has to produce.
+
+The PID namespace matters for a different reason: CTP's reset selects processes with `ps`, and
+inside a slot `ps -e` *is* the slot. Without it a worker's reset kills every other slot's server —
+measured, and it is why the first slot cannot be left outside.
+
+Two things a slot does not get, on purpose. It shares `/tmp`, because cases are entitled to, and it
+shares the machine's hostname, because 126 cases read it.
+
+**A queue, not a partition.** All slots pull from one queue, so a slot that draws short cases keeps
+drawing; nothing is assigned up front. With durations from an earlier run the queue hands out the
+longest first, which is the same schedule as partitioning by rank beforehand without having to know
+how many slots there are.
+
+**And the corpus is shared but not written.** One overlay for the whole run, with the writes going to
+memory and a directory's writes dropped when its last case finishes. That is why fifteen directories
+holding more than one case matter: with lanes the overlay becomes per slot, and then the queue has
+to keep a directory's cases together. Without lanes there is one overlay and it does not arise.
+
+### Running it on your own machine
+
+```bash
+# once, to see what this machine can do
+CUBRID=/path/to/install tools/sizing.sh
+
+# then
+TESTKIT_CONTAIN=1 TESTKIT_NATIVE_SHELL=1 testkit shell -c shell.conf
+```
+
+with, in `shell.conf`:
+
+```
+parallel_slots=8
+scenario_ram_mb=14336
+case_plan=/path/to/plan          # written on the first run, read on the next
+status_http=on
+```
+
+No root, no container runtime, no configuration of the machine: the namespaces are unprivileged and
+the overlay is unprivileged, so this is a normal user running a normal binary. What it needs is
+`TESTKIT_CONTAIN=1` — without it there are no namespaces and slots refuse rather than colliding
+silently.
+
+**Where the numbers come from.** `tools/sizing.sh` reads the machine and the engine's own conf and
+says what bounds the slot count — memory, cores, disk — and what every figure rests on. It is
+deliberately arguable: an operator who disagrees with a number can see which measurement it came
+from.
 
 ## What it does
 

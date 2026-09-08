@@ -11,6 +11,7 @@ package exec
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -185,6 +186,26 @@ func (l *Local) RunWith(ctx context.Context, script string, wrap func(argv ...st
 	var exitErr *osexec.ExitError
 	if ok := asExit(err, &exitErr); ok {
 		res.ExitCode = exitErr.ExitCode()
+		return res, nil
+	}
+	// A command that starts a daemon leaves the daemon holding the pipe.
+	//
+	// cub_master, cub_broker and cub_server all outlive the shell that started
+	// them and inherit its stdout, so the shell exits, its output is complete,
+	// and Wait still blocks -- which is what WaitDelay is here to bound. But the
+	// error it then returns is not a failed case: the process exited on its own
+	// and ProcessState has its status. Reporting it as a runtime error threw the
+	// verdict away and failed the case whatever it had done.
+	//
+	// Measured: _36_cub_master/bug_xdbms40 and _40_broker/itrack03 both failed
+	// with "WaitDelay expired before I/O complete" and no verdict at all.
+	//
+	// A cancelled context is the other half of WaitDelay's job and still an
+	// error -- that is a case that would not stop, and Exited() is false for a
+	// process the cancel killed.
+	if errors.Is(err, osexec.ErrWaitDelay) && ctx.Err() == nil &&
+		cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		res.ExitCode = cmd.ProcessState.ExitCode()
 		return res, nil
 	}
 	return res, fmt.Errorf("local run: %w", err)

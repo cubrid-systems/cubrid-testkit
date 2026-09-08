@@ -605,6 +605,58 @@ easier to make now, while there is one runner, than after there are four.
 | First | decide whether the board is a library each runner serves or a place they report to. The rest follows from that, and it does not become cheaper to decide later |
 | Not yet | a history across runs. This is a window on a run in flight; what a run *was* is the result tree, and duplicating it here would make two answers to the same question |
 
+### B-T12. A corpus that is clean because it cannot be otherwise — **ready**
+
+| | |
+|---|---|
+| Improves on | T: nothing. Nobody put the 20 GB there on purpose |
+| Kind | **correctness first, then speed** |
+
+**The measurement that started this.** The `_01_utility` tree is 105 MB in git and
+**20 GB on this machine**, with 125 files over 10 MB in it -- `xdb_lgat`,
+`testdb_lgar_t`, database volumes from runs that ended weeks ago. Cases create
+their databases in their own directory and do not all delete them, and nothing
+puts the tree back. Every run since has been reading and writing over that, and
+**upstream's CI has the same tree and the same problem**.
+
+That is a correctness question before it is a speed one. A case that finds a
+database it did not create behaves differently from one that does not, and which
+of the two a run gets depends on what ran on that machine last.
+
+**An overlay makes clean structural rather than a step.** Lower layer is the tree
+as the repository has it, read-only and untouched; upper layer is where a run's
+writes go and is discarded when the run ends. There is nothing to remember to do
+and nothing to copy -- 105 MB is cheap to copy, but a copy is a step that can be
+skipped and an overlay is a property of how the run is mounted.
+
+**And the upper layer can be RAM, which is the same mechanism answering the
+speed question.** Measured: an overlay with a disk lower and a tmpfs upper reads
+the clean tree through, puts every write in memory, leaves the lower unchanged,
+and stops with `No space left on device` at the size it was given.
+
+That is the hybrid rather than a choice between disk and memory:
+
+| | where | why |
+|---|---|---|
+| the corpus | disk, read-only | 105 MB, page-cached, shared by every slot |
+| a run's writes | tmpfs upper | 8 slots at `log_volume_size=20M` is 1.7 GB; at the 512M default, 5.5 GB. 17 GB free |
+| the template store | disk | 10 GB, and it has to survive the run. Restoring then reads disk at **1.4 GB/s** -- four times the write speed -- into memory, which is the fastest arrangement available |
+
+**The size bound is the safety property.** The reason not to put everything in
+memory is a case that writes without cleaning up: on disk that accumulated 20 GB
+over weeks, in memory it would end the run. Capping the upper layer turns that
+from a run that dies into a case that fails with a full disk -- which is also a
+change in behaviour and has to be checked, because a case that tests running out
+of space now finds a different amount of it.
+
+**Where it goes and in what order.** In the runner's own namespace, before the
+slots are opened, so that they inherit one shared overlay: each case has its own
+directory, so there is nothing to isolate per slot, and mounting it per slot
+would be N tmpfs where one will do.
+
+| Evidence | wall clock and verdicts at one and eight slots, against the same corpus on disk. Two levers -- the volume size and the ramdisk -- measured separately, because a combined number cannot say which one paid |
+| Risk | `ENOSPC` where there was 141 GB free. Named rather than mitigated: the cap is a number to pick with the corpus in front of you, and the verdicts say whether it was picked right |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

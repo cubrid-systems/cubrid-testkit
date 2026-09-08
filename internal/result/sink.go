@@ -108,11 +108,30 @@ func (s *Sink) Core(path string) { fmt.Fprintf(s.stdout, "CORE_FILE:%s\n", path)
 
 // Worker appends to test_<envId>.log, the per-environment detail log.
 func (s *Sink) Worker(envID, line string) error {
+	return s.WorkerLines(envID, []string{line})
+}
+
+// WorkerLines appends lines to test_<envId>.log as one piece.
+//
+// A case's output is a block, and with slots there is more than one worker
+// writing it. Line at a time they interleave, and the first parallel run showed
+// exactly that: a [TESTCASE] header for one case followed by another case's
+// trace. The lock has to span the block rather than each line -- and the block
+// has to be the unit the caller hands over, which is why this exists rather
+// than a Lock/Unlock pair for a caller to get wrong.
+func (s *Sink) WorkerLines(envID string, lines []string) error {
 	f, err := s.file(s.workers, "test_"+envID+".log", true)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(f, line)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	_, err = io.WriteString(f, b.String())
 	return err
 }
 

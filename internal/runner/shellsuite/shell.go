@@ -132,18 +132,24 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	defer worker.Close()
 	defer monitor.Close()
 
-	// Slot 0 is the channel pair that has always existed, used exactly as it
-	// has always been used. Slots beyond it are the new thing, and they are
-	// the only ones that need a namespace -- so a run of one is not a run of
-	// N with N=1, it is the old path.
+	// One slot is the path there has always been: the pair opened above, used
+	// exactly as it always was, with no namespace anywhere.
+	//
+	// More than one and *every* slot needs a namespace, the first included.
+	// Leaving the first outside looks like it preserves the old behaviour and
+	// does the opposite: the reset matches process names with `ps -e`, and a
+	// worker outside the namespaces sees into all of them, so its sweep kills
+	// every other slot's server. Measured -- four slots produced a `ps -e -f`
+	// listing three keepers, two other slots' cases and another slot's
+	// cub_server, and then killed them.
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
 	if n := cfg.Int("parallel_slots", 1); n > 1 {
-		extra, closeSlots, err := openSlots(n-1, opener, machine)
+		slotted, closeSlots, err := openSlots(n, opener, machine)
 		if err != nil {
 			return quit("%v", err)
 		}
 		defer closeSlots()
-		pairs = append(pairs, extra...)
+		pairs = slotted
 	}
 
 	buildInfo, err := runIn(ctx, worker, versionScript)
@@ -308,7 +314,7 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 			ns.Close()
 		}
 	}
-	for i := 1; i <= n; i++ {
+	for i := 0; i < n; i++ {
 		label := fmt.Sprintf("slot%d", i)
 		ns, err := contain.Open(label)
 		if err != nil {

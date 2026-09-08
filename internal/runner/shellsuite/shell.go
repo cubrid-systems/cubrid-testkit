@@ -159,11 +159,13 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// Clean is then structural rather than a step. 105 MB is cheap to copy, but a
 	// copy is something that can be skipped and a mount is a property of how the
 	// run is mounted.
+	var ramDir string
 	if mb := cfg.Int("scenario_ram_mb", 0); mb > 0 {
-		release, err := ramOverlay(cfg.GetOr("scenario", ""), mb)
+		release, dir, err := ramOverlay(cfg.GetOr("scenario", ""), mb)
 		if err != nil {
 			return quit("%v", err)
 		}
+		ramDir = dir
 		defer release()
 		fmt.Printf("[INFO] the corpus is read-only for this run; its writes go to %d MB of memory\n", mb)
 	}
@@ -286,6 +288,9 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		}
 		defer stop()
 		fmt.Printf("[INFO] status page at http://%s/\n", where)
+		// The machine panel reports the two places that matter to this run
+		// rather than the root filesystem.
+		board.Watch(cfg.GetOr("scenario", ""), ramDir, cfg.Int("scenario_ram_mb", 0))
 	}
 
 	fmt.Println("STARTED")
@@ -346,16 +351,16 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 // dies into a case that fails for want of space -- which is itself a change in
 // behaviour, because a case that tests running out of space now finds a
 // different amount of it.
-func ramOverlay(dir string, mb int) (func(), error) {
+func ramOverlay(dir string, mb int) (func(), string, error) {
 	if dir == "" {
-		return nil, fmt.Errorf("scenario_ram_mb needs scenario to be set")
+		return nil, "", fmt.Errorf("scenario_ram_mb needs scenario to be set")
 	}
 	if !contain.Active() {
-		return nil, fmt.Errorf("scenario_ram_mb needs the runner contained; set %s=1", contain.Env)
+		return nil, "", fmt.Errorf("scenario_ram_mb needs the runner contained; set %s=1", contain.Env)
 	}
 	ram, err := os.MkdirTemp("", "testkit-corpus-*")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	run := func(script string) error {
 		out, err := osexec.Command(contain.Shell, "-c", script).CombinedOutput()
@@ -366,7 +371,7 @@ func ramOverlay(dir string, mb int) (func(), error) {
 	}
 	if err := run(fmt.Sprintf("mount -t tmpfs -o size=%dm corpus %s && mkdir -p %s/up %s/work",
 		mb, ram, ram, ram)); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	// The peak, and whether it ever reached the ceiling.
 	//
@@ -415,9 +420,9 @@ func ramOverlay(dir string, mb int) (func(), error) {
 		dir, ram, ram, dir)); err != nil {
 		_ = run("umount " + ram)
 		_ = os.Remove(ram)
-		return nil, err
+		return nil, "", err
 	}
-	return undo, nil
+	return undo, ram, nil
 }
 
 func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channel, error),

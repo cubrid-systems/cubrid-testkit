@@ -88,6 +88,20 @@ const page = `<!doctype html>
     padding:.02rem .35rem;border-radius:2px;text-align:center}
  .v.ok{color:var(--pass);background:rgba(99,179,137,.13)}
  .v.no{color:var(--fail);background:rgba(211,118,110,.15)}
+ .panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(20rem,1fr));gap:1.6rem;margin-bottom:2rem}
+ .panel{min-width:0}
+ table.kv td{border:0;padding:.15rem .9rem .15rem 0}
+ table.kv td:first-child{color:var(--ink-faint);width:9rem}
+ table.kv td.warn{color:var(--warn)}
+
+ /* The distribution is bars rather than a curve: the buckets are the shape,
+    and a reader wants to know how many cases sit in each rather than to read a
+    value off an axis. */
+ .hist{display:flex;flex-direction:column;gap:.18rem}
+ .hrow{display:flex;align-items:center;gap:.6rem}
+ .hrow span:first-child{width:5rem;text-align:right;color:var(--ink-faint);font-size:.72rem}
+ .hrow i{display:block;height:9px;background:var(--accent);opacity:.75;border-radius:1px;min-width:1px}
+ .hrow span:last-child{color:var(--ink-dim);font-size:.72rem}
  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -110,6 +124,34 @@ const page = `<!doctype html>
 </div>
 <div class=bar><i id=fill></i></div>
 
+<div class=panels>
+  <section class=panel>
+    <h2>machine</h2>
+    <table class=kv><tbody id=machine></tbody></table>
+  </section>
+  <section class=panel>
+    <h2>how long cases take</h2>
+    <div id=hist class=hist></div>
+  </section>
+</div>
+
+<div class=panels>
+  <section class=panel>
+    <h2>by family <span class=count>slowest first</span></h2>
+    <div class=scroll><table>
+      <thead><tr><th>family<th class=num>done<th class=num>nok<th class=num>total<th class=num>worst</tr></thead>
+      <tbody id=family></tbody>
+    </table></div>
+  </section>
+  <section class=panel>
+    <h2>by slot</h2>
+    <div class=scroll><table>
+      <thead><tr><th>slot<th class=num>done<th class=num>nok<th class=num>total<th class=num>worst</tr></thead>
+      <tbody id=slot></tbody>
+    </table></div>
+  </section>
+</div>
+
 <section>
   <h2>slots <span id=nslots style="letter-spacing:0;text-transform:none"></span></h2>
   <div class=scroll><table>
@@ -122,6 +164,10 @@ const page = `<!doctype html>
   <h2>finished
     <span class=seg role=group aria-label="which cases">
       <button id=fAll aria-pressed=true>recent</button><button id=fBad aria-pressed=false>failed</button>
+    </span>
+    <span class=seg role=group aria-label="how many">
+      <button class=nbtn data-n=10>10</button><button class=nbtn data-n=40 aria-pressed=true>40</button
+      ><button class=nbtn data-n=100>100</button><button class=nbtn data-n=0>all</button>
     </span>
     <span class=count id=fcount></span>
   </h2>
@@ -173,8 +219,17 @@ function spark(series, span) {
 // The table is either the tail of the run or its failures, and it is sorted by
 // what the reader picked -- both held across refreshes, or a list would reorder
 // itself under the pointer once a second.
-let showFailed = false, sortKey = null, sortDir = -1
+let showFailed = false, sortKey = null, sortDir = -1, showN = 40
 let lastView = null
+
+for (const b of document.querySelectorAll('.nbtn')) {
+  b.onclick = () => {
+    showN = +b.dataset.n
+    for (const o of document.querySelectorAll('.nbtn'))
+      o.setAttribute('aria-pressed', String(o === b))
+    if (lastView) draw(lastView)
+  }
+}
 
 function pick(failed) {
   showFailed = failed
@@ -202,11 +257,12 @@ for (const th of document.querySelectorAll('th.sortable')) {
 
 function draw(v) {
   const rows = (showFailed ? v.failed : v.recent) || []
-  const list = sortKey ? rows.slice().sort((a, b) =>
+  let list = sortKey ? rows.slice().sort((a, b) =>
     sortDir * (sortKey === 'took' ? a.took - b.took : short(a.case).localeCompare(short(b.case)))) : rows
-  $('fcount').textContent = showFailed
-    ? (v.failed || []).length + ' of ' + v.done
-    : 'last ' + Math.min(rows.length, 40)
+  if (showN) list = list.slice(0, showN)
+  $('fcount').textContent = (showFailed
+    ? (v.failed || []).length + ' failed of ' + v.done
+    : rows.length + ' kept') + (showN && rows.length > showN ? ', showing ' + showN : '')
   $('recent').innerHTML = list.length ? list.map(r =>
     '<tr><td class=slot>' + r.slot +
     '<td class=case title="' + r.case + '">' + short(r.case) +
@@ -238,8 +294,48 @@ async function tick() {
     '<td class=num>' + secs(s.held) + '</tr>').join('')
     : '<tr><td colspan=3 class=empty>' + (v.finished ? 'all slots idle' : 'waiting for the first case') + '</tr>'
 
+  machine(v.machine || {})
+  hist(v.hist || [], v.histEdge || [])
+  groups('family', v.family || [])
+  groups('slot', v.slot || [])
   lastView = v
   draw(v)
+}
+
+const gb = mb => mb >= 1024 ? (mb/1024).toFixed(1) + ' GB' : mb + ' MB'
+
+function machine(m) {
+  const rows = []
+  const hot = m.cores && m.load > m.cores
+  rows.push(['load', m.load == null ? '—' : m.load.toFixed(2) + ' of ' + m.cores + ' cores', hot])
+  if (m.memAll) rows.push(['memory', gb(m.memUsed) + ' of ' + gb(m.memAll),
+                           m.memUsed > m.memAll * 0.9])
+  if (m.ramCap) rows.push(['corpus in memory', gb(m.ram) + ' of ' + gb(m.ramCap),
+                           m.ram > m.ramCap * 0.9])
+  if (m.corpus) rows.push(['disk free', gb(m.corpus), m.corpus < 5120])
+  $('machine').innerHTML = rows.map(([k, val, warn]) =>
+    '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + val + '</tr>').join('')
+}
+
+function hist(h, edges) {
+  const max = Math.max(1, ...h)
+  const label = i => i === 0 ? '< ' + edges[0] + 's'
+    : i < edges.length ? edges[i-1] + '–' + edges[i] + 's'
+    : '> ' + edges[edges.length-1] + 's'
+  $('hist').innerHTML = h.map((n, i) =>
+    '<div class=hrow><span>' + label(i) + '</span>' +
+    '<i style="width:' + (100 * n / max) + '%"></i>' +
+    '<span>' + (n || '') + '</span></div>').join('')
+}
+
+function groups(id, gs) {
+  $(id).innerHTML = gs.length ? gs.map(g =>
+    '<tr><td class=case title="' + g.name + '">' + g.name +
+    '<td class=num>' + g.done +
+    '<td class=num>' + (g.nok ? '<span class="v no">' + g.nok + '</span>' : '') +
+    '<td class=num>' + secs(g.secs) +
+    '<td class=num>' + secs(g.max) + '</tr>').join('')
+    : '<tr><td colspan=5 class=empty>nothing yet</tr>'
 }
 tick(); setInterval(tick, 1000)
 </script>

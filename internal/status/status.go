@@ -16,9 +16,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -74,7 +78,34 @@ type Board struct {
 	// long case until you see the rate go flat.
 	buckets []int
 	bucket0 time.Time
+	// hist counts completions by how long they took, and byFamily and bySlot
+	// aggregate them. All three are counters rather than lists: a corpus of
+	// 3,452 cases should not be held twice so that a page can add it up.
+	// corpusDir and ramDir are what the machine panel reports free space for,
+	// set by the runner when it knows them.
+	corpusDir string
+	ramDir    string
+	ramCap    int
+
+	hist     []int
+	byFamily map[string]*tally
+	bySlot   map[string]*tally
 }
+
+// tally is what is known about a group of cases without keeping the cases.
+type tally struct {
+	Done int
+	OK   int
+	Secs int
+	Max  int
+}
+
+// histEdges are the upper bounds of the duration buckets, in seconds. Chosen
+// from the corpus rather than round numbers: the median is 11 s, the fixed cost
+// of createdb, start, stop and delete is about 2.6, and the longest case
+// measured is 227 -- so the interesting detail is between 2 and 30, and above
+// 120 all that matters is that something is there.
+var histEdges = []int{2, 5, 10, 20, 30, 60, 120, 300}
 
 // bucketSpan is the resolution of the rate. Ten seconds is short enough that a
 // stall shows within one screen refresh and long enough that a single case
@@ -107,7 +138,9 @@ const recentMax = 40
 const failedMax = 500
 
 func New(total int) *Board {
-	return &Board{started: time.Now(), total: total, running: map[string]inflight{}}
+	return &Board{started: time.Now(), total: total, running: map[string]inflight{},
+		hist:     make([]int, len(histEdges)+1),
+		byFamily: map[string]*tally{}, bySlot: map[string]*tally{}}
 }
 
 func (b *Board) Begin(slot, name string) {
@@ -144,7 +177,45 @@ func (b *Board) End(slot, name string, ok bool) {
 			b.failed = b.failed[len(b.failed)-failedMax:]
 		}
 	}
+	secs := int(took.Seconds())
+	b.hist[bucketOf(secs)]++
+	for key, m := range map[string]map[string]*tally{familyOf(name): b.byFamily, slot: b.bySlot} {
+		t := m[key]
+		if t == nil {
+			t = &tally{}
+			m[key] = t
+		}
+		t.Done++
+		t.Secs += secs
+		if ok {
+			t.OK++
+		}
+		if secs > t.Max {
+			t.Max = secs
+		}
+	}
 	b.count(time.Now())
+}
+
+func bucketOf(secs int) int {
+	for i, e := range histEdges {
+		if secs < e {
+			return i
+		}
+	}
+	return len(histEdges)
+}
+
+// familyOf is the corpus's own grouping: the first path segment named the way
+// the families are, _NN_something. A case two levels down -- _06_issues/_11_1h
+// -- counts under the family, because that is the unit anyone asks about.
+func familyOf(path string) string {
+	for _, seg := range strings.Split(path, "/") {
+		if len(seg) > 3 && seg[0] == '_' && seg[1] >= '0' && seg[1] <= '9' {
+			return seg
+		}
+	}
+	return "(other)"
 }
 
 // count puts one completion in its bucket, filling the empty buckets in
@@ -167,24 +238,53 @@ func (b *Board) count(at time.Time) {
 }
 
 type view struct {
-	Total    int        `json:"total"`
-	Done     int        `json:"done"`
-	OK       int        `json:"ok"`
-	NOK      int        `json:"nok"`
-	Elapsed  int        `json:"elapsed"`
-	Remain   int        `json:"remain"`
-	Slots    []slotView `json:"slots"`
-	Recent   []doneView `json:"recent"`
-	Failed   []doneView `json:"failed"`
-	Rate     []int      `json:"rate"`
-	RateSpan int        `json:"rateSpan"`
-	Finished bool       `json:"finished"`
+	Total    int         `json:"total"`
+	Done     int         `json:"done"`
+	OK       int         `json:"ok"`
+	NOK      int         `json:"nok"`
+	Elapsed  int         `json:"elapsed"`
+	Remain   int         `json:"remain"`
+	Slots    []slotView  `json:"slots"`
+	Recent   []doneView  `json:"recent"`
+	Failed   []doneView  `json:"failed"`
+	Rate     []int       `json:"rate"`
+	RateSpan int         `json:"rateSpan"`
+	Hist     []int       `json:"hist"`
+	HistEdge []int       `json:"histEdge"`
+	Family   []groupView `json:"family"`
+	Slot     []groupView `json:"slot"`
+	Machine  machineView `json:"machine"`
+	Finished bool        `json:"finished"`
 }
 
 type slotView struct {
 	Slot string `json:"slot"`
 	Case string `json:"case"`
 	Held int    `json:"held"`
+}
+
+// groupView is a family or a slot, added up.
+type groupView struct {
+	Name string `json:"name"`
+	Done int    `json:"done"`
+	OK   int    `json:"ok"`
+	NOK  int    `json:"nok"`
+	Secs int    `json:"secs"`
+	Max  int    `json:"max"`
+}
+
+// machineView is what the run is competing for. Everything this project has
+// measured about parallelism is a resource question, and none of it was visible
+// while a run was going: a slot holding a case for four minutes reads the same
+// whether it is waiting on a lock or on a disk with nothing left to give.
+type machineView struct {
+	Load    float64 `json:"load"`
+	Cores   int     `json:"cores"`
+	MemUsed int     `json:"memUsed"`
+	MemAll  int     `json:"memAll"`
+	Corpus  int     `json:"corpus"`
+	Ram     int     `json:"ram"`
+	RamCap  int     `json:"ramCap"`
 }
 
 type doneView struct {
@@ -228,6 +328,11 @@ func (b *Board) snapshot() view {
 	}
 	v.Rate = append([]int(nil), b.buckets...)
 	v.RateSpan = int(bucketSpan.Seconds())
+	v.Hist = append([]int(nil), b.hist...)
+	v.HistEdge = append([]int(nil), histEdges...)
+	v.Family = groups(b.byFamily)
+	v.Slot = groups(b.bySlot)
+	v.Machine = machine(b.corpusDir, b.ramDir, b.ramCap)
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]
 		v.Recent = append(v.Recent, doneView{
@@ -261,4 +366,83 @@ func (b *Board) Serve(addr string) (string, func(), error) {
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
 	return ln.Addr().String(), func() { _ = srv.Close() }, nil
+}
+
+// Watch tells the board where the run's disk and memory actually are, so the
+// machine panel reports the two that matter rather than the root filesystem.
+func (b *Board) Watch(corpusDir, ramDir string, ramCapMB int) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.corpusDir, b.ramDir, b.ramCap = corpusDir, ramDir, ramCapMB
+}
+
+// groups sorts the tallies slowest-first: the question is which family or slot
+// is costing the run, and an alphabetical list does not answer it.
+func groups(m map[string]*tally) []groupView {
+	out := make([]groupView, 0, len(m))
+	for name, t := range m {
+		out = append(out, groupView{
+			Name: name, Done: t.Done, OK: t.OK, NOK: t.Done - t.OK,
+			Secs: t.Secs, Max: t.Max,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Secs > out[j].Secs })
+	return out
+}
+
+// machine reads what the run is competing for. Straight from /proc every time
+// the page asks, once a second, because caching a number this cheap would be
+// one more thing that can be stale.
+func machine(corpusDir, ramDir string, ramCap int) machineView {
+	v := machineView{Cores: runtime.NumCPU(), RamCap: ramCap}
+	if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+		if f := strings.Fields(string(b)); len(f) > 0 {
+			v.Load, _ = strconv.ParseFloat(f[0], 64)
+		}
+	}
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		var total, avail int
+		for _, line := range strings.Split(string(b), "\n") {
+			f := strings.Fields(line)
+			if len(f) < 2 {
+				continue
+			}
+			n, _ := strconv.Atoi(f[1])
+			switch f[0] {
+			case "MemTotal:":
+				total = n / 1024
+			case "MemAvailable:":
+				avail = n / 1024
+			}
+		}
+		v.MemAll, v.MemUsed = total, total-avail
+	}
+	v.Corpus = freeMB(corpusDir)
+	v.Ram = usedMB(ramDir)
+	return v
+}
+
+func freeMB(dir string) int {
+	if dir == "" {
+		return 0
+	}
+	var st syscall.Statfs_t
+	if syscall.Statfs(dir, &st) != nil {
+		return 0
+	}
+	return int(uint64(st.Bavail) * uint64(st.Bsize) / (1 << 20))
+}
+
+func usedMB(dir string) int {
+	if dir == "" {
+		return 0
+	}
+	var st syscall.Statfs_t
+	if syscall.Statfs(dir, &st) != nil {
+		return 0
+	}
+	return int((uint64(st.Blocks) - uint64(st.Bavail)) * uint64(st.Bsize) / (1 << 20))
 }

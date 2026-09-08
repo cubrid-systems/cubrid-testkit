@@ -346,3 +346,39 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
+
+// Include exists for the loop a fix goes round: a run leaves failures, the
+// engine is rebuilt, and the question is whether those cases pass now -- not
+// whether the other 3,400 still do, which takes two hours and answers something
+// else.
+func TestIncludeKeepsOnlyWhatIsNamed(t *testing.T) {
+	cases := []string{
+		"/run/shell/_06_issues/_11_1h/bug_bts_4823/cases/bug_bts_4823.sh",
+		"/run/shell/_06_issues/_11_1h/bug_bts_4824/cases/bug_bts_4824.sh",
+		"/run/shell/_01_utility/_38_csql/csql2/cases/csql2.sh",
+	}
+	kept, dropped := Include(cases, ParseExcluded(
+		"_06_issues/_11_1h/bug_bts_4823/cases/bug_bts_4823.sh\n_01_utility/_38_csql/csql2\n"))
+	if len(kept) != 2 || len(dropped) != 1 {
+		t.Fatalf("kept %d dropped %d: %v", len(kept), len(dropped), kept)
+	}
+	// The trailing slash ParseExcluded adds is what stops 4823 selecting 4824.
+	for _, c := range kept {
+		if strings.Contains(c, "4824") {
+			t.Errorf("a longer name that merely starts the same was selected: %s", c)
+		}
+	}
+
+	// The point of matching on a fragment: a list written against one scenario
+	// root still selects under another, which is what makes it work when the
+	// corpus has moved and the engine is a different build.
+	elsewhere := []string{"/somewhere/else/_01_utility/_38_csql/csql2/cases/csql2.sh"}
+	if kept, _ := Include(elsewhere, ParseExcluded("_01_utility/_38_csql/csql2\n")); len(kept) != 1 {
+		t.Error("a list from one root did not select the same case under another")
+	}
+
+	// No patterns is not "select nothing": it is "this filter is off".
+	if kept, _ := Include(cases, nil); len(kept) != 3 {
+		t.Errorf("an empty pattern list dropped cases: %d kept", len(kept))
+	}
+}

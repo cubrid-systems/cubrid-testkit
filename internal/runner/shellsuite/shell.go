@@ -253,7 +253,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// comparison reads it, so a screen drawn over it would be drawn over the
 	// evidence.
 	var board *status.Board
-	if addr := cfg.GetOr("status_http", ""); addr != "" {
+	if addr := status.Addr(cfg.GetOr("status_http", "")); addr != "" {
 		board = status.New(len(cases))
 		where, stop, err := board.Serve(addr)
 		if err != nil {

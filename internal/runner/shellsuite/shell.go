@@ -159,20 +159,66 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// copy is something that can be skipped and a mount is a property of how the
 	// run is mounted.
 
+	// Lanes need three things known before a slot exists: the durations, the
+	// slot count, and whether the corpus is behind an overlay at all -- so the
+	// plan is read here rather than where the case list arrives.
+	planPath := strings.TrimSpace(cfg.GetOr("case_plan", ""))
+	record := plan.NewRecord()
+	var known map[string]time.Duration
+	if planPath != "" {
+		k, err := plan.Read(planPath)
+		if err != nil {
+			return quit("cannot read case_plan %s: %v", planPath, err)
+		}
+		known = k
+	}
+	slowSecs := cfg.Int("lane_slow_secs", 0)
+	slots := cfg.Int("parallel_slots", 1)
+	ramMB := cfg.Int("scenario_ram_mb", 0)
+	if slowSecs > 0 && ramMB <= 0 {
+		return quit("lane_slow_secs needs scenario_ram_mb: a fast lane is a lane whose writes go to memory")
+	}
+
 	var corpus *Corpus
-	if mb := cfg.Int("scenario_ram_mb", 0); mb > 0 {
-		c, err := OpenCorpus(cfg.GetOr("scenario", ""), mb)
+	var split laneSplit
+	if ramMB > 0 {
+		if slowSecs > 0 {
+			// Decided here, before a slot exists, because a slot's lane decides
+			// where its overlay's upper layer goes. The plan's own keys are the
+			// case list it needs: a plan is the previous run's case list with a
+			// duration against each entry, so no discovery is required to know
+			// which directories are slow.
+			measured := make([]string, 0, len(known))
+			for c := range known {
+				measured = append(measured, c)
+			}
+			sp, err := planLanes(measured, known, slowSecs, slots)
+			if err != nil {
+				return quit("%v", err)
+			}
+			if !sp.on() {
+				return quit("lane_slow_secs=%d selects no case in %s; nothing would run in the slow lane",
+					slowSecs, planPath)
+			}
+			split = sp
+		}
+		c, err := OpenCorpus(cfg.GetOr("scenario", ""), ramMB, slowSecs > 0)
 		if err != nil {
 			return quit("%v", err)
 		}
 		corpus = c
 		defer corpus.Close()
-		fmt.Printf("[INFO] the corpus is read-only for this run; its writes go to %d MB of memory\n", mb)
+		if slowSecs > 0 {
+			fmt.Printf("[INFO] the corpus is read-only for this run; the fast lane's writes go to %d MB of memory and the slow lane's to disk\n", ramMB)
+		} else {
+			fmt.Printf("[INFO] the corpus is read-only for this run; its writes go to %d MB of memory\n", ramMB)
+		}
 	}
 
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
-	if n := cfg.Int("parallel_slots", 1); n > 1 {
-		slotted, closeSlots, err := openSlots(n, opener, machine)
+	if slots > 1 {
+		slotted, closeSlots, err := openSlots(slots, opener, machine, corpus,
+			cfg.GetOr("scenario", ""), split)
 		if err != nil {
 			return quit("%v", err)
 		}
@@ -272,13 +318,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// Off unless case_plan names a file, because it changes the order cases are
 	// handed out in -- and a run that did not ask for that keeps the corpus
 	// order it has always had.
-	planPath := strings.TrimSpace(cfg.GetOr("case_plan", ""))
-	record := plan.NewRecord()
 	if planPath != "" {
-		known, err := plan.Read(planPath)
-		if err != nil {
-			return quit("cannot read case_plan %s: %v", planPath, err)
-		}
 		if len(known) > 0 {
 			cases = plan.Order(cases, known)
 			fmt.Printf("[INFO] cases ordered longest-first from %s (%d of %d measured)\n",
@@ -298,6 +338,15 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// ---- test ------------------------------------------------------------
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, cfg.Int("testcase_retry_num", 0))
+	if split.on() {
+		// A directory this corpus has and the plan did not mention takes the
+		// fast lane, which planLanes already decided by omission.
+		queue.Assign(split.byDir)
+		fmt.Println(split.describe(slowSecs))
+		for _, line := range split.slowest(known, cases, 5) {
+			fmt.Printf("[INFO]   slow lane: %s\n", line)
+		}
+	}
 
 	// The page is off unless a port is named. It is not on standard output on
 	// purpose: what the runner prints there is frozen (ADR-003) and the
@@ -318,7 +367,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	}
 
 	fmt.Println("STARTED")
-	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record)
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split)
 
 	if planPath != "" {
 		if werr := record.Write(planPath); werr != nil {
@@ -374,7 +423,8 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 // Nothing is reconfigured, which is the point. A slotted run's conf files and
 // log lines are the ones a serial run produces.
 func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channel, error),
-	machine *topology.Instance) ([]channelPair, func(), error) {
+	machine *topology.Instance, corpus *Corpus, corpusDir string,
+	split laneSplit) ([]channelPair, func(), error) {
 
 	if !contain.Active() {
 		return nil, nil, fmt.Errorf("parallel_slots needs the runner contained; set %s=1", contain.Env)
@@ -407,6 +457,32 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 				continue
 			}
 			if err := ns.Overlay(dir, filepath.Join(root, label, filepath.Base(dir))); err != nil {
+				closeAll()
+				return nil, nil, err
+			}
+		}
+		// With lanes, the corpus overlay is this slot's rather than the run's, and
+		// where its upper layer sits is what the lane means: memory for the fast
+		// lane, disk for the slow one. Mounted here, inside the slot, because
+		// mounted once before the slots there is only one place for it to be.
+		if split.on() {
+			if corpus == nil {
+				closeAll()
+				return nil, nil, fmt.Errorf("lanes need a corpus overlay; scenario_ram_mb is unset")
+			}
+			onRAM := split.laneOf(i) == dispatch.LaneFast
+			upperRoot, err := corpus.Slot(label, onRAM, func(script string) error {
+				out, err := ns.Channel("").Run(context.Background(), script)
+				if err != nil {
+					return fmt.Errorf("%s: %w: %s", label, err, strings.TrimSpace(out.Output()))
+				}
+				return nil
+			})
+			if err != nil {
+				closeAll()
+				return nil, nil, err
+			}
+			if err := ns.Overlay(corpusDir, upperRoot); err != nil {
 				closeAll()
 				return nil, nil, err
 			}
@@ -611,7 +687,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record) error {
+	record *plan.Record, split laneSplit) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -620,7 +696,8 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 		go func(i int, pair channelPair) {
 			defer wg.Done()
 			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg,
-				buildID, bits, local, board, corpus, record, fmt.Sprintf("slot%d", i))
+				buildID, bits, local, board, corpus, record, split.laneOf(i),
+				fmt.Sprintf("slot%d", i))
 		}(i, pair)
 	}
 	wg.Wait()
@@ -644,18 +721,20 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, slotID string) error {
+	record *plan.Record, lane dispatch.Lane, slotID string) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
-	// Which lane this slot is in: where its corpus writes land. One lane today,
-	// because the overlay is mounted once for every slot -- the page says "ram,
-	// 8 slots" rather than a split, and that is the honest reading of what the
-	// run is doing. The split is B-T13.
-	lane := "disk"
-	if corpus != nil {
-		lane = "ram"
+	// Which lane this slot is in: where its corpus writes land. With lanes off
+	// every slot is in the same one, named for where the run's writes go, which
+	// is the honest reading of what it is doing.
+	name := lane.String()
+	if name == "" {
+		name = "disk"
+		if corpus != nil {
+			name = "ram"
+		}
 	}
-	board.Lane(slotID, lane)
+	board.Lane(slotID, name)
 	ssh := machine.SSH()
 	w := &Worker{
 		EnvID:     machine.EnvID(),
@@ -663,6 +742,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 		Board:     board,
 		Corpus:    corpus,
 		Plan:      record,
+		LaneID:    lane,
 		Contained: contain.Active(),
 		Channel:   workerCh,
 		Queue:     queue,

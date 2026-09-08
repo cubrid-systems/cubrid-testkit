@@ -17,6 +17,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
+	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
 )
 
@@ -246,8 +247,24 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// ---- test ------------------------------------------------------------
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, cfg.Int("testcase_retry_num", 0))
+
+	// The page is off unless a port is named. It is not on standard output on
+	// purpose: what the runner prints there is frozen (ADR-003) and the
+	// comparison reads it, so a screen drawn over it would be drawn over the
+	// evidence.
+	var board *status.Board
+	if addr := cfg.GetOr("status_http", ""); addr != "" {
+		board = status.New(len(cases))
+		where, stop, err := board.Serve(addr)
+		if err != nil {
+			return quit("%v", err)
+		}
+		defer stop()
+		fmt.Printf("[INFO] status page at http://%s/\n", where)
+	}
+
 	fmt.Println("STARTED")
-	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local)
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board)
 
 	report.TaskStop()
 
@@ -533,7 +550,7 @@ func (s *Shell) deploy(ctx context.Context, machine *topology.Instance,
 func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
-	buildID, bits string, local bool) error {
+	buildID, bits string, local bool, board *status.Board) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -541,7 +558,8 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 		wg.Add(1)
 		go func(i int, pair channelPair) {
 			defer wg.Done()
-			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg, buildID, bits, local)
+			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg,
+				buildID, bits, local, board, fmt.Sprintf("slot%d", i))
 		}(i, pair)
 	}
 	wg.Wait()
@@ -564,12 +582,14 @@ type channelPair struct {
 func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
-	buildID, bits string, local bool) error {
+	buildID, bits string, local bool, board *status.Board, slotID string) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
 	ssh := machine.SSH()
 	w := &Worker{
 		EnvID:     machine.EnvID(),
+		SlotID:    slotID,
+		Board:     board,
 		Contained: contain.Active(),
 		Channel:   workerCh,
 		Queue:     queue,

@@ -121,6 +121,13 @@ const Profile = `pri_ctp_home=$CTP_HOME; if  [ -f ~/.bash_profile ]; then . ~/.b
 const Shell = "bash"
 
 func (l *Local) Run(ctx context.Context, script string) (Result, error) {
+	return l.RunWith(ctx, script, nil)
+}
+
+// RunWith is Run with the command line handed to wrap first, so a caller can
+// put the script somewhere other than this process's own namespaces without
+// this package learning what a namespace is. nil means run it here.
+func (l *Local) RunWith(ctx context.Context, script string, wrap func(argv ...string) []string) (Result, error) {
 	f, err := os.CreateTemp("", ".testkit-exec-*.sh")
 	if err != nil {
 		return Result{}, fmt.Errorf("script file: %w", err)
@@ -139,7 +146,11 @@ func (l *Local) Run(ctx context.Context, script string) (Result, error) {
 		return Result{}, fmt.Errorf("script file: %w", err)
 	}
 
-	cmd := osexec.CommandContext(ctx, Shell, name)
+	argv := []string{Shell, name}
+	if wrap != nil {
+		argv = wrap(argv...)
+	}
+	cmd := osexec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = l.Dir
 	cmd.Env = l.Env
 

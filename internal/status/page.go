@@ -81,6 +81,11 @@ const page = `<!doctype html>
  th.sortable[aria-sort]:not([aria-sort=none]){color:var(--accent)}
  th .caret{opacity:.55;font-size:.85em}
  .count{letter-spacing:0;text-transform:none;color:var(--ink-faint)}
+ /* A finished run played back looks exactly like one happening now, and
+    mistaking the first for the second costs an afternoon. */
+ .replay{font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;
+   padding:.08rem .45rem;border-radius:2px;color:var(--warn);
+   border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}
 
  /* A slot that has held a case a long time is the thing this page exists to
     surface, so it is marked in shape as well as colour: the row gains a rail. */
@@ -124,6 +129,7 @@ const page = `<!doctype html>
 
 <header>
   <h1>testkit</h1>
+  <span id=replay class=replay hidden>replay</span>
   <span id=state>starting</span>
 </header>
 
@@ -314,6 +320,7 @@ async function tick() {
   $('elapsed').textContent = secs(v.elapsed)
   $('remain').textContent = v.finished ? '—' : (v.remain ? secs(v.remain) : '—')
   $('fill').style.width = (v.total ? 100*v.done/v.total : 0) + '%'
+  $('replay').hidden = !v.replaying
   $('state').textContent = v.finished ? 'finished' : (v.slots||[]).length + ' running'
   document.title = v.total ? v.done + '/' + v.total + ' testkit' : 'testkit run'
   spark(v.rate||[], v.rateSpan)

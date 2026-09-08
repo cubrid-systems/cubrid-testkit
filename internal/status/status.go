@@ -109,6 +109,11 @@ type Board struct {
 	// templates is the database-template cache, when a run uses one. Nil when it
 	// does not, which is every run that leaves CTP_DB_TEMPLATE_CACHE off.
 	templates *templates
+	// replaying says this board is playing a finished run back rather than
+	// watching one happen, and the page says so -- an old run and a live one look
+	// identical otherwise, and mistaking the first for the second is the kind of
+	// error that costs an afternoon.
+	replaying bool
 }
 
 // tally is what is known about a group of cases without keeping the cases.
@@ -210,6 +215,22 @@ func (b *Board) End(slot, name string, ok bool) {
 	if in, live := b.running[slot]; live {
 		took = time.Since(in.Since)
 	}
+	b.end(slot, name, ok, took)
+}
+
+// endWith is End with a duration supplied rather than measured, which is what a
+// replay needs: the wall clock is compressed but the durations reported are the
+// ones the run really had.
+func (b *Board) endWith(slot, name string, ok bool, took time.Duration) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.end(slot, name, ok, took)
+}
+
+func (b *Board) end(slot, name string, ok bool, took time.Duration) {
 	delete(b.running, slot)
 	b.done++
 	if ok {
@@ -314,6 +335,7 @@ type view struct {
 	Templates *templateView `json:"templates,omitempty"`
 	Machine   machineView   `json:"machine"`
 	Finished  bool          `json:"finished"`
+	Replaying bool          `json:"replaying,omitempty"`
 }
 
 type slotView struct {
@@ -377,8 +399,9 @@ func (b *Board) snapshot() view {
 	elapsed := time.Since(b.started)
 	v := view{
 		Total: b.total, Done: b.done, OK: b.ok, NOK: b.done - b.ok,
-		Elapsed:  int(elapsed.Seconds()),
-		Finished: b.done >= b.total && len(b.running) == 0,
+		Elapsed:   int(elapsed.Seconds()),
+		Finished:  b.done >= b.total && len(b.running) == 0,
+		Replaying: b.replaying,
 	}
 	// Remaining time from the rate so far. Wrong early and wrong for a corpus
 	// whose long cases are all at the end, which is the reason to order the

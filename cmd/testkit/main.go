@@ -15,9 +15,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -73,6 +75,14 @@ func run(args []string) int {
 	// (docs/concept/external-surface-freeze.md §1-4).
 	if len(args) > 0 && args[0] == "run-shell" {
 		return runShell(args[1:])
+	}
+
+	// replay is the third CLI tree, and it is new rather than inherited: CTP had
+	// nothing like it. It plays a finished run back through the status page, at a
+	// speed, from the feedback.log the run already wrote -- so it works on runs
+	// that finished before any of this existed.
+	if len(args) > 0 && args[0] == "replay" {
+		return replay(args[1:])
 	}
 
 	inv, err := cli.Parse(args)
@@ -307,4 +317,87 @@ func runShell(args []string) int {
 		return exitPreflight
 	}
 	return exitOK
+}
+
+const replayUsage = `usage: replay [OPTION] <feedback.log | result directory>
+
+Play a finished run back through the status page. The wall clock is compressed;
+the durations reported are the ones the run really had, so the histogram, the
+per-family totals and the finished table all say what actually happened.
+
+The input is a run's feedback.log, or a directory holding one -- a result tree,
+or its current_runtime_logs. Nothing was recorded for this: feedback.log already
+carries the slot, the case, the verdict, the elapsed time and the wall clock each
+case finished at, which is everything the page needs.
+
+options:
+  --speed N     times real time; default 60, so an hour plays in a minute
+  --http ADDR   where to serve; "on" or a bare port are accepted, as in shell.conf
+`
+
+func replay(args []string) int {
+	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	speed := fs.Float64("speed", 60, "")
+	addr := fs.String("http", "on", "")
+	help := fs.Bool("h", false, "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		fmt.Fprint(os.Stderr, replayUsage)
+		return exitPreflight
+	}
+	if *help || fs.NArg() == 0 {
+		fmt.Fprint(os.Stdout, replayUsage)
+		return exitOK
+	}
+
+	path, err := findFeedback(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		return exitPreflight
+	}
+	events, err := status.ParseFeedbackFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %s: %v\n", path, err)
+		return exitPreflight
+	}
+	where := status.Addr(*addr)
+	if where == "" {
+		where = status.DefaultAddr
+	}
+	stopPage, err := status.Replay(events, *speed, where, os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		return exitEnvironment
+	}
+	defer stopPage()
+	// The run is over but the page is the point, so it stays up until the user
+	// stops looking at it.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	return exitOK
+}
+
+// findFeedback accepts the log itself, a result tree, or anything above one.
+func findFeedback(arg string) (string, error) {
+	info, err := os.Stat(arg)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return arg, nil
+	}
+	for _, try := range []string{
+		"feedback.log",
+		"current_runtime_logs/feedback.log",
+		"shell/current_runtime_logs/feedback.log",
+		"result/shell/current_runtime_logs/feedback.log",
+	} {
+		p := filepath.Join(arg, try)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no feedback.log under %s", arg)
 }

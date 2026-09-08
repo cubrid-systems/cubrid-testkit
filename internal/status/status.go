@@ -368,15 +368,19 @@ func (b *Board) Serve(addr string) (string, func(), error) {
 	return ln.Addr().String(), func() { _ = srv.Close() }, nil
 }
 
-// Watch tells the board where the run's disk and memory actually are, so the
-// machine panel reports the two that matter rather than the root filesystem.
-func (b *Board) Watch(corpusDir, ramDir string, ramCapMB int) {
+// Watch tells the board where the run's disk and memory actually are.
+//
+// diskDir must not be the corpus directory once that has an overlay on it: a
+// statfs there answers for the upper layer, which is the tmpfs, so the panel
+// reported the same filesystem twice and called one of them disk. It is the
+// install instead, which is on the disk the run actually writes to.
+func (b *Board) Watch(diskDir, ramDir string, ramCapMB int) {
 	if b == nil {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.corpusDir, b.ramDir, b.ramCap = corpusDir, ramDir, ramCapMB
+	b.corpusDir, b.ramDir, b.ramCap = diskDir, ramDir, ramCapMB
 }
 
 // groups sorts the tallies slowest-first: the question is which family or slot

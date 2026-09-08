@@ -290,7 +290,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		fmt.Printf("[INFO] status page at http://%s/\n", where)
 		// The machine panel reports the two places that matter to this run
 		// rather than the root filesystem.
-		board.Watch(cfg.GetOr("scenario", ""), ramDir, cfg.Int("scenario_ram_mb", 0))
+		board.Watch(os.Getenv("CUBRID"), ramDir, cfg.Int("scenario_ram_mb", 0))
 	}
 
 	fmt.Println("STARTED")

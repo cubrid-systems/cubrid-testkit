@@ -310,9 +310,11 @@ function machine(m) {
   rows.push(['load', m.load == null ? '—' : m.load.toFixed(2) + ' of ' + m.cores + ' cores', hot])
   if (m.memAll) rows.push(['memory', gb(m.memUsed) + ' of ' + gb(m.memAll),
                            m.memUsed > m.memAll * 0.9])
+  // Shown even at zero. Zero is the value worth seeing, and hiding the row
+  // exactly then is what the first version of this did.
   if (m.ramCap) rows.push(['corpus in memory', gb(m.ram) + ' of ' + gb(m.ramCap),
                            m.ram > m.ramCap * 0.9])
-  if (m.corpus) rows.push(['disk free', gb(m.corpus), m.corpus < 5120])
+  rows.push(['disk free', m.corpus == null ? '—' : gb(m.corpus), m.corpus < 5120])
   $('machine').innerHTML = rows.map(([k, val, warn]) =>
     '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + val + '</tr>').join('')
 }

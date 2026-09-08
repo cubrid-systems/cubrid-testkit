@@ -430,6 +430,35 @@ Verdicts identical case by case, and the eight failures are the machine's, not t
 fail in the `wait` arm too. The wall clock barely moves because these fourteen are heavy cases that
 spend their time on their own work -- this run was for the output, not for the speed.
 
+**Over the corpus, and what it found.** `verify` across `_01_utility`'s 217 cases took 173 fast
+paths and **three of them wrote something the engine did not say**: `Calling java stored procedure
+is allowed`, on a start where the engine had printed no such line.
+
+That line is not util_service's. **`cub_javasp` prints it about itself**, and
+`process_javasp_start` does not spawn it when a javasp server for that database is already up -- so
+the line is simply absent. All three were the *later* starts inside a case that starts a server more
+than once: the first start left a javasp running, and the grammar, which read only the
+`java_stored_procedure` parameter, could not see it.
+
+The fix is not a fourth condition in the grammar but a fourth reason to decline. `cubrid javasp
+status` answers in 0.01 s and only "is not running" earns the fast path. Re-run:
+
+| | before | after |
+|---|---:|---:|
+| fast paths, master down | 95 | 95 |
+| fast paths, master up | 81 | **78** |
+| **differing** | **3** | **0** |
+
+Exactly the three, and nothing else. Verdicts identical to the wait baseline case by case, 174 OK
+and 43 NOK, and the wall clock 3,851 s waiting against 3,525 s not -- **8.5%** off a corpus whose
+time is mostly the cases' own.
+
+**What that does not yet earn.** Every one of the 173 was `java_stored_procedure=y`. The `n` branch
+of the grammar has been checked against the utility but never against a case, and 217 is 6% of the
+corpus. `verify` costs 2% over `wait` (3,946 s against 3,851), so the full-corpus run that ADR-013
+requires can carry the audit at no meaningful cost -- which is where a default should be earned,
+rather than from a sixteenth of the evidence.
+
 **The lingering utility does not interfere.** The fast path returns with the real `cubrid server
 start` still running for another 1.9 s, so what a case does next was tried against it: an immediate
 `server stop` succeeds and the server stays down after the utility finishes, an immediate query

@@ -485,6 +485,47 @@ function hist(h, secsIn, edges) {
   }).join('')
 }
 
+// A lane is one word, and an unset one is nothing rather than a placeholder.
+const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''
+
+// The cache is off in most runs, so the panel is absent rather than empty: a
+// panel of zeroes reads as "nothing is hitting" when the truth is "nobody asked
+// for a cache".
+function templates(t) {
+  $('tplpanel').hidden = !t
+  if (!t) return
+  $('tplwhere').textContent = t.dir
+  const asked = (t.restored || 0) + (t.built || 0)
+  const hit = asked ? Math.round(100 * t.restored / asked) : 0
+  const rows = [
+    ['store', t.count + ' templates, ' + gb(t.mb) + (t.capMB ? ' of ' + gb(t.capMB) : ''),
+     t.capMB && t.mb > t.capMB * 0.9],
+    // Restored against built is the hit rate, which is the number the cache
+    // exists for -- and the one that says whether it is earning its keep.
+    ['this run', t.restored + ' restored, ' + t.built + ' built' + (asked ? '  (' + hit + '% hit)' : ''), false],
+  ]
+  $('tplkv').innerHTML = rows.map(([k, val, warn]) =>
+    '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + val + '</tr>').join('')
+  const top = t.top || []
+  $('tpltop').innerHTML = top.length ? top.map(r =>
+    '<tr><td class=case title="' + r.key + '">' + r.key.slice(0, 12) +
+    '<td class=num>' + r.refs +
+    '<td class=num>' + gb(r.mb) +
+    '<td class=case title="' + (r.origin || '') + '">' + (r.origin || '') + '</tr>').join('')
+    : '<tr><td colspan=4 class=empty>the store is empty</tr>'
+}
+
+function lanes(ls) {
+  $('lanes').innerHTML = ls.length ? ls.map(l =>
+    '<tr><td>' + lane(l.name) +
+    '<td class=slots title="' + l.nslots + ' slots">' + l.slots +
+    '<td class=num>' + l.done +
+    '<td class=num>' + (l.nok ? '<span class="v no">' + l.nok + '</span>' : '') +
+    '<td class=num>' + secs(l.secs) +
+    '<td class=num>' + l.share + '%</tr>').join('')
+    : '<tr><td colspan=6 class=empty>no lane reported</tr>'
+}
+
 function groups(id, gs, withLane) {
   const cols = withLane ? 6 : 5
   $(id).innerHTML = gs.length ? gs.map(g =>

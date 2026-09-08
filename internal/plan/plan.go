@@ -9,12 +9,13 @@
 // giving memory to, because a case holds its database for as long as it runs and
 // the cases differ by two orders of magnitude.
 //
-// Measured on six cases of _01_sqlx, which is the shape of the problem: 19 s,
-// 0 s, 182 s, 183 s, 183 s, 6 s. Three of the six are 96% of the time.
+// Measured over _01_utility: 3,189 case-seconds across 217 cases, of which the
+// 17 cases over 30 seconds are 41%. The longest is 195 s and the median is
+// under 10.
 //
 // The format is one line per case, longest first:
 //
-//	183.4 /path/to/scenario/_01_sqlx/bug_cubridsus2018/cases/bug_cubridsus2018.sh
+//	195.0 /path/to/scenario/_15_backupdb/itrack_10002/cases/itrack_10002.sh
 //
 // Text, sorted, one field and a path, because it is a file an operator will want
 // to read, grep and diff between runs -- "what got slower" is the question it

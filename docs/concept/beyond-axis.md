@@ -764,15 +764,23 @@ it. The durations say how lopsided that is:
 | `bug_xdbms420` | 0 s | the whole fixed cost, ~2.6 s |
 | `bug_cubrid2125` | 6 s | ~40% of the case |
 | `bug_xdbms49` | 19 s | ~14% |
-| `bug_xdbms154` | 182 s | ~1%, and it holds the memory for three minutes |
-| `bug_cubridsus2560` | 183 s | ~1% |
-| `bug_cubridsus2018` | 183 s | ~1% |
+| `_15_backupdb/itrack_10002` | 195 s | ~1%, and it holds the memory for three minutes |
+| `_18_unloaddb/itrack_10003` | 166 s | ~2% |
+| `_03_start_server/itrack_10004` | 125 s | ~2%, and it is *waiting*, not working |
 
-Six cases, and **three of them are 96% of the time**. In memory-seconds it is
-worse than that: those three occupy the ceiling for 548 of the sample's 573
-seconds and return about 8 seconds between them. Send them to disk and the fast
-pool needs a fraction of what it needs now -- which is the same thing as saying
-the ceiling stops being the binding constraint on the slot count.
+Over the whole family: **17 cases of 217 are 41% of the case-seconds**. Send those
+to disk and the fast pool needs a fraction of what it needs now -- which is the
+same thing as saying the ceiling stops being the binding constraint on the slot
+count.
+
+An earlier version of this table quoted three `_01_sqlx` cases at 182, 183 and
+183 s. They are 8.8, 12.4 and 38.4 s, measured three times on develop, and they
+pass. The 183 s came from a serial arm that had no `parallel_slots` and therefore
+no network namespace, so it shared port 1523 with leftover masters and another
+session's server. The correction matters beyond the table: three cases at almost
+exactly the same number looked like a fixed timeout and was contention, and the
+way to tell them apart is that a timeout repeats to within 1% and contention does
+not.
 
 **And per-lane placement is also what makes a failure attributable.** With one
 pool, the case that fills it fails every other slot's case at the same moment,
@@ -787,6 +795,59 @@ B-T13 did not note: 15 of the 217 directories hold more than one case, and if tw
 slots in different lanes see different corpora, a case that set a database up for
 its sibling is invisible to it. So the queue has to keep a directory's cases in
 one lane.
+
+#### Where the long cases spend their time
+
+Asked because a long case might be long for a reason the harness controls -- a
+slow common function, an unnecessary sleep -- rather than because the work is
+long. Reviewed, and the answer is in three parts.
+
+**The harness is clean.** CTP's `init_path` has one sleep on the hot path, the
+`sleep 0.05` in B-T9's readiness poll. `make_ha_*.sh`, `ha_common.sh` and
+`rqg_init.sh` hold the rest, and `_01_utility` sources none of them. The corpus
+itself has 176 `sleep 1` and 41 `sleep 2` across 217 cases, but not in the long
+ones: of the six longest, four have no sleep at all and the other two have one
+each.
+
+**The long cases are deterministic, which is how a timeout can be told from
+work.** Across three independent arms:
+
+| | nocache | ranked | dbvol20 | spread |
+|---|---:|---:|---:|---:|
+| `_15_backupdb/itrack_10002` | 195.0 | 192.9 | 193.9 | 1% |
+| `_18_unloaddb/itrack_10003` | 166.4 | 165.4 | 162.4 | 2% |
+| `_03_start_server/itrack_10004` | 124.8 | 123.2 | 123.1 | 1% |
+| `_03_start_server/itrack_10003` | 115.7 | 114.5 | 115.2 | 1% |
+| `_18_unloaddb/itrack_10010` | 111.8 | 111.6 | 110.4 | 1% |
+
+**And two of them are pure waiting, in the engine.** `_03_start_server/itrack_10003`
+is 37 lines with no sleep and no loop, and it takes 115 seconds three times
+running. Both `_03_start_server` cases deliberately break the PL/Java
+environment -- one moves `pl_server.jar` aside, the other does `rm -rf
+$CUBRID/vm` and `unset JAVA_HOME` -- set `stored_procedure=yes`, and expect
+`cubrid server start` to report the failure. What they are waiting for is
+`server_monitor_task` in `src/sp/pl_sr.cpp`:
+
+```c
+constexpr int MAX_FAIL_COUNT = 10;              // one-second polls
+error = do_check_connection (MAX_FAIL_COUNT);
+...
+while (try_count++ < 10 && m_state != SERVER_MONITOR_STATE_RUNNING);
+```
+
+Eleven outer attempts over ten one-second polls each, so about 110 seconds
+before a server that cannot find its JVM gives up looking. The source carries
+`// TODO: parameterize this` above `MAX_FAIL_COUNT`, so it cannot be shortened
+from the test side.
+
+**240 seconds of a 3,189 case-second run -- 7.5% -- is two cases waiting for
+that.** Three things follow. They are ideal slow-lane cases and the 30-second
+threshold already puts them there: pure wait, no CPU, no I/O, and memory buys
+them 0.1%. It is an argument for the slow lane holding *more* slots than its
+share of the work suggests, because its cases are idle rather than busy and the
+core count does not bound them. And it is worth reporting upstream, because a
+two-minute retry before reporting a missing JVM is a product decision rather than
+a test one.
 
 **And one lever is still untouched.** `log_volume_size` went from 512M to 20M and
 the wall clock went 1,738 s to 1,047. `db_volume_size` is the **same 512M default**

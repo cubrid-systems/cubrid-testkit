@@ -147,11 +147,26 @@ func ParseFeedbackFile(path string) ([]Event, error) {
 // stopping the server when the last case plays would close the window just as it
 // became worth reading.
 func Replay(events []Event, speed float64, addr string, out io.Writer) (stop func(), err error) {
+	return ReplayFrom("", events, speed, addr, out)
+}
+
+// ReplayFrom is Replay knowing which file the events came from, so that clicking
+// a case can show what it did.
+//
+// The detail is in that same feedback.log -- the checks and, for a failing case,
+// the console output -- so a replay is exactly the place the link should work:
+// the run is over and the file is all there is. It did not, because only the
+// runner was telling the board where its log was, and a replay board was left
+// answering "this run did not say where its feedback.log is" to every click.
+func ReplayFrom(path string, events []Event, speed float64, addr string, out io.Writer) (stop func(), err error) {
 	if speed <= 0 {
 		speed = 1
 	}
 	b := New(len(events))
 	b.replaying = true
+	if path != "" {
+		b.Detail(path)
+	}
 	lastBoard = b
 	where, stop, err := b.Serve(addr)
 	if err != nil {

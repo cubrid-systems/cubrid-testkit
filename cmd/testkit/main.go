@@ -372,7 +372,7 @@ func replay(args []string) int {
 	if where == "" {
 		where = status.DefaultAddr
 	}
-	stopPage, err := status.Replay(events, *speed, where, os.Stdout)
+	stopPage, err := status.ReplayFrom(path, events, *speed, where, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
 		return exitEnvironment

@@ -118,7 +118,7 @@ const page = `<!doctype html>
     by glancing at the rail. */
  .lane{display:inline-block;font-size:.66rem;letter-spacing:.08em;text-transform:uppercase;
    padding:.02rem .34rem;border-radius:2px;border:1px solid var(--line);color:var(--ink-faint)}
- .lane.ram{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+ .lane.tmpfs{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 
@@ -149,6 +149,14 @@ const page = `<!doctype html>
   <section class=panel>
     <h2>how long cases take <span class=count>cases &middot; share of time</span></h2>
     <div id=hist class=hist></div>
+  </section>
+  <section class=panel id=tplpanel hidden>
+    <h2>template cache <span class=count id=tplwhere></span></h2>
+    <table class=kv><tbody id=tplkv></tbody></table>
+    <div class=scroll><table style="margin-top:.5rem">
+      <thead><tr><th>most used<th class=num>used<th class=num>size<th>built from</tr></thead>
+      <tbody id=tpltop></tbody>
+    </table></div>
   </section>
   <section class=panel>
     <h2>lanes <span class=count>where the writes go</span></h2>
@@ -323,6 +331,7 @@ async function tick() {
   groups('family', v.family || [], false)
   groups('slot', v.slot || [], true)
   lanes(v.lanes || [])
+  templates(v.templates)
   lastView = v
   draw(v)
 }
@@ -337,7 +346,7 @@ function machine(m) {
                            m.memUsed > m.memAll * 0.9])
   // Shown even at zero. Zero is the value worth seeing, and hiding the row
   // exactly then is what the first version of this did.
-  if (m.ramCap) rows.push(['corpus in memory', gb(m.ram) + ' of ' + gb(m.ramCap),
+  if (m.ramCap) rows.push(['corpus tmpfs', gb(m.ram) + ' of ' + gb(m.ramCap),
                            m.ram > m.ramCap * 0.9])
   rows.push(['disk free', m.corpus == null ? '—' : gb(m.corpus), m.corpus < 5120])
   $('machine').innerHTML = rows.map(([k, val, warn]) =>
@@ -346,6 +355,33 @@ function machine(m) {
 
 // A lane is one word, and an unset one is nothing rather than a placeholder.
 const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''
+
+// The cache is off in most runs, so the panel is absent rather than empty: a
+// panel of zeroes reads as "nothing is hitting" when the truth is "nobody asked
+// for a cache".
+function templates(t) {
+  $('tplpanel').hidden = !t
+  if (!t) return
+  $('tplwhere').textContent = t.dir
+  const asked = (t.restored || 0) + (t.built || 0)
+  const hit = asked ? Math.round(100 * t.restored / asked) : 0
+  const rows = [
+    ['store', t.count + ' templates, ' + gb(t.mb) + (t.capMB ? ' of ' + gb(t.capMB) : ''),
+     t.capMB && t.mb > t.capMB * 0.9],
+    // Restored against built is the hit rate, which is the number the cache
+    // exists for -- and the one that says whether it is earning its keep.
+    ['this run', t.restored + ' restored, ' + t.built + ' built' + (asked ? '  (' + hit + '% hit)' : ''), false],
+  ]
+  $('tplkv').innerHTML = rows.map(([k, val, warn]) =>
+    '<tr><td>' + k + '<td' + (warn ? ' class=warn' : '') + '>' + val + '</tr>').join('')
+  const top = t.top || []
+  $('tpltop').innerHTML = top.length ? top.map(r =>
+    '<tr><td class=case title="' + r.key + '">' + r.key.slice(0, 12) +
+    '<td class=num>' + r.refs +
+    '<td class=num>' + gb(r.mb) +
+    '<td class=case title="' + (r.origin || '') + '">' + (r.origin || '') + '</tr>').join('')
+    : '<tr><td colspan=4 class=empty>the store is empty</tr>'
+}
 
 function lanes(ls) {
   $('lanes').innerHTML = ls.length ? ls.map(l =>

@@ -100,12 +100,15 @@ type Board struct {
 	bySlot   map[string]*tally
 	// laneOf is where a slot's writes go, and byLane adds the cases up by it.
 	// One lane today -- every slot's corpus writes go to the same place -- which
-	// is why the panel reads "ram 8 slots" rather than a split. It is here
+	// is why the panel reads "tmpfs 8 slots" rather than a split. It is here
 	// because the split is the next thing (B-T13) and because even undivided it
 	// answers a question the other panels do not: what fraction of the run's
 	// case-seconds is holding memory.
 	laneOf map[string]string
 	byLane map[string]*tally
+	// templates is the database-template cache, when a run uses one. Nil when it
+	// does not, which is every run that leaves CTP_DB_TEMPLATE_CACHE off.
+	templates *templates
 }
 
 // tally is what is known about a group of cases without keeping the cases.
@@ -306,8 +309,11 @@ type view struct {
 	Family   []groupView `json:"family"`
 	Slot     []groupView `json:"slot"`
 	Lanes    []laneView  `json:"lanes"`
-	Machine  machineView `json:"machine"`
-	Finished bool        `json:"finished"`
+	// Templates is nil unless the run uses the database-template cache, and the
+	// page leaves the panel out when it is.
+	Templates *templateView `json:"templates,omitempty"`
+	Machine   machineView   `json:"machine"`
+	Finished  bool          `json:"finished"`
 }
 
 type slotView struct {
@@ -413,6 +419,7 @@ func (b *Board) snapshot() view {
 		v.Slot[i].Lane = b.laneOf[v.Slot[i].Name]
 	}
 	v.Lanes = b.lanes()
+	v.Templates = b.templates.snapshot()
 	v.Machine = machine(b.corpusDir, b.ramDir, b.ramCap)
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]

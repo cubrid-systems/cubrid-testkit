@@ -45,7 +45,7 @@ const (
 func (l Lane) String() string {
 	switch l {
 	case LaneFast:
-		return "ram"
+		return "tmpfs"
 	case LaneSlow:
 		return "disk"
 	}

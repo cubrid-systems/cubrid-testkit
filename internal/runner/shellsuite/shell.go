@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -391,6 +392,13 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		// The machine panel reports the two places that matter to this run
 		// rather than the root filesystem.
 		board.Watch(os.Getenv("CUBRID"), corpus.Ram(), cfg.Int("scenario_ram_mb", 0))
+		// The template cache is CTP's, turned on with an environment variable and
+		// keeping its own store, so the page reads that store rather than asking
+		// the shell to report. Off unless the run asked for a cache, and then the
+		// panel is absent rather than empty.
+		if os.Getenv("CTP_DB_TEMPLATE_CACHE") == "1" {
+			board.WatchTemplates(templateStore(), templateCapMB())
+		}
 	}
 
 	fmt.Println("STARTED")
@@ -758,7 +766,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	if name == "" {
 		name = "disk"
 		if corpus != nil {
-			name = "ram"
+			name = "tmpfs"
 		}
 	}
 	board.Lane(slotID, name)
@@ -802,4 +810,24 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	}).Watch(monitorCtx)
 
 	return w.Run(ctx)
+}
+
+// templateStore and templateCapMB read where CTP's database-template cache keeps
+// its store and how large it is allowed to be. The defaults are init.sh's.
+func templateStore() string {
+	if d := strings.TrimSpace(os.Getenv("CTP_DB_TEMPLATE_DIR")); d != "" {
+		return d
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".ctp_db_templates")
+}
+
+func templateCapMB() int {
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("CTP_DB_TEMPLATE_MAX_MB"))); err == nil && v > 0 {
+		return v
+	}
+	return 10240
 }

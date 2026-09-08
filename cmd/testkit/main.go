@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -83,6 +84,12 @@ func run(args []string) int {
 	// that finished before any of this existed.
 	if len(args) > 0 && args[0] == "replay" {
 		return replay(args[1:])
+	}
+
+	// failures turns a finished run into the list of cases to try again. It is
+	// the other half of testcase_from_file, and it is new rather than inherited.
+	if len(args) > 0 && args[0] == "failures" {
+		return failures(args[1:])
 	}
 
 	inv, err := cli.Parse(args)
@@ -400,4 +407,99 @@ func findFeedback(arg string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no feedback.log under %s", arg)
+}
+
+const failuresUsage = `usage: failures [OPTION] <feedback.log | result directory>
+
+Print the cases a run failed, one a line, in the form testcase_from_file wants.
+This is the loop a fix goes round: run the corpus, fix something, rebuild the
+engine, and try the failures again -- which is minutes rather than the two hours
+the whole corpus takes, and answers the question that was actually asked.
+
+    testkit failures ~/CTP/result/shell > failed.txt
+    # then, in the conf for the next run:
+    #   testcase_from_file=/path/to/failed.txt
+
+Paths are printed from the family segment down rather than in full, so the list
+still selects the same cases when the corpus sits somewhere else. The engine may
+be a different build; a case is the same case.
+
+options:
+  --full        print the whole path as the run recorded it
+  --count       print only how many failed
+`
+
+func failures(args []string) int {
+	fs := flag.NewFlagSet("failures", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	full := fs.Bool("full", false, "")
+	count := fs.Bool("count", false, "")
+	help := fs.Bool("h", false, "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "failures: %v\n", err)
+		fmt.Fprint(os.Stderr, failuresUsage)
+		return exitPreflight
+	}
+	if *help || fs.NArg() == 0 {
+		fmt.Fprint(os.Stdout, failuresUsage)
+		return exitOK
+	}
+	path, err := findFeedback(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failures: %v\n", err)
+		return exitPreflight
+	}
+	events, err := status.ParseFeedbackFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failures: %s: %v\n", path, err)
+		return exitPreflight
+	}
+
+	// The last attempt wins. A retried case appears twice and the second
+	// verdict is the run's; listing a case that ended up passing would send the
+	// next run after something that is already fixed.
+	last := map[string]status.Event{}
+	for _, e := range events {
+		if prev, seen := last[e.Case]; !seen || e.Start.After(prev.Start) {
+			last[e.Case] = e
+		}
+	}
+	var out []string
+	for name, e := range last {
+		if e.OK {
+			continue
+		}
+		if *full {
+			out = append(out, name)
+		} else {
+			out = append(out, caseFragment(name))
+		}
+	}
+	sort.Strings(out)
+
+	if *count {
+		fmt.Println(len(out))
+		return exitOK
+	}
+	if len(out) == 0 {
+		fmt.Fprintln(os.Stderr, "failures: none -- every case in that run passed")
+		return exitOK
+	}
+	fmt.Printf("# %d cases failed in %s\n", len(out), path)
+	for _, c := range out {
+		fmt.Println(c)
+	}
+	return exitOK
+}
+
+// caseFragment names a case from its family down, which is the part that does
+// not change when the corpus moves. Same rule the status page names cases by.
+func caseFragment(p string) string {
+	parts := strings.Split(p, "/")
+	for i, seg := range parts {
+		if len(seg) > 3 && seg[0] == '_' && seg[1] >= '0' && seg[1] <= '9' {
+			return strings.Join(parts[i:], "/")
+		}
+	}
+	return p
 }

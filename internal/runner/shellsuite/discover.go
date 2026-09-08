@@ -203,3 +203,36 @@ func Remove(cases, unwanted []string) (kept, removed []string) {
 	}
 	return kept, removed
 }
+
+// Include is Exclude's inverse: keep only the cases a pattern names.
+//
+// It exists for the loop a fix goes round. A run leaves a list of failures; the
+// engine is rebuilt with a change; and the question is whether those cases pass
+// now -- not whether the other 3,400 still do, which takes two hours and answers
+// something else. Running the failures alone is minutes.
+//
+// Matching is Exclude's, a substring of the path with a trailing slash, so that
+// a list written against one scenario root still selects under another. That is
+// what makes it work across builds: the corpus may sit somewhere else, and a
+// case is still the same case.
+func Include(cases, patterns []string) (kept, dropped []string) {
+	if len(patterns) == 0 {
+		return cases, nil
+	}
+	keep := map[int]bool{}
+	for _, pat := range patterns {
+		for j := range cases {
+			if !keep[j] && strings.Contains(cases[j]+"/", pat) {
+				keep[j] = true
+			}
+		}
+	}
+	for i, c := range cases {
+		if keep[i] {
+			kept = append(kept, c)
+		} else {
+			dropped = append(dropped, c)
+		}
+	}
+	return kept, dropped
+}

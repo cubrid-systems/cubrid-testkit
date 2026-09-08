@@ -662,6 +662,29 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 		}
 	}
 
+	// Only these, when a run is a second attempt at what failed. It comes first
+	// because the two exclusions still apply on top: a case excluded upstream
+	// stays excluded even if it is on the list.
+	if file := strings.TrimSpace(cfg.GetOr("testcase_from_file", "")); file != "" {
+		out, runErr := runIn(ctx, ch, "cat "+file)
+		if runErr != nil {
+			return nil, nil, nil, runErr
+		}
+		patterns := ParseExcluded(out.Output())
+		if len(patterns) == 0 {
+			return nil, nil, nil, fmt.Errorf("testcase_from_file %s names no case", file)
+		}
+		var missed []string
+		cases, missed = Include(cases, patterns)
+		fmt.Println("****************************************")
+		fmt.Printf("# OF SELECTED = %d, from %d patterns\n", len(cases), len(patterns))
+		fmt.Println("****************************************")
+		_ = missed
+		if len(cases) == 0 {
+			return nil, nil, nil, fmt.Errorf("testcase_from_file %s selected no case in this corpus", file)
+		}
+	}
+
 	if file := strings.TrimSpace(cfg.GetOr("testcase_exclude_from_file", "")); file != "" {
 		out, runErr := runIn(ctx, ch, "cat "+file)
 		if runErr != nil {

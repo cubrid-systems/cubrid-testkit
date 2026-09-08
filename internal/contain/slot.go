@@ -3,8 +3,8 @@ package contain
 import (
 	"context"
 	"fmt"
-	osexec "os/exec"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,10 +32,11 @@ import (
 //
 // docs/concept/beyond-axis.md B-T3.
 type Namespace struct {
-	keeper *osexec.Cmd
-	pid    int
-	inner  *exec.Local
-	label  string
+	keeper  *osexec.Cmd
+	pid     int
+	inner   *exec.Local
+	label   string
+	scratch string
 }
 
 // keeperScript is what holds the namespace open.
@@ -86,6 +87,14 @@ func Open(label string) (*Namespace, error) {
 		return nil, fmt.Errorf("%s: hold a namespace open: %w", label, err)
 	}
 	ns := &Namespace{keeper: cmd, pid: cmd.Process.Pid, label: label}
+	// Outside /tmp on purpose: this is where the scripts a command runs are
+	// written, and the slot is about to get a /tmp that this process cannot see
+	// into.
+	ns.scratch = filepath.Join(scratchRoot(), label)
+	if err := os.MkdirAll(ns.scratch, 0o755); err != nil {
+		ns.Close()
+		return nil, fmt.Errorf("%s: %w", label, err)
+	}
 
 	// The keeper is PID 1 but nothing has mounted /proc for it, so `ps` in there
 	// would still report the machine. Doing it from outside, in the keeper's own
@@ -122,8 +131,46 @@ const Shell = "bash"
 // did.
 func (n *Namespace) Channel(dir string, env ...string) exec.Channel {
 	inner := exec.NewLocal(dir, env...)
+	// The script has to be written somewhere both sides can see. This slot has a
+	// /tmp of its own, so the usual place is the wrong one.
+	inner.ScriptDir = n.scratch
 	n.inner = inner
 	return &nsChannel{ns: n, inner: inner}
+}
+
+// Private gives this slot a directory of its own at path, backed by under.
+//
+// /tmp is the case for which this exists. cub_master listens on a Unix domain
+// socket named after its port -- /tmp/CUBRID1523 -- and the network namespace
+// that lets every slot keep the shipped 1523 is exactly what makes them all want
+// that one path. Four masters then fight over one socket and none of them comes
+// up: "Could not connect to master server on localhost", six times, and every
+// case that needed a server fails.
+//
+// A bind of a directory rather than a tmpfs, because a case is free to write
+// something large to /tmp and a tmpfs would take it out of memory.
+func (n *Namespace) Private(path, under string) error {
+	if !n.Alive() {
+		return fmt.Errorf("%s: the namespace is gone", n.label)
+	}
+	// Replacing the directory the scripts are written into would leave every
+	// command looking for a file that is not there, and the symptom is a command
+	// that produces nothing at all rather than an error.
+	if rel, err := filepath.Rel(path, n.scratch); err == nil && !strings.HasPrefix(rel, "..") {
+		return fmt.Errorf("%s: cannot make %s private: it holds this slot's scripts (%s)",
+			n.label, path, n.scratch)
+	}
+	if err := os.MkdirAll(under, 0o1777); err != nil {
+		return fmt.Errorf("%s: %w", n.label, err)
+	}
+	if err := os.Chmod(under, 0o1777); err != nil {
+		return fmt.Errorf("%s: %w", n.label, err)
+	}
+	if out, err := n.run(context.Background(), 20*time.Second,
+		fmt.Sprintf("mount --bind %s %s", under, path)); err != nil {
+		return fmt.Errorf("%s: private %s: %w: %s", n.label, path, err, strings.TrimSpace(out))
+	}
+	return nil
 }
 
 // enter is the command that puts a child in this namespace.
@@ -253,3 +300,16 @@ func (c *nsChannel) Describe() string { return c.ns.label }
 func (c *nsChannel) Close() error     { return c.ns.Close() }
 
 var _ exec.Channel = (*nsChannel)(nil)
+
+// scratchRoot is where slots keep the scripts their commands run from.
+//
+// Not under /tmp, and not under os.TempDir() which usually is /tmp: a slot gets
+// a /tmp of its own, and a script written into this process's would not be there
+// when the command went looking. /var/tmp is the same filesystem and not the
+// directory being replaced.
+func scratchRoot() string {
+	if r := os.Getenv("TESTKIT_SLOT_ROOT"); r != "" {
+		return filepath.Join(r, "scratch")
+	}
+	return filepath.Join("/var/tmp", "testkit-slots", "scratch")
+}

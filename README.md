@@ -19,7 +19,9 @@ For engine developers and QA. Part of
 
 > **Where it is:** Phase 3 is in progress. `unittest` runs natively, and `shell` runs end-to-end
 > and agrees with CTP on four real cases — behind an opt-in gate until the full corpus clears.
-> Every other task dispatches to CTP unchanged. See [Status](#status).
+> Every other task dispatches to CTP unchanged. A shell run can now use several slots on one
+> machine; see [Running the shell suite in parallel](#running-the-shell-suite-in-parallel) and
+> [Status](#status).
 
 ## Prerequisites
 
@@ -31,7 +33,14 @@ For engine developers and QA. Part of
 | **A testcases checkout** | the cases themselves, for the tasks that read a corpus |
 
 Linux. Windows is stale and out of scope — the native runner refuses it and says so.
-`/bin/sh` must be bash: the shell suite has never run on dash.
+
+The shell suite has always needed a bash-compatible `/bin/sh` — CTP's own `init.sh` opens with
+`function get_os(){` — and **the runner now arranges that itself**, binding bash over `/bin/sh`
+inside its own mount namespace. The machine is not changed and nothing outside the run sees a
+different shell; on a machine that already has it right the bind is skipped. Set
+`TESTKIT_CONTAIN_SH` to override. Without it, on a distribution where `/bin/sh` is dash, every case
+dies on `init.sh`'s first line — measured: seventeen cases, seventeen blank results, seventeen
+`Syntax error: "(" unexpected`.
 
 ## Build
 
@@ -99,6 +108,80 @@ and `summary_info`.
 
 ![Animated: a shell run checks the machine, finds the cases, runs each one after a process reset, judges the result file, and writes the verdicts down. Four real cases: three OK and one NOK. Every stage leaves a file that is part of the frozen surface.](docs/assets/anim-shell-run.svg)
 
+## Running the shell suite in parallel
+
+Upstream CI spreads this corpus over 60 Kubernetes pods. The same corpus can be spread over the
+slots of one machine instead, and everything here exists to make that safe rather than merely fast.
+
+Parallelism is off by default. Everything below is one machine, one binary, and no change to the
+output — a slotted run writes the files a serial run writes, because slots share an environment id
+on purpose.
+
+| key | | |
+|---|---|---|
+| `parallel_slots` | `1` | how many cases run at once. Each slot gets its own PID, IPC, mount and **network** namespace, so every slot keeps the shipped port 1523 and no configuration is rewritten |
+| `scenario_ram_mb` | off | put the corpus behind an overlay whose upper layer is a tmpfs of this size. The corpus stays read-only, the run's writes go to memory, and a directory's writes are dropped when its last case finishes |
+| `status_http` | off | serve a progress page. `on` takes `127.0.0.1:51523`; a bare port takes every interface |
+| `case_plan` | off | a file of per-case durations. The run reads it to hand the longest cases out first and writes it back from what it measured |
+| `lane_slow_secs` | off | split the slots into a fast lane whose writes go to memory and a slow lane whose writes go to disk, with cases assigned by duration |
+
+Namespaces are what make a slot cost nothing to configure, and they need the run to be contained:
+
+```bash
+TESTKIT_CONTAIN=1 TESTKIT_NATIVE_SHELL=1 testkit shell -c shell.conf
+```
+
+`TESTKIT_SLOT_ROOT` says where the per-slot overlays go, `/var/tmp/testkit-slots` by default.
+
+**How many slots, and how big a ceiling.** `tools/sizing.sh` answers both from the machine and the
+engine's own configuration, and says what every number rests on:
+
+```bash
+CUBRID=/path/to/install tools/sizing.sh
+```
+
+The ceiling is not a reservation. A tmpfs occupies what is written to it and nothing more, so a
+generous one costs nothing until it is used; its job is to turn a case that never cleans up from a
+run that dies into a case that fails for want of space. The run reports its high-water mark on the
+way out and says the verdicts are unusable if it got within 10% of the ceiling — because a case
+that runs out of space fails like a case that got the wrong answer, and nothing else in the output
+would say so.
+
+### What it is worth, measured
+
+`_01_utility` on develop — 217 cases, 3,189 case-seconds of work, longest case 195 s:
+
+| | wall clock | verdicts |
+|---|---:|---|
+| 8 slots | 407 s | the baseline |
+| 8 slots, longest first (`case_plan`) | **391 s** | **identical, case for case** |
+| 8 slots, lanes at 30 s | 696 s | identical |
+
+Two things that table is for. **The scheduler is already at its floor**: every arm lands within 1-2%
+of `total work ÷ slots`, so the wall clock is decided by how much work there is and how many slots,
+not by how the work is ordered. Ordering pays from about sixteen slots up, where the longest case
+becomes the wall.
+
+And **lanes lose here**, which is the opposite of what the design predicted. Splitting a pool costs
+flexibility, and the criterion was wrong: duration selects the I/O-heavy cases, which are exactly
+the ones memory helps most. Measured per case, moving the slow lane to disk cost 1.55× at three
+slots and 1.93× at five — `_16_restoredb/cbrd_24892` went 67.5 s to 236.1, while
+`_03_start_server/itrack_10003`, which spends its 115 seconds waiting rather than writing, cost
+nothing at all. Lanes are for a machine where memory is the binding constraint; on this one it is
+not. The reasoning is in [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T12 and B-T13,
+including the numbers that contradict it.
+
+### Watching a run
+
+`status_http` serves one page, no dependencies, that answers what a log of ten workers cannot:
+which slot is stuck and on what. Per-slot progress with a held-slot rail, the completion rate,
+where the time goes by duration bucket, per-family and per-slot totals, a machine panel, a
+failed-only filter and sortable columns.
+
+It is deliberately **not** on standard output. What the runner prints there is frozen
+([ADR-003](docs/adr/ADR-003-external-surface-freeze.md)) and the comparison that proves this system
+equivalent reads it, so a screen drawn over it would be drawn over the evidence.
+
 ## What it does
 
 ![Architecture: frozen entry scripts call one Go binary, which routes each task either to a native runner or to the old CTP as a subprocess; both produce the same frozen output, and QA operations are excluded](docs/assets/architecture.svg)
@@ -145,7 +228,7 @@ version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
 | 0 — analysis | **done** | 39 documents on what CTP actually does |
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
-| **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` end-to-end and matching CTP's verdicts on four real cases; `run-shell` complete, with six axis-T options. The harness that compares a corpus is built; the gate is running it |
+| **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` end-to-end and matching CTP's verdicts on four real cases; `run-shell` complete, with six axis-T options. The harness that compares a corpus is built; the gate is running it. Parallel slots, a corpus that cleans itself, per-case durations and a progress page are in and measured |
 | 4 — the rest | — | `sql` family, `isolation`, `ha_repl`, `cdc_repl`, `jdbc` |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
@@ -165,7 +248,7 @@ still unexplained, and saying so is the point: the page previously had one unexp
 and it was the wrong one.
 
 **The gate.** Equivalence is proven by comparing normalised output over the whole shell corpus —
-3,452 cases, with the 195 in `_25_unstable` counted separately because their own readme says they
+3,475 cases, with the 195 in `_25_unstable` counted separately because their own readme says they
 depend on machine load and elapsed time ([ADR-013](docs/adr/ADR-013-regression-equivalence.md)).
 `TESTKIT_NATIVE_SHELL` comes off when that clears. That is 64 shards and tens of hours on each
 runner, so it is run by [`evidence/compare/`](docs/evidence/compare/README.md) rather than by hand:
@@ -187,7 +270,10 @@ first comparison could not explain was blamed on the environment when it belonge
 CONTEXT.md               the glossary — task ≠ suite ≠ module ≠ runner
 cmd/testkit/             the entry point
 internal/                cli · conf · registry · dispatch · runner (legacy, shellsuite) ·
-                         runshell · exec · result · feedback · topology
+                         runshell · exec · result · feedback · topology ·
+                         contain (namespaces per slot) · plan (case durations) ·
+                         status (the progress page)
+tools/sizing.sh          how many slots and how big a ceiling, for this machine
 ext/cubrid-sqlancer/     submodule — a SQLancer provider for CUBRID
 docs/
   ROADMAP.md             phases, exit conditions, risks, the re-evaluation gate
@@ -211,6 +297,7 @@ docs/
 | what was left out, and why | [`concept/migration-exclusions.md`](docs/concept/migration-exclusions.md) |
 | how it is built | [`design/architecture.md`](docs/design/architecture.md) · [`design/contracts.md`](docs/design/contracts.md) |
 | how equivalence is decided, and run | [`adr/ADR-013`](docs/adr/ADR-013-regression-equivalence.md) · [`evidence/compare/`](docs/evidence/compare/README.md) |
+| how a run is made parallel | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T3, B-T12, B-T13 |
 | what happens next | [`ROADMAP.md`](docs/ROADMAP.md) · [`design/module-shell.md`](docs/design/module-shell.md) |
 | every decision so far | [`adr/README.md`](docs/adr/README.md) |
 

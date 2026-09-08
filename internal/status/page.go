@@ -62,6 +62,9 @@ const page = `<!doctype html>
  tr:last-child td{border-bottom:0}
  .slot{color:var(--ink-dim);width:4.5rem}
  .lanecol{width:4.5rem}
+ /* With lanes off every slot is in the same one, and a column that says the
+    same word on every row is not information. It comes back when there are two. */
+ body.onelane .lanecol{display:none}
  .slots{color:var(--ink-dim);white-space:nowrap}
  /* The elastic column: it takes what is left and ellipsizes rather than pushing
     the numbers off the edge. max-width:0 with width:100% is what makes a table
@@ -262,11 +265,23 @@ const secs = s => s == null ? '—'
   : s < 3600 ? Math.floor(s/60) + 'm' + String(s%60).padStart(2,'0')
   : Math.floor(s/3600) + 'h' + String(Math.floor(s%3600/60)).padStart(2,'0')
 
-// A case is named by the family it is in and its own name; the path above that
-// is the same for every row and would push the part that differs off the edge.
+// A case is named from its family down; the path above that is the same for
+// every row and would push the part that differs off the edge.
+//
+// It cannot be "the last two segments", which is what this was. That happened to
+// be right while the scenario root was _01_utility and a case sat at
+// <family>/<case>/cases/, and it silently dropped the family the moment the
+// whole corpus was run: _06_issues/_14_1h/bug_bts_12352 rendered as
+// "_14_1h/bug_bts_12352", and a sub-family on its own says nothing about which
+// family it is in.
+//
+// So it starts at the first segment that looks like a family -- _NN_something,
+// which is the corpus's own convention and the same rule the Go side groups by.
+// The title attribute keeps the full path either way.
 const short = c => {
   const p = c.split('/cases/')[0].split('/')
-  return p.slice(-2).join('/')
+  const at = p.findIndex(seg => /^_\d+_/.test(seg))
+  return (at >= 0 ? p.slice(at) : p.slice(-2)).join('/')
 }
 
 function spark(series, span) {
@@ -374,6 +389,7 @@ async function tick() {
   hist(v.hist || [], v.histSecs || [], v.histEdge || [])
   groups('family', v.family || [], false)
   groups('slot', v.slot || [], true)
+  document.body.classList.toggle('onelane', (v.lanes || []).length < 2)
   lanes(v.lanes || [])
   templates(v.templates)
   lastView = v

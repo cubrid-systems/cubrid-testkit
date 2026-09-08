@@ -573,6 +573,38 @@ that path does no shutdown work and has nothing to save.
 | Worth | 2,239 of the 3,452 case scripts stop a server, so a bound of one second each is under half of what B-T9 is worth, and the true figure is smaller by however long a shutdown really takes |
 | First | measure `t_gone` against `t_return`, on an empty database and on one with data, with the stored-procedure server on and off. If `t_gone` is not well under a second there is nothing here and this entry closes |
 
+### B-T11. One place to watch every task run — **idea**
+
+| | |
+|---|---|
+| Improves on | T: nothing. A run's progress has never been visible anywhere but its log |
+| Kind | **operability** — the same verdicts, and you can see them arriving |
+
+**Built so far: a page for the shell task.** `status_http` serves it; it says what
+each slot is on and for how long, the counts, and the rate. It is not on standard
+output and could not be: what the runner prints there is frozen (ADR-003) and the
+comparison reads it, so a screen drawn over it would be drawn over the evidence.
+
+**Two things it does not do yet, both asked for while it was being built.**
+
+*The machine, not just the run.* Everything this project has measured about
+parallelism is a resource question -- 332 MB/s of disk, 498 MB a server, 16
+cores against ten slots -- and none of it is visible while a run is going. A slot
+holding a case for four minutes reads the same whether it is waiting on a lock or
+on a disk that has nothing left to give. Load, free memory, disk throughput and
+free space alongside the slots would answer that from the same screen, and the
+numbers are cheap: `/proc/loadavg`, `/proc/meminfo`, `/proc/diskstats`, `statfs`.
+
+*Every task, not just shell.* The register's own plan is `sqlsuite`, `isolation`
+and `replication` after shell (ROADMAP Phase 4), and a QA run is all of them.
+Four pages on four ports is four things to keep open; the useful shape is one
+board that several runners report to. That is a decision about where the board
+lives -- in the process, or behind something a run registers with -- and it is
+easier to make now, while there is one runner, than after there are four.
+
+| First | decide whether the board is a library each runner serves or a place they report to. The rest follows from that, and it does not become cheaper to decide later |
+| Not yet | a history across runs. This is a window on a run in flight; what a run *was* is the result tree, and duplicating it here would make two answers to the same question |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

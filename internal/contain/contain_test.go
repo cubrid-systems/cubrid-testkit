@@ -138,3 +138,33 @@ func mustModuleRoot(t *testing.T) string {
 	}
 	return p[:strings.LastIndex(p, "/")]
 }
+
+// $USER said hgryoo while every process in the namespace ran as root, so every
+// `ps -u $USER` in the corpus silently matched nothing -- including the one in
+// _37_cubrid/_02_server, which printed "cubrid server start: success" and then
+// "DB testdb can't start!" on the next line.
+func TestInsideSaysWhoTheProcessesActuallyAre(t *testing.T) {
+	got := inside([]string{"PATH=/bin", "USER=hgryoo", "HOME=/home/hgryoo", "LOGNAME=hgryoo"})
+	var user, logname, home int
+	for _, kv := range got {
+		switch {
+		case strings.HasPrefix(kv, "USER="):
+			user++
+			if kv != "USER=root" {
+				t.Errorf("USER is %q, and in here the processes are root's", kv)
+			}
+		case strings.HasPrefix(kv, "LOGNAME="):
+			logname++
+		case kv == "HOME=/home/hgryoo":
+			home++
+		}
+	}
+	if user != 1 || logname != 1 {
+		t.Errorf("USER appears %d times and LOGNAME %d; a duplicate leaves which one wins to the exec", user, logname)
+	}
+	// $HOME is not touched: it is where ERROR_BACKUP and the template store
+	// live, and they belong to the user outside.
+	if home != 1 {
+		t.Error("HOME was changed; it points at directories the run shares with the machine")
+	}
+}

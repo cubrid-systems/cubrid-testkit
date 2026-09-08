@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -54,7 +55,7 @@ func Enter() int {
 		fail("cannot find own path: %v", err)
 	}
 	cmd := exec.Command(self, os.Args[1:]...)
-	cmd.Env = append(os.Environ(), insideEnv+"=1")
+	cmd.Env = append(inside(os.Environ()), insideEnv+"=1")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS |
@@ -71,6 +72,40 @@ func Enter() int {
 		fail("cannot contain the run: %v", err)
 	}
 	return 0
+}
+
+// inside is the environment as it is true in the namespace rather than outside
+// it.
+//
+// $USER said hgryoo while every process in the namespace ran as root, and 23 of
+// the corpus's 24 uses of $USER are a process or IPC filter -- `ps -u $USER`,
+// `ipcs | grep $USER`, `ps -ef | grep $USER`. All of them silently matched
+// nothing. Seven cases failed on it directly: _37_cubrid/_01_service,
+// _02_server, _03_manager and bug_xdbms79, _34_cub_auto/bug_xdbms212,
+// _35_cub_js/bug_xdbms212 and _36_cub_master/bug_xdbms40 -- exactly the set of
+// cases in the corpus that select processes by user. _02_server printed
+// "cubrid server start: success" and then "DB testdb can't start!" on the next
+// line, because `ps -u hgryoo` could not see the server it had just started.
+//
+// CTP's own cleanup is on the same list (init.sh kills by `ps -u $USER` and
+// sweeps broker segments by `ipcs | grep $USER`), so it has been finding nothing
+// too -- which does not fail a case, it just quietly leaves things behind.
+//
+// Setting it to root is not a workaround for the namespace, it is the namespace
+// described accurately: in here the processes really are root's, and a filter
+// that says so selects exactly what the case meant. Nothing in the corpus uses
+// $USER as a path or a database user -- that is $USERNAME, a different variable
+// CTP sets.
+func inside(env []string) []string {
+	out := make([]string, 0, len(env)+2)
+	for _, kv := range env {
+		switch {
+		case strings.HasPrefix(kv, "USER="), strings.HasPrefix(kv, "LOGNAME="):
+		default:
+			out = append(out, kv)
+		}
+	}
+	return append(out, "USER=root", "LOGNAME=root")
 }
 
 // Setup is what the contained process does before anything else: give itself a

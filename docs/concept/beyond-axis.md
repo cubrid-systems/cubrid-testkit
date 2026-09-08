@@ -744,28 +744,49 @@ kilobytes against the database volumes this exists to reclaim. Telling the two
 apart needs the tree as it was, and once the overlay is mounted that path leads
 to the overlay -- hence a read-only bind of the lower, taken first.
 
-#### One tmpfs or one per slot
+#### One tmpfs, one per slot, or one per lane
 
-Worth writing down because it was asked, and because the measurement answers it
-differently from the way it reads.
+Three different questions, and the measurement answers them differently.
 
-Per-slot placement does not help the part that is breaking. The working set is
-the sum of what the slots hold, and splitting the pool does not shrink that sum
--- it makes it worse, because each slot's ceiling then has to be sized for the
-**largest** directory it might get. That is `_18_unloaddb/itrack_10010` at
-1,078 MB, so eight private ceilings need 8.6 GB where one shared pool that flexes
-needed 6. A shared pool with a reclaim is strictly the better arrangement for
-memory.
+**One per slot** does not help the part that is breaking. The working set is the
+sum of what the slots hold, and splitting the pool does not shrink that sum -- it
+makes it worse, because each slot's ceiling then has to cover the **largest**
+directory it might draw. That is `_18_unloaddb/itrack_10010` at 1,078 MB, so
+eight private ceilings want 8.6 GB where one shared pool that flexes needed 6.
 
-What per-slot would buy is **blast radius**. With one pool, the case that fills it
-fails every other slot's case at the same moment, and nothing in the output says
-which case did it -- one arm's 34 failures are indistinguishable from 34 wrong
-answers. Per-slot ceilings would confine that to the slot and make the peak
-attributable. That is worth having and it is a diagnosis property, not a capacity
-one, so it is filed with B-T13 rather than here.
+**One per lane is the idea worth having**, and it is not the same thing. A set of
+slots on tmpfs, a set on disk, and the assignment made by how long the case runs
+-- because a case that cannot get speed out of memory has no business occupying
+it. The durations say how lopsided that is:
 
-The other reading of the question -- *some* slots on memory and *some* on disk --
-is B-T13 itself, and per-slot placement is the mechanism it needs.
+| | took | what memory is worth to it |
+|---|---:|---|
+| `bug_xdbms420` | 0 s | the whole fixed cost, ~2.6 s |
+| `bug_cubrid2125` | 6 s | ~40% of the case |
+| `bug_xdbms49` | 19 s | ~14% |
+| `bug_xdbms154` | 182 s | ~1%, and it holds the memory for three minutes |
+| `bug_cubridsus2560` | 183 s | ~1% |
+| `bug_cubridsus2018` | 183 s | ~1% |
+
+Six cases, and **three of them are 96% of the time**. In memory-seconds it is
+worse than that: those three occupy the ceiling for 548 of the sample's 573
+seconds and return about 8 seconds between them. Send them to disk and the fast
+pool needs a fraction of what it needs now -- which is the same thing as saying
+the ceiling stops being the binding constraint on the slot count.
+
+**And per-lane placement is also what makes a failure attributable.** With one
+pool, the case that fills it fails every other slot's case at the same moment,
+and nothing in the output says which one did it -- one arm's 34 failures are
+indistinguishable from 34 wrong answers, which is why two arms' verdicts had to
+be thrown away.
+
+What it needs, in order: the durations (**done** -- `case_plan`), then a corpus
+overlay mounted per lane inside the slots' own mount namespaces rather than once
+before them, then a lane in `Queue.Claim`. The middle step carries a constraint
+B-T13 did not note: 15 of the 217 directories hold more than one case, and if two
+slots in different lanes see different corpora, a case that set a database up for
+its sibling is invisible to it. So the queue has to keep a directory's cases in
+one lane.
 
 **And one lever is still untouched.** `log_volume_size` went from 512M to 20M and
 the wall clock went 1,738 s to 1,047. `db_volume_size` is the **same 512M default**
@@ -778,7 +799,7 @@ now finds a different volume.
 | Evidence | wall clock and verdicts at one and eight slots, against the same corpus on disk. Two levers -- the volume size and the ramdisk -- measured separately, because a combined number cannot say which one paid |
 | Risk | `ENOSPC` where there was 141 GB free. Named rather than mitigated: the cap is a number to pick with the corpus in front of you, and the verdicts say whether it was picked right |
 
-### B-T13. Fast and slow lanes, and one ceiling per slot — **idea**
+### B-T13. Fast and slow lanes, so memory goes where it pays — **idea**
 
 | | |
 |---|---|
@@ -820,15 +841,17 @@ keep every slot busy to the end. Long cases going to the slow lane costs them
 1% of themselves; short cases going to the fast lane is where the ratio moves.
 The two policies want the same split for different reasons.
 
-**And a second reason to make the upper layer per slot: the failures become
-attributable.** With one pool, the case that fills it fails every other slot's
-case at the same moment, and nothing in the output says which case did it -- one
-arm's 34 failures are indistinguishable from 34 wrong answers, which is why two
-arms' verdicts had to be thrown away. A per-slot ceiling confines that to the
-slot that caused it. It costs memory to do (each slot's ceiling has to cover the
-largest directory it might get -- 1,078 MB, so eight private ceilings want 8.6 GB
-where one shared pool needed 6), which is why it belongs with the lanes, where
-only the fast slots pay it.
+**Two more things follow from the split.** The failures become attributable: with
+one pool the case that fills it fails every other slot's case at the same moment
+and nothing says which one did it, and a per-lane ceiling confines that to the
+lane. And the fast pool is small enough to be worth having -- the measured
+alternative, one ceiling covering all eight slots, needed 6 GB and still filled.
+
+**One constraint the split has to respect.** 15 of the 217 directories hold more
+than one case, and two lanes are two different corpora: a case that set a
+database up for its sibling is invisible to a slot in the other lane. So the
+queue has to keep a directory's cases in one lane, which is the same bookkeeping
+the reclaim already does.
 
 **What it asks for.** The overlay moves from one mount before the slots to one
 per slot -- the lower layer stays shared, because it is the same read-only corpus,

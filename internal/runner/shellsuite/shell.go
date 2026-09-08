@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -143,6 +144,29 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// every other slot's server. Measured -- four slots produced a `ps -e -f`
 	// listing three keepers, two other slots' cases and another slot's
 	// cub_server, and then killed them.
+	// The corpus goes behind an overlay whose upper layer is memory, before the
+	// slots exist so that they inherit one rather than each mounting its own.
+	//
+	// It answers two things with one mechanism. A case creates its database in
+	// its own directory and not all of them delete it, and nothing puts the tree
+	// back -- 105 MB in the repository is 20 GB on this machine, and a case that
+	// finds a database it did not create behaves differently from one that does
+	// not. And the writes are the run's bottleneck: at eight slots the wall clock
+	// stopped improving, because 217 cases at 708 MB each is 150 GB against a
+	// disk that writes 332 MB/s.
+	//
+	// Clean is then structural rather than a step. 105 MB is cheap to copy, but a
+	// copy is something that can be skipped and a mount is a property of how the
+	// run is mounted.
+	if mb := cfg.Int("scenario_ram_mb", 0); mb > 0 {
+		release, err := ramOverlay(cfg.GetOr("scenario", ""), mb)
+		if err != nil {
+			return quit("%v", err)
+		}
+		defer release()
+		fmt.Printf("[INFO] the corpus is read-only for this run; its writes go to %d MB of memory\n", mb)
+	}
+
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
 	if n := cfg.Int("parallel_slots", 1); n > 1 {
 		slotted, closeSlots, err := openSlots(n, opener, machine)
@@ -313,6 +337,51 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 //
 // Nothing is reconfigured, which is the point. A slotted run's conf files and
 // log lines are the ones a serial run produces.
+// ramOverlay puts dir behind an overlay whose upper layer is a tmpfs of mb
+// megabytes, and returns the way to take it down again.
+//
+// The cap is the safety property rather than a formality. What accumulated 20 GB
+// on disk over weeks would end a run in memory, so the ceiling turns a run that
+// dies into a case that fails for want of space -- which is itself a change in
+// behaviour, because a case that tests running out of space now finds a
+// different amount of it.
+func ramOverlay(dir string, mb int) (func(), error) {
+	if dir == "" {
+		return nil, fmt.Errorf("scenario_ram_mb needs scenario to be set")
+	}
+	if !contain.Active() {
+		return nil, fmt.Errorf("scenario_ram_mb needs the runner contained; set %s=1", contain.Env)
+	}
+	ram, err := os.MkdirTemp("", "testkit-corpus-*")
+	if err != nil {
+		return nil, err
+	}
+	run := func(script string) error {
+		out, err := osexec.Command(contain.Shell, "-c", script).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%s: %w: %s", script, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if err := run(fmt.Sprintf("mount -t tmpfs -o size=%dm corpus %s && mkdir -p %s/up %s/work",
+		mb, ram, ram, ram)); err != nil {
+		return nil, err
+	}
+	undo := func() {
+		_ = run("umount " + dir)
+		_ = run("umount " + ram)
+		_ = os.Remove(ram)
+	}
+	if err := run(fmt.Sprintf(
+		"mount -t overlay overlay -o lowerdir=%s,upperdir=%s/up,workdir=%s/work %s",
+		dir, ram, ram, dir)); err != nil {
+		_ = run("umount " + ram)
+		_ = os.Remove(ram)
+		return nil, err
+	}
+	return undo, nil
+}
+
 func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channel, error),
 	machine *topology.Instance) ([]channelPair, func(), error) {
 

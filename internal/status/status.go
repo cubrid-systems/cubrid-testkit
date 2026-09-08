@@ -63,7 +63,21 @@ type Board struct {
 	done    int
 	ok      int
 	recent  []finished
+	// buckets counts completions per bucketSpan, so the page can show whether
+	// the run is keeping pace. With slots that is the question the numbers alone
+	// do not answer: ten workers finishing nothing looks like one worker on a
+	// long case until you see the rate go flat.
+	buckets []int
+	bucket0 time.Time
 }
+
+// bucketSpan is the resolution of the rate. Ten seconds is short enough that a
+// stall shows within one screen refresh and long enough that a single case
+// finishing does not read as a spike.
+const bucketSpan = 10 * time.Second
+
+// bucketMax bounds the series at half an hour of history.
+const bucketMax = 180
 
 type inflight struct {
 	Case  string
@@ -114,6 +128,26 @@ func (b *Board) End(slot, name string, ok bool) {
 	if len(b.recent) > recentMax {
 		b.recent = b.recent[len(b.recent)-recentMax:]
 	}
+	b.count(time.Now())
+}
+
+// count puts one completion in its bucket, filling the empty buckets in
+// between: a gap has to appear in the series as zeroes, or a stall would draw
+// as a straight line from before it to after.
+func (b *Board) count(at time.Time) {
+	if b.bucket0.IsZero() {
+		b.bucket0 = b.started
+	}
+	want := int(at.Sub(b.bucket0)/bucketSpan) + 1
+	for len(b.buckets) < want {
+		b.buckets = append(b.buckets, 0)
+	}
+	b.buckets[want-1]++
+	if len(b.buckets) > bucketMax {
+		drop := len(b.buckets) - bucketMax
+		b.buckets = b.buckets[drop:]
+		b.bucket0 = b.bucket0.Add(time.Duration(drop) * bucketSpan)
+	}
 }
 
 type view struct {
@@ -125,6 +159,8 @@ type view struct {
 	Remain   int        `json:"remain"`
 	Slots    []slotView `json:"slots"`
 	Recent   []doneView `json:"recent"`
+	Rate     []int      `json:"rate"`
+	RateSpan int        `json:"rateSpan"`
 	Finished bool       `json:"finished"`
 }
 
@@ -163,6 +199,12 @@ func (b *Board) snapshot() view {
 		})
 	}
 	sort.Slice(v.Slots, func(i, j int) bool { return v.Slots[i].Slot < v.Slots[j].Slot })
+	// The series runs to now, not to the last completion, so a stall is visible
+	// as it happens rather than only once something finishes.
+	b.count(time.Now())
+	b.buckets[len(b.buckets)-1]--
+	v.Rate = append([]int(nil), b.buckets...)
+	v.RateSpan = int(bucketSpan.Seconds())
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]
 		v.Recent = append(v.Recent, doneView{

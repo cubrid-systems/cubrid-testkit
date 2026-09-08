@@ -80,6 +80,14 @@ type Queue struct {
 
 	stopped bool
 
+	// inFlight is how many cases are running right now, across every slot. A
+	// retry is only handed out when it is zero, which is what makes the retry
+	// pass quiet.
+	inFlight int
+	// departed are the slots that have stopped asking. A retry owned by one of
+	// them has to go back to the general queue or nobody would ever run it.
+	departed map[string]bool
+
 	// --- lanes and slot affinity -----------------------------------------
 	//
 	// With lanes, a slot's corpus writes go to an overlay of its own, so two
@@ -118,6 +126,7 @@ func New(cases []string, maxRetry int) *Queue {
 		retryCount: map[string]int{},
 		queued:     map[string]bool{},
 		laneOf:     map[string]Lane{},
+		departed:   map[string]bool{},
 		owner:      map[string]string{},
 		held:       map[string][]string{},
 		taken:      make([]bool, len(cases)),
@@ -191,26 +200,45 @@ func (q *Queue) ClaimFor(slot string, lane Lane) (Ticket, bool) {
 		q.held[slot] = held[1:]
 		retry := q.retryCount[c]
 		delete(q.queued, c)
+		q.inFlight++
 		return Ticket{Case: c, Retry: retry}, true
 	}
 	if !q.lanes {
 		if q.next < len(q.cases) {
 			c := q.cases[q.next]
 			q.next++
+			q.inFlight++
 			return Ticket{Case: c}, true
 		}
 	} else if c, ok := q.scan(slot, lane); ok {
+		q.inFlight++
 		return Ticket{Case: c}, true
 	}
-	// The first pass is done for this claimant. Retries come now and not before.
-	for i, c := range q.retryQueue {
-		if q.lanes && !q.laneMatch(c, lane) {
-			continue
+	// The first pass is done for this claimant, so retries come now -- but only
+	// when nothing else is running.
+	//
+	// A retry exists to tell a flaky case from a broken build, and a case that
+	// failed because eight slots were competing for memory, disk or the ceiling
+	// will fail again if it is retried while they still are. Waiting for the
+	// machine to go quiet is what makes the second attempt mean something
+	// different from the first.
+	//
+	// It costs nothing to arrange: a worker that finds the first pass empty while
+	// others are still busy simply stops, and the last one standing drains the
+	// retries alone. Whoever completes the final case is the one that enqueued
+	// the last failure, so it is always there to pick it up.
+	if q.inFlight == 0 {
+		for i, c := range q.retryQueue {
+			if q.lanes && !q.laneMatch(c, lane) {
+				continue
+			}
+			q.retryQueue = append(q.retryQueue[:i:i], q.retryQueue[i+1:]...)
+			delete(q.queued, c)
+			q.inFlight++
+			return Ticket{Case: c, Retry: q.retryCount[c]}, true
 		}
-		q.retryQueue = append(q.retryQueue[:i:i], q.retryQueue[i+1:]...)
-		delete(q.queued, c)
-		return Ticket{Case: c, Retry: q.retryCount[c]}, true
 	}
+	q.departed[slot] = true
 	return Ticket{}, false
 }
 
@@ -259,6 +287,9 @@ func (q *Queue) Complete(t Ticket, success, hasCore bool) (retrying bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	if q.inFlight > 0 {
+		q.inFlight--
+	}
 	retrying = !success && !hasCore && t.Retry < q.maxRetry
 	if retrying {
 		q.enqueue(t.Case, t.Retry+1)
@@ -283,7 +314,10 @@ func (q *Queue) enqueue(c string, retry int) {
 	// against a pristine corpus, which is a different test from the one that
 	// failed.
 	if q.lanes {
-		if owner, ok := q.owner[dirOf(c)]; ok {
+		// A retry goes to the slot that owns the directory -- unless that slot
+		// has already stopped asking, in which case holding it for that slot
+		// would mean nobody ever runs it.
+		if owner, ok := q.owner[dirOf(c)]; ok && !q.departed[owner] {
 			q.held[owner] = append(q.held[owner], c)
 			return
 		}
@@ -298,7 +332,7 @@ func (q *Queue) Finished() bool {
 	if q.stopped {
 		return true
 	}
-	if len(q.retryQueue) > 0 {
+	if len(q.retryQueue) > 0 || q.inFlight > 0 {
 		return false
 	}
 	for _, held := range q.held {

@@ -175,6 +175,7 @@ func TestClaimForWithoutLanesIsTheOldQueue(t *testing.T) {
 		if !ok || tk.Case != want {
 			t.Fatalf("got %q %v, want %q -- an unassigned queue must ignore the lane", tk.Case, ok, want)
 		}
+		q.Complete(tk, true, false)
 	}
 	if !q.Finished() {
 		t.Error("the queue is not finished after every case was claimed")
@@ -198,6 +199,7 @@ func TestALaneOnlyGetsItsOwnCases(t *testing.T) {
 		if !ok || !strings.Contains(tk.Case, "long") {
 			t.Fatalf("the slow lane was handed %q", tk.Case)
 		}
+		q.Complete(tk, true, false)
 	}
 	if tk, ok := q.ClaimFor("slow0", LaneSlow); ok {
 		t.Errorf("the slow lane got a third case: %q", tk.Case)
@@ -210,6 +212,7 @@ func TestALaneOnlyGetsItsOwnCases(t *testing.T) {
 		if !ok || !strings.Contains(tk.Case, "short") {
 			t.Fatalf("the fast lane was handed %q", tk.Case)
 		}
+		q.Complete(tk, true, false)
 	}
 	if !q.Finished() {
 		t.Error("every case was claimed and the queue says it is not finished")
@@ -247,12 +250,14 @@ func TestADirectorysCasesAllGoToOneSlot(t *testing.T) {
 	if !ok || first.Case != "/x/multi/cases/a.sh" {
 		t.Fatalf("first claim was %q", first.Case)
 	}
+	q.Complete(first, true, false)
 	// The other slot must not be able to take a sibling, even though one is
 	// next in the list.
 	tk, ok := q.ClaimFor("slot1", LaneFast)
 	if !ok || tk.Case != "/x/other/cases/other.sh" {
 		t.Fatalf("slot1 was handed %q; the siblings should be held for slot0", tk.Case)
 	}
+	q.Complete(tk, true, false)
 	if _, ok := q.ClaimFor("slot1", LaneFast); ok {
 		t.Error("slot1 got a case from slot0's directory")
 	}
@@ -261,6 +266,7 @@ func TestADirectorysCasesAllGoToOneSlot(t *testing.T) {
 		if !ok || tk.Case != want {
 			t.Fatalf("slot0 got %q, want its held sibling %q", tk.Case, want)
 		}
+		q.Complete(tk, true, false)
 	}
 	if !q.Finished() {
 		t.Error("all four cases were claimed and the queue says it is not finished")
@@ -321,5 +327,99 @@ func TestDirOf(t *testing.T) {
 		if got := dirOf(in); got != want {
 			t.Errorf("dirOf(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A retry exists to tell a flaky case from a broken build, and a case that
+// failed because eight slots were competing for memory will fail again if it is
+// retried while they still are. So a retry is handed out only when nothing else
+// is running.
+func TestRetriesWaitForTheMachineToGoQuiet(t *testing.T) {
+	q := New(cs("a", "b"), 1)
+
+	a, _ := q.Claim()
+	b, _ := q.Claim()
+
+	// a fails while b is still running. Its retry is queued...
+	if !q.Complete(a, false, false) {
+		t.Fatal("a failing case with a retry left was not retried")
+	}
+	// ...and must not be handed out yet: b is still going.
+	if tk, ok := q.Claim(); ok {
+		t.Errorf("a retry was handed out while a case was still running: %q", tk.Case)
+	}
+	if q.Finished() {
+		t.Error("the queue reports finished with a case running and a retry pending")
+	}
+
+	// b finishes. Now the machine is quiet and the retry can go.
+	q.Complete(b, true, false)
+	tk, ok := q.Claim()
+	if !ok || tk.Case != a.Case || tk.Retry != 1 {
+		t.Fatalf("the retry was not handed out once the machine went quiet: %q %v", tk.Case, ok)
+	}
+	// And only one at a time: nothing else while the retry runs.
+	if _, ok := q.Claim(); ok {
+		t.Error("a second case was handed out during the retry pass")
+	}
+	q.Complete(tk, true, false)
+	if !q.Finished() {
+		t.Error("the queue is not finished after the retry succeeded")
+	}
+}
+
+// A worker that finds the first pass empty while others are busy simply stops.
+// The last one standing drains the retries, and it is always there: whoever
+// completes the final case is the one that enqueued the last failure.
+func TestTheLastWorkerDrainsTheRetries(t *testing.T) {
+	q := New(cs("a", "b", "c"), 1)
+	a, _ := q.ClaimFor("slot0", LaneAny)
+	b, _ := q.ClaimFor("slot1", LaneAny)
+	c, _ := q.ClaimFor("slot2", LaneAny)
+
+	q.Complete(a, false, false) // fails, queued for retry
+	// slot0 asks again: the first pass is empty and two cases are running.
+	if _, ok := q.ClaimFor("slot0", LaneAny); ok {
+		t.Error("slot0 took a retry while slot1 and slot2 were running")
+	}
+	q.Complete(b, true, false)
+	if _, ok := q.ClaimFor("slot1", LaneAny); ok {
+		t.Error("slot1 took a retry while slot2 was running")
+	}
+	// slot2 finishes last, so it is the one that drains.
+	q.Complete(c, true, false)
+	tk, ok := q.ClaimFor("slot2", LaneAny)
+	if !ok || tk.Case != a.Case {
+		t.Fatalf("the last worker did not get the retry: %q %v", tk.Case, ok)
+	}
+	q.Complete(tk, true, false)
+	if !q.Finished() {
+		t.Error("the queue is not finished after the last retry")
+	}
+}
+
+// With lanes, a retry goes back to the slot that owns the directory -- but a
+// slot that has already stopped asking would hold it for ever.
+func TestARetryOwnedByADepartedSlotGoesBackToTheQueue(t *testing.T) {
+	q := New(cs("a", "b"), 1)
+	q.Assign(map[string]Lane{"/x/a/cases": LaneFast, "/x/b/cases": LaneFast})
+
+	a, _ := q.ClaimFor("slot0", LaneFast)
+	b, _ := q.ClaimFor("slot1", LaneFast)
+	q.Complete(a, true, false)
+	// slot0 has nothing left and stops asking.
+	if _, ok := q.ClaimFor("slot0", LaneFast); ok {
+		t.Fatal("slot0 was given work while slot1 was running")
+	}
+	// Now b fails, and b's directory is owned by slot1 -- but suppose the owner
+	// had left: the general queue has to take it.
+	q.Complete(b, false, false)
+	tk, ok := q.ClaimFor("slot1", LaneFast)
+	if !ok || tk.Case != b.Case {
+		t.Fatalf("the retry did not come back: %q %v", tk.Case, ok)
+	}
+	q.Complete(tk, true, false)
+	if !q.Finished() {
+		t.Error("the queue is not finished")
 	}
 }

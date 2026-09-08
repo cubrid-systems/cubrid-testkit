@@ -158,3 +158,34 @@ func TestLoopbackIsUp(t *testing.T) {
 		t.Errorf("loopback is not up: %q", got)
 	}
 }
+
+// What one slot writes into the install must not be what another reads, and the
+// list of places a run writes has already been wrong once -- it named lib/ and
+// not locales/loclib/, where make_locale builds before moving the result. An
+// overlay does not need the list to be right.
+func TestSlotsWriteIntoTheInstallWithoutSeeingEachOther(t *testing.T) {
+	a, b := namespace(t), namespace(t)
+
+	install := t.TempDir()
+	if err := os.WriteFile(install+"/shared", []byte("from the install\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Overlay(install, t.TempDir()); err != nil {
+		t.Fatalf("overlay a: %v", err)
+	}
+	if err := b.Overlay(install, t.TempDir()); err != nil {
+		t.Fatalf("overlay b: %v", err)
+	}
+
+	if got := run(t, a, "cat "+install+"/shared"); got != "from the install" {
+		t.Errorf("the install does not read through the overlay: %q", got)
+	}
+	run(t, a, "echo a > "+install+"/conf")
+	run(t, b, "echo b > "+install+"/conf")
+	if got := run(t, a, "cat "+install+"/conf"); got != "a" {
+		t.Errorf("the other slot's write is visible here: %q", got)
+	}
+	if _, err := os.Stat(install + "/conf"); err == nil {
+		t.Error("a slot's write reached the install itself")
+	}
+}

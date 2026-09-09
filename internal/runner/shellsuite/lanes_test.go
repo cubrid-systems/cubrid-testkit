@@ -44,7 +44,7 @@ func TestTheSlotsFollowTheWork(t *testing.T) {
 	}
 	cases, took := corpus(pairs...)
 
-	sp, err := planLanes(cases, took, nil, 30, 0, 10)
+	sp, err := planLanes(cases, took, nil, 30, 0, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestNeitherLaneIsStarved(t *testing.T) {
 		pairs = append(pairs, "s"+string(rune('a'+i%26))+string(rune('a'+i/26)), 1)
 	}
 	cases, took := corpus(pairs...)
-	sp, err := planLanes(cases, took, nil, 30, 0, 2)
+	sp, err := planLanes(cases, took, nil, 30, 0, 0, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestNeitherLaneIsStarved(t *testing.T) {
 // whole directory goes to one slot and a slot is in one lane.
 func TestADirectoryGoesByItsLongestCase(t *testing.T) {
 	cases, took := corpus("multi#a", 5, "multi#b", 90, "solo", 5)
-	sp, err := planLanes(cases, took, nil, 30, 0, 4)
+	sp, err := planLanes(cases, took, nil, 30, 0, 0, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,15 +116,15 @@ func TestADirectoryGoesByItsLongestCase(t *testing.T) {
 // guess, and the run says so rather than guessing.
 func TestLanesRefuseWithoutDurations(t *testing.T) {
 	cases, _ := corpus("a", 1)
-	if _, err := planLanes(cases, nil, nil, 30, 0, 4); err == nil {
+	if _, err := planLanes(cases, nil, nil, 30, 0, 0, 4); err == nil {
 		t.Error("lanes were planned with no durations")
 	}
-	if _, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, nil, 30, 0, 1); err == nil {
+	if _, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, nil, 30, 0, 0, 1); err == nil {
 		t.Error("lanes were planned for one slot")
 	}
 	// And a threshold nothing reaches is not a split, it is a mistake worth
 	// reporting -- an empty slow lane would leave its slots idle all run.
-	sp, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, nil, 30, 0, 4)
+	sp, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, nil, 30, 0, 0, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestLanesRefuseWithoutDurations(t *testing.T) {
 // Off is off: no threshold means no lanes and no error.
 func TestNoThresholdIsNoLanes(t *testing.T) {
 	cases, took := corpus("a", 100)
-	sp, err := planLanes(cases, took, nil, 0, 0, 8)
+	sp, err := planLanes(cases, took, nil, 0, 0, 0, 8)
 	if err != nil || sp.on() {
 		t.Errorf("lane_slow_secs=0 gave %+v %v", sp, err)
 	}
@@ -170,7 +170,7 @@ func TestLanesSelectByFootprintNotDuration(t *testing.T) {
 		root + "/_d/small_fast/cases": 20,
 	}
 
-	sp, err := planLanes(cases, took, held, 0, 1000, 4)
+	sp, err := planLanes(cases, took, held, 0, 1000, 0, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestBothThresholdsAreAUnion(t *testing.T) {
 		root + "/_b/long/cases":    10,
 		root + "/_c/neither/cases": 10,
 	}
-	sp, err := planLanes(cases, took, held, 300, 1000, 4)
+	sp, err := planLanes(cases, took, held, 300, 1000, 0, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,11 +233,109 @@ func TestBothThresholdsAreAUnion(t *testing.T) {
 func TestFootprintLaneNeedsMeasurements(t *testing.T) {
 	cases := []string{"/c/shell/_a/x/cases/x.sh"}
 	took := map[string]time.Duration{cases[0]: time.Second}
-	_, err := planLanes(cases, took, nil, 0, 1000, 4)
+	_, err := planLanes(cases, took, nil, 0, 1000, 0, 4)
 	if err == nil {
 		t.Fatal("lane_slow_mb with no footprints should refuse")
 	}
 	if !strings.Contains(err.Error(), "case_sizes") {
 		t.Errorf("the refusal should name the file that supplies them: %v", err)
+	}
+}
+
+// Footprint and duration are unrelated on this corpus -- over 2,949 directories
+// measured at their peak, Spearman is +0.02 -- so selecting the disk lane by
+// footprint picks its bandwidth demand at random. The disk delivered 88 MB/s
+// under four concurrent writers, and these are real rows from that measurement:
+//
+//	8,662 MB in  17 s = 512 MB/s
+//	9,093 MB in 523 s =  17 MB/s
+//
+// lane_slow_mb sees similar megabytes and cannot tell them apart. Rate can, and
+// spends a budget longest-first, which is the greedy order for "as many bytes as
+// possible within a bandwidth" because bytes over bytes-per-second is seconds.
+func TestTheDiskLaneIsChosenByRateAndNotByBytes(t *testing.T) {
+	dirs := map[string]struct{ mb, secs int }{
+		"/c/fast_and_huge/cases": {8662, 17},  // 512 MB/s
+		"/c/slow_and_huge/cases": {9093, 523}, // 17 MB/s
+		"/c/slow_and_big/cases":  {6000, 300}, // 20 MB/s
+		"/c/tiny/cases":          {2, 5},      // 0.4 MB/s
+	}
+	var cases []string
+	took := map[string]time.Duration{}
+	held := map[string]int{}
+	for d, v := range dirs {
+		c := d + "/a.sh"
+		cases = append(cases, c)
+		took[c] = time.Duration(v.secs) * time.Second
+		held[d] = v.mb
+	}
+
+	// A budget of 88 MB/s, spent longest-first: 523 s takes 17, 300 s takes 20,
+	// 5 s takes 0.4 -- and the 17-second monster is refused because 512 does not
+	// fit in what is left.
+	sp, err := planLanes(cases, took, held, 0, 0, 88, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for dir, want := range map[string]dispatch.Lane{
+		"/c/slow_and_huge/cases": dispatch.LaneSlow,
+		"/c/slow_and_big/cases":  dispatch.LaneSlow,
+		"/c/tiny/cases":          dispatch.LaneSlow,
+		"/c/fast_and_huge/cases": dispatch.LaneFast,
+	} {
+		if got := sp.byDir[dir]; got != want {
+			t.Errorf("%s went to lane %v, want %v", dir, got, want)
+		}
+	}
+
+	// And what footprint would have done with the same numbers: the 512 MB/s
+	// directory is the *first* thing it sends to disk.
+	byBytes, err := planLanes(cases, took, held, 0, 8000, 0, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byBytes.byDir["/c/fast_and_huge/cases"] != dispatch.LaneSlow {
+		t.Error("lane_slow_mb=8000 was expected to send the 8,662 MB directory to disk; " +
+			"the point of this test is that it does, and that rate does not")
+	}
+}
+
+// A rate is megabytes over seconds, and both halves come from a previous run.
+func TestTheRateLaneNeedsBothMeasurements(t *testing.T) {
+	cases := []string{"/c/a/cases/a.sh"}
+	took := map[string]time.Duration{"/c/a/cases/a.sh": 10 * time.Second}
+	held := map[string]int{"/c/a/cases": 100}
+
+	if _, err := planLanes(cases, nil, held, 0, 0, 88, 8); err == nil {
+		t.Error("lane_slow_mbps with no durations should say what it needs")
+	}
+	if _, err := planLanes(cases, took, nil, 0, 0, 88, 8); err == nil {
+		t.Error("lane_slow_mbps with no footprints should say what it needs")
+	}
+}
+
+// Every knob that names a lane has to turn lanes on. lane_slow_mbps was added
+// and the boolean that decides whether to split the corpus at all was left
+// naming only the two older ones, so a run configured with it ran shared -- and
+// said so in a line that also tested only the oldest knob.
+func TestEveryLaneKnobTurnsLanesOn(t *testing.T) {
+	for _, c := range []struct {
+		name                       string
+		slowSecs, slowMB, slowMBps int
+		want                       bool
+	}{
+		{"nothing configured", 0, 0, 0, false},
+		{"by duration", 30, 0, 0, true},
+		{"by footprint", 0, 1000, 0, true},
+		{"by rate", 0, 0, 88, true},
+		{"rate with the others", 30, 1000, 88, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := c.slowSecs > 0 || c.slowMB > 0 || c.slowMBps > 0
+			if got != c.want {
+				t.Errorf("lane_slow_secs=%d lane_slow_mb=%d lane_slow_mbps=%d: lanes=%v want %v",
+					c.slowSecs, c.slowMB, c.slowMBps, got, c.want)
+			}
+		})
 	}
 }

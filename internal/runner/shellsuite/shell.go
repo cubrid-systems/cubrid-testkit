@@ -195,7 +195,8 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 
 	slowSecs := cfg.Int("lane_slow_secs", 0)
 	slowMB := cfg.Int("lane_slow_mb", 0)
-	lanes := slowSecs > 0 || slowMB > 0
+	slowMBps := cfg.Int("lane_slow_mbps", 0)
+	lanes := slowSecs > 0 || slowMB > 0 || slowMBps > 0
 	slots := cfg.Int("parallel_slots", 1)
 	ramMB := cfg.Int("scenario_ram_mb", 0)
 	if lanes && ramMB <= 0 {
@@ -203,6 +204,9 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	}
 	if slowMB > 0 && sizePath == "" {
 		return quit("lane_slow_mb needs case_sizes: the footprints it thresholds are measured by a run, not guessed")
+	}
+	if slowMBps > 0 && (sizePath == "" || planPath == "") {
+		return quit("lane_slow_mbps needs case_sizes and case_plan: a rate is megabytes over seconds and both halves are measured by a run, not guessed")
 	}
 
 	var corpus *Corpus
@@ -218,7 +222,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 			for c := range known {
 				measured = append(measured, c)
 			}
-			sp, err := planLanes(measured, known, heldMB, slowSecs, slowMB, slots)
+			sp, err := planLanes(measured, known, heldMB, slowSecs, slowMB, slowMBps, slots)
 			if err != nil {
 				return quit("%v", err)
 			}
@@ -233,7 +237,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		}
 		corpus = c
 		defer corpus.Close()
-		if slowSecs > 0 {
+		if lanes {
 			fmt.Printf("[INFO] the corpus is read-only for this run; the fast lane's writes go to %d MB of memory and the slow lane's to disk\n", ramMB)
 		} else {
 			fmt.Printf("[INFO] the corpus is read-only for this run; its writes go to %d MB of memory\n", ramMB)

@@ -164,6 +164,9 @@ them: `dispatch_tc_ALL.txt` and `dispatch_tc_FIN_local.txt` (the cases found and
 `main_snapshot.properties`, `feedback.log`, `test-shell.xml`, `test_local.log`, plus `main.info`
 and `summary_info`.
 
+One file is this runner's own, and it is absent unless it has something to say: `patched.txt`, the
+cases that did not run as the corpus has them. See [`patches/README.md`](patches/README.md).
+
 ![Animated: a shell run checks the machine, finds the cases, runs each one after a process reset, judges the result file, and writes the verdicts down. Four real cases: three OK and one NOK. Every stage leaves a file that is part of the frozen surface.](docs/assets/anim-shell-run.svg)
 
 ## The shell task in detail
@@ -366,7 +369,8 @@ worker pulling cases through it:
     │             ├── $CUBRID          an overlay of its own — writable, nothing copied
     │             ├── $CUBRID_DATABASES  likewise: the registry is per slot
     │             ├── /dev/shm         its own, so POSIX segments do not collide
-    │             ├── CUBRID_TMP       its own, so the master sockets do not collide
+    │             ├── CUBRID_TMP       $CUBRID/tmp, so the master sockets do not collide
+    │             ├── 192.0.2.1        an address, so `hostname -I` answers
     │             └── port 1523        its own, because the network namespace says so
     │
     ├── slot1 ── the same, and it cannot see any of slot0's
@@ -387,6 +391,28 @@ measured, and it is why the first slot cannot be left outside.
 Two things a slot does not get, on purpose. It shares `/tmp`, because cases are entitled to, and it
 shares the machine's hostname, because 126 cases read it.
 
+**And four things it has to be given, because the isolation takes them away.** Each was found the
+same way — a failure that looked like the case's and was the runner's — and each is measured:
+
+| what | why | measured |
+|---|---|---|
+| an address on a dummy interface | `hostname -I` reports every interface *except* loopback, so in a fresh network namespace it answers with an empty string. 108 case scripts start `hostip=$(hostname -I \| awk '{print $1}')` and then connect to it, register a dblink server, or hand the empty string to a utility that says `Incorrect hostname format` | 6 failures → 0 |
+| `TAR_OPTIONS=--no-same-owner` | a user namespace maps one uid, so `tar -x` cannot restore an archive's recorded ownership: it extracts the files and exits 2. 51 case scripts unpack something, and the exit status is what fails them | exit 2 → exit 0 |
+| a linker that keeps what the command line names | not the isolation but the distribution: `--as-needed` is the default here and not on the CI image, and CTP's `xgcc` puts `-lcascci` *before* the object that needs it. 173 case scripts compile C | 112 failures → 2 |
+| `$CUBRID_TMP` at the shipped path | it was on `/var/tmp/tk<pid>/<slot>`, which is per-slot and short but is not where the engine puts it — and cases compare output holding a socket path against an answer written as `${CUBRID}/...` | 1 failure → 0 |
+
+`192.0.2.0/24` is TEST-NET-1, reserved by RFC 5737 for documentation, so it cannot be mistaken for a
+real host anywhere a case records it. Every slot gets the same address for the same reason every slot
+keeps port 1523: a slot should look like a machine, and they are machines that cannot see each other.
+
+**The registry has a shared floor.** `$CUBRID_DATABASES` is an overlay like `$CUBRID`, so a slot's
+*writes* are its own — which matters more than it sounds: the corpus makes 4,056 `createdb` calls
+using 115 distinct names, and `testdb` alone is used by 74 different cases. What the overlay cannot
+isolate is the lower layer, the directory as the machine left it, so an entry an earlier run left
+behind is in every slot at once. `make_tz -g extend` walks every name in `databases.txt`, so one
+stale entry failed all 38 timezone cases. The run says so before the first case, and the reclaim now
+takes a directory's entries with it when it drops the directory.
+
 **A queue, not a partition.** All slots pull from one queue, so a slot that draws short cases keeps
 drawing; nothing is assigned up front. With durations from an earlier run the queue hands out the
 longest first, which is the same schedule as partitioning by rank beforehand without having to know
@@ -396,6 +422,32 @@ how many slots there are.
 memory and a directory's writes dropped when its last case finishes. That is why fifteen directories
 holding more than one case matter: with lanes the overlay becomes per slot, and then the queue has
 to keep a directory's cases together. Without lanes there is one overlay and it does not arise.
+
+### What a lane is
+
+A lane is a block of slots whose corpus writes go to the same place: the **fast** lane's to the
+tmpfs, the **slow** lane's to disk. Off by default — one overlay, every slot in memory.
+
+The idea in one sentence: a case that cannot get speed out of memory has no business occupying it.
+The ceiling is finite, and a directory that holds gigabytes while gaining nothing from being in RAM
+is spending the ceiling on behalf of the cases that would.
+
+**Which cases those are is the part that took two attempts.** `lane_slow_secs` picks them by
+duration, and it lost its own measurement — 696 s against a predicted 440. Duration is answering two
+questions with one number: for *which case should a free slot take next* it is right, and makespan
+proves it; for *which cases should not be given memory* it is a proxy, and an anti-correlated one,
+because the long cases are the I/O-heavy ones and those are what memory helps most.
+
+`lane_slow_mb` picks them by footprint instead, from what `case_sizes` measured. What the ceiling
+counts is megabytes, so megabytes are what the lane is chosen by. Set both and a directory goes to
+the slow lane for either reason.
+
+Slots are divided in proportion to the case-seconds each lane holds, so the two lanes finish
+together. Both lanes get at least one slot, and a split that would starve one is refused rather than
+made.
+
+**Lanes are for a machine where memory is the binding constraint.** On the machine this was measured
+on it is not, and the fast lane alone wins — see the table above.
 
 ### Running it on your own machine
 

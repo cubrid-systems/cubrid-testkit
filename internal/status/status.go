@@ -148,6 +148,8 @@ type Board struct {
 	typical time.Duration
 	// setup is how the run was configured, recorded once before the first case.
 	setup setupBox
+	// patched names the cases a compatibility patch was applied to.
+	patched map[string]bool
 	// replayAt is the knobs' state as the replayer last published it.
 	//
 	// Published rather than asked for. The replayer takes its own lock and then
@@ -259,6 +261,31 @@ func (b *Board) Lane(slot, lane string) {
 	if b.bySlot[slot] == nil {
 		b.bySlot[slot] = &tally{}
 	}
+}
+
+// Patched records that a case ran against a compatibility patch. A verdict from
+// patched source is a claim about the patched case, not about the corpus, and
+// every place the page shows the verdict has to show that too.
+func (b *Board) Patched(name string) {
+	if b == nil || name == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.patched == nil {
+		b.patched = map[string]bool{}
+	}
+	b.patched[name] = true
+}
+
+// WasPatched reports whether a case ran against a patch.
+func (b *Board) WasPatched(name string) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.patched[name]
 }
 
 // Expect tells the board what the run is expected to cost, from the plan an
@@ -464,6 +491,8 @@ type view struct {
 	// Setup is how the run was configured. Static, and sent with every snapshot
 	// because a reader who opens the page an hour in needs it too.
 	Setup []Setting `json:"setup,omitempty"`
+	// NPatched is how many finished cases ran against a compatibility patch.
+	NPatched int `json:"npatched,omitempty"`
 	// Templates is nil unless the run uses the database-template cache, and the
 	// page leaves the panel out when it is.
 	Templates *templateView `json:"templates,omitempty"`
@@ -512,6 +541,10 @@ type doneView struct {
 	Case string `json:"case"`
 	OK   bool   `json:"ok"`
 	Took int    `json:"took"`
+	// Patched marks a verdict produced from a case this run changed before it
+	// ran it. It is a different claim from a verdict about the corpus, and the
+	// page has to say which one it is showing.
+	Patched bool `json:"patched,omitempty"`
 }
 
 func (b *Board) snapshot() view {
@@ -558,6 +591,7 @@ func (b *Board) snapshot() view {
 		f := b.failed[i]
 		v.Failed = append(v.Failed, doneView{
 			Slot: f.Slot, Case: f.Case, OK: false, Took: int(f.Took.Seconds()),
+			Patched: b.patched[f.Case],
 		})
 	}
 	v.Rate = append([]int(nil), b.buckets...)
@@ -576,6 +610,7 @@ func (b *Board) snapshot() view {
 	}
 	v.Lanes = b.lanes()
 	v.Setup = b.setupRows()
+	v.NPatched = len(b.patched)
 	v.Templates = b.templates.snapshot()
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()
@@ -583,6 +618,7 @@ func (b *Board) snapshot() view {
 		f := b.recent[i]
 		v.Recent = append(v.Recent, doneView{
 			Slot: f.Slot, Case: f.Case, OK: f.OK, Took: int(f.Took.Seconds()),
+			Patched: b.patched[f.Case],
 		})
 	}
 	return v

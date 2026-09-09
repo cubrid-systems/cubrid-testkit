@@ -459,8 +459,18 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		}
 	}
 
+	// A corpus changed before it ran is the first thing a reader of the verdicts
+	// has to know, so it is said here and repeated per case and on the page.
+	patches, perr := LoadPatches(cfg.GetOr("case_patch_dir", ""), cfg.GetOr("scenario", ""), cases)
+	if perr != nil {
+		return quit("%v", perr)
+	}
+	for _, line := range patches.Describe() {
+		fmt.Println(line)
+	}
+
 	fmt.Println("STARTED")
-	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split)
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split, patches)
 
 	if planPath != "" {
 		if werr := record.Write(planPath); werr != nil {
@@ -839,7 +849,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, split laneSplit) error {
+	record *plan.Record, split laneSplit, patches *Patches) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -849,7 +859,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 			defer wg.Done()
 			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg,
 				buildID, bits, local, board, corpus, record, split.laneOf(i),
-				fmt.Sprintf("slot%d", i))
+				fmt.Sprintf("slot%d", i), patches)
 		}(i, pair)
 	}
 	wg.Wait()
@@ -873,7 +883,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, lane dispatch.Lane, slotID string) error {
+	record *plan.Record, lane dispatch.Lane, slotID string, patches *Patches) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
 	// Which lane this slot is in: where its corpus writes land. With lanes off
@@ -892,6 +902,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 		EnvID:     machine.EnvID(),
 		SlotID:    slotID,
 		Board:     board,
+		Patches:   patches,
 		Corpus:    corpus,
 		Plan:      record,
 		LaneID:    lane,

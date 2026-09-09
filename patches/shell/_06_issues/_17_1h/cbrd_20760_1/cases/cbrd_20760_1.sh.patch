@@ -1,0 +1,19 @@
+--- cbrd_20760_1.sh
++++ cbrd_20760_1.sh
+@@ -9,6 +9,16 @@
+ 	cp $CUBRID/conf/cubrid.conf $CUBRID/conf/cubrid.conf.org	    
+ fi
+ 
++# testkit compatibility: the baseline this case compares against is an empty
++# [common]. test1.answer expects "[C ] db_volume_size=512.0M (512.0M)" -- the
++# engine's own default, with nothing overriding it. CUBRID does not ship that:
++# the stock cubrid.conf sets log_volume_size=20M, so this case fails on a fresh
++# install, and a run that also lowers db_volume_size fails it twice over.
++# Clearing the two parameters the case is about makes the default it asserts the
++# default it gets. Only here: from testcase 2 on, the case sets these itself and
++# is entitled to what it sets.
++sed -i '/^[[:space:]]*db_volume_size[[:space:]]*=/d;/^[[:space:]]*log_volume_size[[:space:]]*=/d' $CUBRID/conf/cubrid.conf
++
+ echo "[@tdb2]" >> $CUBRID/conf/cubrid.conf
+ 
+ #testcase 1: do not set any macros in cubrid.conf (use the defaule value)

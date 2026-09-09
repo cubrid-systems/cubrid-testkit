@@ -731,10 +731,16 @@ func (s *Shell) prepareWorkspace(ctx context.Context, ch exec.Channel, cfg *conf
 	fmt.Println(out.Output())
 
 	if workspace != "" && workspace != scenario {
+		// This empties the workspace, so it is checked before it is a command
+		// rather than after it has been one.
+		if err := safeToEmpty("testcase_workspace_dir", workspace); err != nil {
+			return "", err
+		}
+		w, sc := shQuote(workspace), shQuote(scenario)
 		script := strings.Join([]string{
-			"mkdir -p " + workspace,
-			"rm -rf " + workspace + "/*",
-			"cp -r " + scenario + "/* " + workspace,
+			"mkdir -p " + w,
+			"rm -rf " + w + "/*",
+			"cp -r " + sc + "/* " + w,
 		}, "\n")
 		if _, err := runIn(ctx, ch, script); err != nil {
 			return "", err

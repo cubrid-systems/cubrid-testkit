@@ -347,7 +347,7 @@ func (c *Corpus) dropInSlot(st *slotStore, dir string) {
 	}
 	args := make([]string, 0, len(gone))
 	for _, g := range gone {
-		args = append(args, "'"+strings.ReplaceAll(g, "'", `'''`)+"'")
+		args = append(args, shQuote(g))
 	}
 	_ = st.run("rm -rf -- " + strings.Join(args, " "))
 }

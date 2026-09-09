@@ -1,13 +1,17 @@
 package shellsuite
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
 )
 
@@ -278,5 +282,59 @@ func TestTheResetRefusesWithoutACubridInstall(t *testing.T) {
 				t.Fatalf("a directory named core was deleted: %v", serr)
 			}
 		})
+	}
+}
+
+// The reset's blast radius was the machine because a mount namespace shares the
+// filesystem except where something is mounted over it. The process sweep is the
+// other half of the same question, and the answer has to be demonstrated rather
+// than read: a PID namespace does contain `ps -e`, but only if the sweep runs
+// inside one and only if it was told it is contained.
+func TestTheSweepCannotReachOutsideTheSlot(t *testing.T) {
+	if os.Getenv("TESTKIT_CONTAINED") != "1" {
+		t.Skip("not contained; run under TESTKIT_CONTAIN=1")
+	}
+	// A process outside the slot, named like something the sweep hunts.
+	outside := exec.Command("bash", "-c", "exec -a cub_master_decoy sleep 120")
+	if err := outside.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = outside.Process.Kill()
+		_ = outside.Wait()
+	}()
+
+	ns, err := contain.Open("sweeptest")
+	if err != nil {
+		t.Fatalf("open slot: %v", err)
+	}
+	defer ns.Close()
+
+	// The sweep as a contained run issues it.
+	if _, err := ns.Channel("").Run(context.Background(), KillScript(true, true)); err != nil {
+		t.Logf("the sweep returned an error, which it often does: %v", err)
+	}
+
+	// Give any kill a moment to land, then check the outsider is still there.
+	time.Sleep(500 * time.Millisecond)
+	if err := outside.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("the sweep reached a process outside the slot: %v", err)
+	}
+}
+
+// And the uncontained sweep is CTP's, which selects by $USER across the whole
+// machine. That is documented as item B in docs/evidence/ctp-improvements.md;
+// what must not happen is a contained run quietly taking that path.
+func TestAContainedRunDoesNotUseTheMachineWideSelector(t *testing.T) {
+	contained := KillScript(true, true)
+	if strings.Contains(contained, "ps -u $USER") {
+		t.Error("a contained sweep must not select by user: that is the selector that reaches the whole machine")
+	}
+	if !strings.Contains(contained, "ps -e") {
+		t.Error("a contained sweep should look at its own PID namespace")
+	}
+	loose := KillScript(true, false)
+	if !strings.Contains(loose, "ps -u $USER") {
+		t.Error("the uncontained sweep is CTP's and is kept verbatim")
 	}
 }

@@ -170,7 +170,7 @@ func (p *Patches) Describe() []string {
 // the point: a patch that no longer applies means the case has moved, and
 // running the case unpatched would answer a question nobody asked.
 func ApplyScript(caseDir, patchFile string) string {
-	d, f := shellQuote(caseDir), shellQuote(patchFile)
+	d, f := shQuote(caseDir), shQuote(patchFile)
 	return "patch -p0 --batch --forward --dry-run -d " + d + " -i " + f + " >/dev/null 2>&1 && " +
 		"patch -p0 --batch --forward -d " + d + " -i " + f
 }
@@ -189,7 +189,7 @@ func ApplyScript(caseDir, patchFile string) string {
 // so -- the revert is refused rather than making it worse, and the caller
 // reports it.
 func RevertScript(caseDir, patchFile string) string {
-	d, f := shellQuote(caseDir), shellQuote(patchFile)
+	d, f := shQuote(caseDir), shQuote(patchFile)
 	// --forward alongside --reverse is what stops a second revert re-applying
 	// the patch forwards: to a reversed run, an already-reverted file looks like
 	// a reversed patch, and --forward skips those instead of "fixing" them.

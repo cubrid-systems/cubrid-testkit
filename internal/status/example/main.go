@@ -62,6 +62,7 @@ func main() {
 		{"TESTKIT_NATIVE_SHELL", "run cases here rather than through CTP"},
 		{"TESTKIT_CONTAIN", "namespaces of the run's own"},
 		{"TESTKIT_CONTAIN_SH", "shell bound over /bin/sh"},
+		{"TESTKIT_NO_LINK_SHIM", "leave the machine linker as it is"},
 		{"CTP_SERVER_START_NOWAIT", "do not wait for the server to come up"},
 		{"CTP_DB_TEMPLATE_CACHE", "reuse a built database instead of createdb"},
 		{"CTP_ERROR_BACKUP", "pack a failing case's databases"},

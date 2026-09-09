@@ -601,6 +601,16 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 			return nil, nil, err
 		}
 		env := []string{"CUBRID_TMP=" + tmp}
+		// And a linker that keeps the libraries the command line names, where
+		// the machine's would drop them. Measured per run rather than assumed,
+		// and absent on a toolchain that needs no correction -- see
+		// contain.GccShim.
+		if bin, gerr := contain.GccShim(filepath.Join(tmp, "bin")); gerr != nil {
+			closeAll()
+			return nil, nil, gerr
+		} else if bin != "" {
+			env = append(env, "PATH="+bin+":"+os.Getenv("PATH"))
+		}
 		pairs = append(pairs, channelPair{
 			worker:  ns.Channel("", env...),
 			monitor: ns.Channel("", env...),
@@ -617,14 +627,37 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 // after which the case fails on a comparison rather than on the real cause.
 const sunPathMax = 108
 
-// slotTmp is the short directory a slot's master keeps its socket in.
+// slotTmp is the directory a slot's master keeps its socket in.
 //
-// Deliberately not derived from TESTKIT_SLOT_ROOT: that is where the overlays
-// go, where length does not matter, and it is often long. This one is bounded.
+// $CUBRID/tmp first, because that is where the engine puts it when nothing says
+// otherwise and it is already this slot's own: $CUBRID is behind a per-slot
+// overlay, so two slots writing CUBRID1523 there do not meet. Staying at the
+// shipped path also keeps the cases' own normalisation working -- several
+// compare output holding a socket path against an answer that says
+// "${CUBRID}/...", and a path outside $CUBRID is a path their sed does not
+// rewrite. Observed on _08_shard/_13_shard_command, whose answer expects
+// ${CUBRID}/var/CUBRID_SOCK and got /var/tmp/tk<pid>/slot1.
+//
+// /var/tmp is the fallback and not the default. It exists because sun_path is
+// 108 bytes: an install deep enough produces a socket path the kernel cannot
+// hold, the engine says "The $CUBRID_TMP is too long" on every command, and the
+// case then fails on a comparison rather than on the real cause. Deliberately
+// not derived from TESTKIT_SLOT_ROOT, which is where the overlays go and is
+// often long.
 func slotTmp(label string) (string, error) {
-	dir := filepath.Join("/var/tmp", fmt.Sprintf("tk%d", os.Getpid()), label)
 	// The longest name the engine puts here is the socket, CUBRID<port>.
-	if n := len(dir) + len("/CUBRID65535") + 1; n > sunPathMax {
+	const leaf = "/CUBRID65535"
+	if home := os.Getenv("CUBRID"); home != "" {
+		dir := filepath.Join(home, "tmp")
+		if len(dir)+len(leaf) < sunPathMax {
+			if err := os.MkdirAll(dir, 0o1777); err != nil {
+				return "", fmt.Errorf("%s: %w", label, err)
+			}
+			return dir, nil
+		}
+	}
+	dir := filepath.Join("/var/tmp", fmt.Sprintf("tk%d", os.Getpid()), label)
+	if n := len(dir) + len(leaf) + 1; n > sunPathMax {
 		return "", fmt.Errorf("%s: CUBRID_TMP would be %s, and a socket under it needs %d of the %d bytes a Unix socket path has",
 			label, dir, n, sunPathMax)
 	}

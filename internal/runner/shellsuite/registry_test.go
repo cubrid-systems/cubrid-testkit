@@ -100,3 +100,41 @@ func TestPruningWithoutARegistryIsQuiet(t *testing.T) {
 		t.Fatalf("prune should be a no-op: %v: %s", err, out)
 	}
 }
+
+// The socket lives where the engine ships it whenever that fits, because the
+// cases normalise their output against $CUBRID and a path outside it is a path
+// their sed does not rewrite.
+func TestSlotTmpPrefersTheShippedPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CUBRID", home)
+	got, err := slotTmp("slot0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, "tmp"); got != want {
+		t.Fatalf("CUBRID_TMP is %s, want %s", got, want)
+	}
+	if _, err := os.Stat(got); err != nil {
+		t.Errorf("the directory was not made: %v", err)
+	}
+}
+
+// And falls back when the install is deep enough that a socket under it would
+// not fit in sun_path -- which is a real engine error, not a theory.
+func TestSlotTmpFallsBackWhenThePathWouldNotFit(t *testing.T) {
+	deep := filepath.Join(t.TempDir(), strings.Repeat("d", 60), strings.Repeat("e", 60))
+	t.Setenv("CUBRID", deep)
+	got, err := slotTmp("slot0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(got, deep) {
+		t.Fatalf("a socket under %s cannot fit in %d bytes, and CUBRID_TMP went there anyway", got, sunPathMax)
+	}
+	if !strings.HasPrefix(got, "/var/tmp/") {
+		t.Errorf("the fallback should be the bounded one: %s", got)
+	}
+	if n := len(got) + len("/CUBRID65535") + 1; n > sunPathMax {
+		t.Errorf("the fallback is %d bytes with the socket, over the %d available", n, sunPathMax)
+	}
+}

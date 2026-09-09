@@ -2,6 +2,7 @@ package shellsuite
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -72,19 +73,26 @@ type Corpus struct {
 
 	mu sync.Mutex
 	// pending counts, per case directory, the cases that have yet to retire.
-	// Reclaiming per case rather than per directory would be wrong: 15 of this
-	// family's 217 directories hold more than one case, and a case that set up a
-	// database for its sibling would find it gone.
+	// Reclaiming per case rather than per directory would be wrong: a directory
+	// can hold more than one case, and a case that set up a database for its
+	// sibling would find it gone. (An earlier comment here said "15 of this
+	// family's 217 directories"; counted on the corpus this runs, it is 0 of
+	// 3,494 -- the shape of the rule is right and that figure was not.)
 	pending map[string]int
 	freed   int
-	// held is how many megabytes each directory was holding when it retired,
-	// which is the measurement lanes need: the ceiling is made of space, so the
-	// lane that gives space away has to be chosen by space.
+	// held is the most each directory was seen holding, which is the measurement
+	// lanes need: the ceiling is made of space, so the lane that gives space
+	// away has to be chosen by space.
 	//
-	// The tmpfs is measured whole, so a directory reclaimed while other slots are
-	// writing reads low. It is the right kind of wrong -- the figure selects the
-	// directories worth keeping off memory, and those are the ones whose own
-	// gigabytes dwarf what seven other slots move in the same instant.
+	// The most, and not what it had left at the end. Two earlier versions of
+	// this were wrong in different ways. Taking the drop in the whole tmpfs
+	// across a reclaim measures mostly what other slots were writing at that
+	// instant -- it recorded 342 directories summing to 13,854 MB for a run that
+	// held 22,528 MB at once. Taking what the directory still had at retire is
+	// honest but answers a different question: a case that writes four gigabytes
+	// and deletes them before it finishes leaves nothing, and 70 directories
+	// summed to 7,334 MB for a run that filled 12,288. What fills a ceiling is
+	// what is held while the case runs, so that is what is sampled.
 	held map[string]int
 
 	peak int
@@ -291,12 +299,24 @@ func (c *Corpus) Retire(slot, dir string) bool {
 		if before > c.peak {
 			c.peak = before
 		}
+		// The footprint is measured on the directory's own upper layer, before
+		// it goes. It used to be the drop in the whole tmpfs across the delete
+		// -- which is what the tmpfs is for, but not what one directory holds:
+		// with 24 slots writing at the same time the difference is mostly other
+		// slots' work, and it comes out negative as often as not. That is why
+		// case_sizes held 342 directories summing to 13,854 MB after a run whose
+		// ceiling measured 22,528 MB in use at once. A sum of parts smaller than
+		// the peak they were part of cannot be right, and lane_slow_mb
+		// thresholds those parts.
+		own := c.ownMB(st, dir)
 		c.dropInSlot(st, dir)
 		reclaimed = true
 		if st.onRAM {
 			if freed := before - c.used(); freed > 0 {
 				c.freed += freed
-				c.held[dir] = freed
+			}
+			if own > c.held[dir] {
+				c.held[dir] = own
 			}
 		}
 		// A slow-lane directory writes to disk, so there is nothing on the tmpfs
@@ -311,10 +331,18 @@ func (c *Corpus) Retire(slot, dir string) bool {
 	if before > c.peak {
 		c.peak = before
 	}
+	// Measured on the directory before it goes, for the reason given above: the
+	// tmpfs delta is what the ceiling gave back, and with every slot writing
+	// into the same tmpfs that is not what this directory was holding. This is
+	// the path a run without lanes takes, so it is the one that produced the
+	// figures case_sizes has.
+	own := c.addedMB(dir, c.pristineOf(dir))
 	c.dropAdditions(dir, c.pristineOf(dir))
 	if freed := before - c.used(); freed > 0 {
 		c.freed += freed
-		c.held[dir] = freed
+	}
+	if own > c.held[dir] {
+		c.held[dir] = own
 	}
 	return true
 }
@@ -362,6 +390,20 @@ func (c *Corpus) dropInSlot(st *slotStore, dir string) {
 		args = append(args, shQuote(g))
 	}
 	_ = st.run("rm -rf -- " + strings.Join(args, " "))
+}
+
+// ownMB is how much of the tmpfs one directory is holding, in MB, measured on
+// the slot's own upper layer rather than on the tmpfs as a whole.
+//
+// Blocks and not sizes: a tmpfs charges what it allocates, and that is the
+// number the ceiling counts. A sparse file would otherwise be recorded as its
+// apparent length and a directory of small files as less than it takes.
+func (c *Corpus) ownMB(st *slotStore, dir string) int {
+	rel, ok := c.relOf(dir)
+	if !ok || st == nil {
+		return 0
+	}
+	return int(treeBytes(filepath.Join(st.upperRoot, "upper", rel)) / (1 << 20))
 }
 
 // collectAdditions walks the upper layer and names, in the overlay's own
@@ -420,6 +462,106 @@ func (c *Corpus) dropAdditions(live, pristine string) {
 	}
 }
 
+// addedMB is what a directory has added to the pristine tree, in megabytes.
+//
+// It walks the same way dropAdditions does and counts what that would delete,
+// so the number recorded is exactly the files this directory put there. Blocks
+// rather than sizes, because a tmpfs charges what it allocates and that is what
+// the ceiling counts.
+func (c *Corpus) addedMB(live, pristine string) int {
+	if pristine == "" {
+		return 0
+	}
+	return int(c.addedBytes(live, pristine) / (1 << 20))
+}
+
+func (c *Corpus) addedBytes(live, pristine string) int64 {
+	entries, err := os.ReadDir(live)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		l := filepath.Join(live, e.Name())
+		p := filepath.Join(pristine, e.Name())
+		ps, err := os.Lstat(p)
+		if err != nil {
+			total += treeBytes(l)
+			continue
+		}
+		if e.IsDir() && ps.IsDir() {
+			total += c.addedBytes(l, p)
+		}
+	}
+	return total
+}
+
+// treeBytes is what a path occupies, counting allocation rather than length.
+func treeBytes(path string) int64 {
+	var total int64
+	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+				total += sys.Blocks * 512
+			}
+		}
+		return nil
+	})
+	return total
+}
+
+// sampleForTest drives one round of what the watcher does on its ticker.
+func (c *Corpus) sampleForTest() {
+	c.mu.Lock()
+	live := make([]string, 0, len(c.pending))
+	for dir := range c.pending {
+		live = append(live, dir)
+	}
+	c.mu.Unlock()
+	for _, dir := range live {
+		if mb := c.liveMB(dir); mb > 0 {
+			c.mu.Lock()
+			if mb > c.held[dir] {
+				c.held[dir] = mb
+			}
+			c.mu.Unlock()
+		}
+	}
+}
+
+// liveMB is what a directory is holding right now.
+//
+// Sampled rather than taken at retire, because what fills the ceiling is what a
+// case holds while it runs and not what it leaves behind. Measured: a run that
+// used 12,288 MB of its 12,288 MB ceiling recorded 70 directories summing to
+// 7,334 MB at retire, because a case that writes four gigabytes and deletes
+// them before it finishes leaves nothing to find.
+func (c *Corpus) liveMB(dir string) int {
+	if c.shared {
+		return c.addedMB(dir, c.pristineOf(dir))
+	}
+	// With lanes a directory lives in exactly one slot's upper layer, and only
+	// a fast-lane slot's writes are on the tmpfs the ceiling counts.
+	best := 0
+	c.mu.Lock()
+	slots := make([]*slotStore, 0, len(c.slots))
+	for _, st := range c.slots {
+		if st != nil && st.onRAM {
+			slots = append(slots, st)
+		}
+	}
+	c.mu.Unlock()
+	for _, st := range slots {
+		if mb := c.ownMB(st, dir); mb > best {
+			best = mb
+		}
+	}
+	return best
+}
+
 // used is how many megabytes the tmpfs is holding.
 //
 // statfs on the tmpfs itself, not on the corpus directory: statfs through an
@@ -450,6 +592,26 @@ func (c *Corpus) watch() {
 			c.mu.Lock()
 			if v := c.used(); v > c.peak {
 				c.peak = v
+			}
+			live := make([]string, 0, len(c.pending))
+			for dir := range c.pending {
+				live = append(live, dir)
+			}
+			c.mu.Unlock()
+
+			// Walked without the lock: a reclaim must not wait on a directory
+			// listing, and the listing does not have to be of one instant.
+			seen := make(map[string]int, len(live))
+			for _, dir := range live {
+				if mb := c.liveMB(dir); mb > 0 {
+					seen[dir] = mb
+				}
+			}
+			c.mu.Lock()
+			for dir, mb := range seen {
+				if mb > c.held[dir] {
+					c.held[dir] = mb
+				}
 			}
 			c.mu.Unlock()
 		}

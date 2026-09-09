@@ -364,3 +364,107 @@ func TestRetiringADirectoryRecordsWhatItHeld(t *testing.T) {
 		t.Error("Held handed out its own map")
 	}
 }
+
+// And the footprint has to be the directory's own, not the tmpfs's.
+//
+// It used to be the drop in the whole tmpfs across the delete. That is the right
+// number for the ceiling and the wrong one for a directory: every slot writes
+// into the same tmpfs, so the difference is mostly other slots' work and it
+// comes out negative as often as not. That is why case_sizes held 342
+// directories summing to 13,854 MB after a run whose ceiling measured 22,528 MB
+// in use at once -- a sum of parts smaller than the peak they were part of,
+// which cannot be right. lane_slow_mb thresholds those parts.
+func TestAFootprintIsTheDirectorysOwnAndNotTheTmpfsDelta(t *testing.T) {
+	contained(t)
+	root, dir, cases := caseTree(t, "a")
+
+	c, err := OpenCorpus(root, 512, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Plan(cases)
+
+	if err := os.WriteFile(filepath.Join(dir, "db_lgat"), make([]byte, 32<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another slot, writing into the same tmpfs while this directory retires.
+	// The old measurement counted its work against this directory and came out
+	// at zero or below, so nothing was recorded at all.
+	other := filepath.Join(root, "family", "other")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stop, started := make(chan struct{}), make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 8<<20)
+		for i := 0; ; i++ {
+			_ = os.WriteFile(filepath.Join(other, fmt.Sprintf("f%d", i)), buf, 0o644)
+			if i == 0 {
+				close(started)
+			}
+			select {
+			case <-stop:
+				return
+			default:
+			}
+		}
+	}()
+	<-started
+	c.Retire("slot0", dir)
+	close(stop)
+	<-done
+
+	got, ok := c.Held()[dir]
+	if !ok {
+		t.Fatalf("no footprint recorded: the tmpfs grew while the directory retired, "+
+			"and a delta-based measurement loses it entirely. held=%v", c.Held())
+	}
+	if got < 31 || got > 33 {
+		t.Errorf("the directory added 32 MB and was recorded at %d; what another "+
+			"slot wrote during the delete must not enter its footprint", got)
+	}
+}
+
+// What fills the ceiling is what a case holds while it runs, not what it leaves
+// behind. A case that writes four gigabytes and deletes them before it finishes
+// leaves nothing to find at retire -- which is why 70 directories summed to
+// 7,334 MB for a run that filled a 12,288 MB ceiling.
+func TestAFootprintIsThePeakAndNotTheResidue(t *testing.T) {
+	contained(t)
+	root, dir, cases := caseTree(t, "a")
+
+	c, err := OpenCorpus(root, 512, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Plan(cases)
+
+	// Held while it runs...
+	big := filepath.Join(dir, "db_lgat")
+	if err := os.WriteFile(big, make([]byte, 40<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// ...and the sampler has to see it before the case tidies up. The run's own
+	// ticker is two seconds; the test drives one sample directly.
+	c.sampleForTest()
+
+	// The case cleans up after itself, as many do.
+	if err := os.Remove(big); err != nil {
+		t.Fatal(err)
+	}
+	c.Retire("slot0", dir)
+
+	got, ok := c.Held()[dir]
+	if !ok {
+		t.Fatalf("nothing recorded for a directory that held 40 MB: %v", c.Held())
+	}
+	if got < 39 || got > 41 {
+		t.Errorf("the directory peaked at 40 MB and was recorded at %d; measuring what "+
+			"it left behind gives 0 and tells lanes nothing", got)
+	}
+}

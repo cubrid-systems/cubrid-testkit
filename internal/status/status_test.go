@@ -259,8 +259,20 @@ func TestLanesAddTheRunUpByWhereTheWritesGo(t *testing.T) {
 	// And the slot that is running says which lane it is in, because the
 	// question asked of the rail is whether the stuck slot holds memory.
 	b.Begin("slot0", "/x/_01_a/f/cases/f.sh")
-	if s := b.snapshot().Slots; len(s) != 1 || s[0].Lane != "tmpfs" {
-		t.Errorf("a running slot did not report its lane: %+v", s)
+	rows := b.snapshot().Slots
+	var running *slotView
+	for i := range rows {
+		if rows[i].Case != "" {
+			running = &rows[i]
+		}
+	}
+	if running == nil || running.Slot != "slot0" || running.Lane != "tmpfs" {
+		t.Errorf("a running slot did not report its lane: %+v", rows)
+	}
+	// And the idle slots are listed too, because a table of only the busy ones
+	// makes a slot between cases look like one that never gets anything.
+	if len(rows) != 3 {
+		t.Errorf("every slot should be listed, busy or not: %+v", rows)
 	}
 }
 

@@ -160,6 +160,9 @@ const page = `<!doctype html>
     corpus nor the patch has it, and without a mark of its own it looks like an
     ordinary failure. */
  .patched.bad{color:var(--fail);border-color:var(--fail);opacity:1}
+ /* An idle slot is a fact, not a fault: it is between cases, or the admission
+    policy is holding the queue back. Dimmed so the busy rows carry the eye. */
+ tr.idle td{color:var(--ink-faint)}
  /* Which patch, above the case's own output, because a caveat the reader cannot
     follow up is half a caveat. */
  .detailpatch{font-size:.75rem;margin:0 0 .5rem;padding:.35rem .6rem;
@@ -300,7 +303,7 @@ const page = `<!doctype html>
 <section>
   <h2>slots <span id=nslots style="letter-spacing:0;text-transform:none"></span></h2>
   <div class=scroll><table>
-    <thead><tr><th class=slot>slot<th class=lanecol>lane<th class=case>running<th class=num>for</tr></thead>
+    <thead><tr><th class="slot sortable" tabindex=0 data-sk=slot aria-sort=none>slot<th class=lanecol>lane<th class=case>running<th class="num sortable" tabindex=0 data-sk=held aria-sort=none>for<th class=num>plan</tr></thead>
     <tbody id=slots><tr><td colspan=4 class=empty>waiting for the first case</tr></tbody>
   </table></div>
 </section>
@@ -385,6 +388,9 @@ function spark(series, span) {
 // what the reader picked -- both held across refreshes, or a list would reorder
 // itself under the pointer once a second.
 let showFailed = false, sortKey = null, sortDir = -1, showN = 40
+// The slots table sorts on its own: it answers "which slot has been on
+// something longest", which is a different question from the finished table's.
+let slotKey = 'slot', slotDir = 1
 let lastView = null
 
 for (const b of document.querySelectorAll('.nbtn')) {
@@ -408,7 +414,28 @@ $('fBad').onclick = () => pick(true)
 function sortBy(k) {
   sortDir = sortKey === k ? -sortDir : -1
   sortKey = k
-  for (const th of document.querySelectorAll('th.sortable')) {
+  function slotLess(a, b) {
+  // slot10 after slot9: the names are slotN and a plain compare puts 10 before 9.
+  const na = parseInt(String(a).replace(/\D+/g, ''), 10)
+  const nb = parseInt(String(b).replace(/\D+/g, ''), 10)
+  if (!isNaN(na) && !isNaN(nb) && na !== nb) return na < nb ? 1 : -1
+  return a < b ? 1 : (a > b ? -1 : 0)
+}
+
+function sortSlotsBy(k) {
+  slotDir = slotKey === k ? -slotDir : (k === 'held' ? -1 : 1)
+  slotKey = k
+  for (const th of document.querySelectorAll('th[data-sk]')) {
+    th.setAttribute('aria-sort', th.dataset.sk !== k ? 'none' : (slotDir < 0 ? 'descending' : 'ascending'))
+  }
+  if (lastView) draw(lastView)
+}
+for (const th of document.querySelectorAll('th[data-sk]')) {
+  th.onclick = () => sortSlotsBy(th.dataset.sk)
+  th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortSlotsBy(th.dataset.sk) } }
+}
+
+for (const th of document.querySelectorAll('th.sortable')) {
     th.setAttribute('aria-sort', th.dataset.k !== k ? 'none' : (sortDir < 0 ? 'descending' : 'ascending'))
     const base = th.dataset.k
     th.innerHTML = base + (th.dataset.k === k ? ' <span class=caret>' + (sortDir < 0 ? '\u25be' : '\u25b4') + '</span>' : '')
@@ -457,17 +484,41 @@ async function tick() {
   $('remain').textContent = v.finished ? '—' : (v.remain ? secs(v.remain) : '—')
   $('fill').style.width = (v.total ? 100*v.done/v.total : 0) + '%'
   $('replay').hidden = !v.replaying
-  $('state').textContent = v.finished ? 'finished' : (v.slots||[]).length + ' running'
+  const busy = (v.slots||[]).filter(x => x.case).length
+  $('state').textContent = v.finished ? 'finished' : busy + ' running'
   document.title = v.total ? v.done + '/' + v.total + ' testkit' : 'testkit run'
   spark(v.rate||[], v.rateSpan)
 
-  const slots = v.slots||[]
-  $('nslots').textContent = slots.length ? '' : ''
-  $('slots').innerHTML = slots.length ? slots.map(s =>
-    '<tr' + (s.held > HELD ? ' class=held' : '') + '><td class=slot>' + s.slot +
-    '<td class=case title="' + s.case + '">' + short(s.case) +
-    '<td class=num>' + secs(s.held) + '</tr>').join('')
-    : '<tr><td colspan=3 class=empty>' + (v.finished ? 'all slots idle' : 'waiting for the first case') + '</tr>'
+  let slots = (v.slots||[]).slice()
+  $('nslots').textContent = slots.length ? busy + ' of ' + slots.length + ' busy' : ''
+  if (slotKey === 'held') {
+    // Idle slots have no duration, so they sort to the end either way rather
+    // than pretending to be the shortest-held.
+    slots.sort((a, b) => (a.case ? 0 : 1) - (b.case ? 0 : 1) || slotDir * ((a.held||0) - (b.held||0)))
+  } else {
+    slots.sort((a, b) => slotDir * -slotLess(a.slot, b.slot))
+  }
+  // Every slot, busy or not. A table of only the busy ones makes a slot between
+  // cases look like a slot that never gets anything, while the ones holding long
+  // cases stay listed as the others come and go.
+  $('slots').innerHTML = slots.length ? slots.map(s => {
+    if (!s.case) {
+      return '<tr class=idle><td class=slot>' + esc(s.slot) +
+        '<td class=lanecol>' + esc(s.lane || '') +
+        '<td class=case colspan=3>idle</tr>'
+    }
+    // Well past its plan is what a stuck case looks like while it is still
+    // stuck, rather than at the timeout twenty minutes later.
+    const over = s.plan > 0 && s.held > s.plan * 3
+    return '<tr' + (s.held > HELD || over ? ' class=held' : '') +
+      '><td class=slot>' + esc(s.slot) +
+      '<td class=lanecol>' + esc(s.lane || '') +
+      '<td class=case title="' + esc(s.case) + '">' + short(s.case) +
+      '<td class=num>' + secs(s.held) +
+      '<td class=num' + (over ? ' style="color:var(--fail)"' : '') + '>' +
+        (s.plan > 0 ? secs(s.plan) : '\u2014') + '</tr>'
+  }).join('')
+    : '<tr><td colspan=5 class=empty>' + (v.finished ? 'all slots idle' : 'waiting for the first case') + '</tr>'
 
   // A replay is a finished run: the machine numbers would be this machine now,
   // not the one the run happened on, and a panel that says something true about

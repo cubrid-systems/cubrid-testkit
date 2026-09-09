@@ -167,7 +167,6 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// slot count, and whether the corpus is behind an overlay at all -- so the
 	// plan is read here rather than where the case list arrives.
 	planPath := strings.TrimSpace(cfg.GetOr("case_plan", ""))
-	record := plan.NewRecord()
 	var known map[string]time.Duration
 	if planPath != "" {
 		k, err := plan.Read(planPath)
@@ -176,6 +175,9 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		}
 		known = k
 	}
+	// Seeded with what is already known, so an interrupted run refreshes the
+	// cases it reached instead of forgetting the ones it did not.
+	record := plan.Continue(known)
 	slowSecs := cfg.Int("lane_slow_secs", 0)
 	slots := cfg.Int("parallel_slots", 1)
 	ramMB := cfg.Int("scenario_ram_mb", 0)

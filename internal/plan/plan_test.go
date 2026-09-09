@@ -155,3 +155,42 @@ func TestAJunkPlanIsIgnoredLineByLine(t *testing.T) {
 		t.Errorf("a path with a space was mangled: %v", got)
 	}
 }
+
+// A run that is killed part way through must not take the plan with it.
+func TestAnInterruptedRunKeepsWhatItDidNotReach(t *testing.T) {
+	prior := map[string]time.Duration{
+		"a": 800 * time.Second,
+		"b": 700 * time.Second,
+		"c": 600 * time.Second,
+	}
+	r := Continue(prior)
+	// Only one case ran, and it was faster this time.
+	r.Add("a", 500*time.Second)
+
+	path := filepath.Join(t.TempDir(), "plan")
+	if err := r.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]time.Duration{
+		"a": 500 * time.Second,
+		"b": 700 * time.Second,
+		"c": 600 * time.Second,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("plan has %d entries, want %d: %v", len(got), len(want), got)
+	}
+	for n, d := range want {
+		if got[n] != d {
+			t.Errorf("%s: %v, want %v", n, got[n], d)
+		}
+	}
+
+	// Seeding copies rather than aliases: the caller's map is not the record.
+	if prior["a"] != 800*time.Second {
+		t.Errorf("Continue wrote through to the prior plan: a is %v", prior["a"])
+	}
+}

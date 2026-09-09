@@ -159,14 +159,17 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 	// corpus, so the checkout is unchanged and the change is visible. Refused
 	// rather than skipped when it does not fit: the case has moved, and running
 	// it unpatched would answer a question nobody asked.
-	if pf := w.Patches.For(c.Script); pf != "" {
+	// c.Path and not c.Script: Script is only the part after cases/, and a patch
+	// is keyed by the case's whole path.
+	if pf := w.Patches.For(c.Path); pf != "" {
 		if _, perr := runIn(ctx, w.Channel, ApplyScript(c.Dir, pf)); perr != nil {
 			add("NOK", "the compatibility patch "+pf+" does not apply to this case any more, "+
 				"which usually means the case changed upstream: "+perr.Error())
 			return items, console
 		}
 		w.log("[PATCH] applied " + pf)
-		w.Board.Patched(c.Script)
+		w.Board.Patched(c.Path)
+		w.Patches.Applied(c.Path, pf)
 		// Put it back. Behind the overlay the writes go anyway when the
 		// directory retires, but that is a property of how the run was
 		// configured, and "does the corpus come out as it went in" must not

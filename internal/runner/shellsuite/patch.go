@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Patches are the corpus changes a run needs and does not own.
@@ -52,6 +53,11 @@ type Patches struct {
 	// orphans are patches with no case in this corpus. Reported, not fatal: a
 	// corpus filtered to one family should not have to carry every patch.
 	orphans []string
+
+	mu sync.Mutex
+	// applied is what was actually used, which is not the same as what was
+	// found: a patch that refuses to apply fails its case instead.
+	applied map[string]string
 }
 
 // LoadPatches indexes dir against the cases this run will execute.
@@ -189,4 +195,54 @@ func RevertScript(caseDir, patchFile string) string {
 	// a reversed patch, and --forward skips those instead of "fixing" them.
 	return "patch -p0 --batch --reverse --forward --dry-run -d " + d + " -i " + f + " >/dev/null 2>&1 && " +
 		"patch -p0 --batch --reverse --forward -d " + d + " -i " + f
+}
+
+// Applied records that a patch was used, and Report writes the record out.
+//
+// The startup line says what a run intends to patch; this says what it did. The
+// two differ when a patch refuses to apply, and a reader of finished results has
+// only the files -- feedback.log keeps a case's console output for failures
+// only, so an OK case that ran patched leaves no trace there at all.
+//
+// A file of its own rather than a new line in an existing one: what the runner
+// prints on standard output and writes into the result tree is CTP's shape and
+// is frozen (ADR-003). A file nothing else reads adds nothing to parse.
+func (p *Patches) Applied(script, patchFile string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.applied == nil {
+		p.applied = map[string]string{}
+	}
+	p.applied[script] = patchFile
+}
+
+// Report writes the record into the result directory. Nothing is written when
+// nothing was patched, so the file's presence is itself the answer to "did this
+// run patch anything".
+func (p *Patches) Report(dir string) error {
+	if p == nil || dir == "" {
+		return nil
+	}
+	p.mu.Lock()
+	names := make([]string, 0, len(p.applied))
+	for c := range p.applied {
+		names = append(names, c)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	b.WriteString("# Cases this run did not execute as the corpus has them.\n")
+	b.WriteString("# Their verdicts are about the patched case. See patches/README.md.\n")
+	for _, c := range names {
+		fmt.Fprintf(&b, "%s\t%s\n", c, p.applied[c])
+	}
+	n := len(names)
+	p.mu.Unlock()
+
+	if n == 0 {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(dir, "patched.txt"), []byte(b.String()), 0o644)
 }

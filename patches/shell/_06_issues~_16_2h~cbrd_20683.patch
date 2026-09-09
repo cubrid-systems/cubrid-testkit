@@ -1,0 +1,17 @@
+--- cbrd_20683.sh
++++ cbrd_20683.sh
+@@ -5,6 +5,14 @@
+ init test
+ 
+ 
++
++# testkit compatibility: the answer file records a volume layout, and the
++# volumes this case's load auto-extends into take their size from cubrid.conf --
++# a setting the case never meant to depend on. Lowering db_volume_size globally
++# turns one 128 M extension volume into two of 64 M: same total space, different
++# listing, and spacedb prints the listing. Pin it to what CUBRID ships, which is
++# the condition the answer was written under.
++change_db_parameter "db_volume_size=512M"
+ db=db20683
+ cur_dir=`pwd`
+ 

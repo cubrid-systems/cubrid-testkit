@@ -1,0 +1,18 @@
+--- bug_bts_5106.sh
++++ bug_bts_5106.sh
+@@ -4,6 +4,15 @@
+ 
+ init test
+ 
++# testkit compatibility: this case pins db_volume_size on the createdb command
++# line, but the volumes the load then auto-extends into take their size from
++# cubrid.conf -- and the answer file records the volume layout that produces.
++# So the case is sensitive to a setting it never meant to depend on: a run that
++# lowers db_volume_size globally turns one 128 M extension volume into two of
++# 64 M, same total space, different listing, and spacedb prints the listing.
++# Pin it to what CUBRID ships, which is the condition the answer was written
++# under.
++change_db_parameter "db_volume_size=512M"
+ db_name=bug_5106
+ 
+ cubrid server stop $db_name

@@ -72,6 +72,12 @@ missed:
 | the case's own log | `[PATCH] applied <file>`, so it is in `feedback.log` and in the page's case detail |
 | the page's **finished** table | a `patched` badge beside the case name |
 | the page's finished count | `… · N patched` |
+| `patched.txt` in the result directory | every case that actually ran patched, and which patch. Written only when there was one, so the file's presence is itself the answer |
+
+The startup line says what a run *intends* to patch; `patched.txt` says what it
+*did*. They differ when a patch refuses to apply — and `feedback.log` keeps a
+case's console output for failures only, so an OK case that ran patched leaves
+no trace there at all.
 
 ## When a patch stops applying
 
@@ -90,6 +96,7 @@ it did, delete the patch.
 | `_08_shard/_03_cubrid_broker02` | the same line, the same fix |
 | `_06_issues/_17_1h/cbrd_20760_1` | `test1.answer` expects an empty `[common]` — `db_volume_size=512.0M (512.0M)`, the engine's own default. CUBRID does not ship that: the stock `cubrid.conf` sets `log_volume_size=20M`, so the case fails on a fresh install. The patch clears the two parameters the case is about, before the baseline it asserts |
 | `_01_utility/_16_restoredb/itrack_10001` | `char(10000)` is over the engine's 2048-byte limit, so the class is never created and all fifteen restore checks fail behind `Unknown class "dba.x"`. The widths are arbitrary — the loader binds the integers 1, 2 and 3, and no answer file mentions them. CBRD-21637, and on the daily exclusion list |
+| `_06_issues/_11_1h/bug_bts_5106`<br>`_06_issues/_11_1h/bug_bts_5200`<br>`_06_issues/_16_2h/cbrd_20683`<br>`_06_issues/_17_1h/cbrd_20966` | the answer records a **volume layout**, and the volumes the load auto-extends into take their size from `cubrid.conf` — a setting the case never meant to depend on. `bug_bts_5106` even pins `--db-volume-size=20M` on its own `createdb`, which does not reach the extension. Lowering `db_volume_size` globally turns one 128 M extension volume into two of 64 M: same total space, different listing, and `spacedb` prints the listing. Pinning to what CUBRID ships turns all four from NOK back to OK |
 
 ## What is deliberately not here
 

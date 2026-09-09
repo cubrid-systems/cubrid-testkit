@@ -11,7 +11,23 @@ import (
 // laneSplit is how a run divides its slots and its cases between the two lanes.
 //
 // The whole idea in one sentence: a case that cannot get speed out of memory has
-// no business occupying it. Measured, the fixed cost memory removes is about
+// no business occupying it.
+//
+// There are two ways to say which cases those are, and only one of them has
+// survived a measurement.
+//
+// By duration (lane_slow_secs) was the first, and it lost: predicted 440 s,
+// measured 696. The reasoning below is sound about bandwidth and still wrong
+// about selection, because duration picks the I/O-heavy cases and those are the
+// ones memory helps most. It is kept because the argument is worth reading and
+// the knob is worth having, not because it worked.
+//
+// By footprint (lane_slow_mb) is the second, and it is chosen to relieve the
+// bound that actually breaks: the ceiling is made of space. Eighteen cases into
+// this corpus, three directories that each hold gigabytes overlap and take
+// 18,417 MB of an 18,432 MB ceiling -- and they overlap precisely because they
+// are also long, so longest-first starts them together. Space is not a proxy
+// for anything here. It is the quantity the ceiling counts. Measured, the fixed cost memory removes is about
 // 0.2 s a case -- createdb is 0.24 s on tmpfs against 0.04 s for a copy -- so a
 // five-second case gets 4% of itself back and a 195-second case gets 0.1%, while
 // holding the ceiling for three minutes. On the six cases of _01_sqlx that were
@@ -35,26 +51,39 @@ type laneSplit struct {
 	FastWork, SlowWork float64
 	// Cases counts them.
 	FastCases, SlowCases int
+	// MB is the footprint each lane was given, summed over its directories, and
+	// FastBiggest is the largest single directory left in memory. Neither is the
+	// fast lane's peak -- that is whatever subset happens to overlap -- but the
+	// sum is its ceiling and the largest is its floor, so an operator choosing a
+	// threshold against scenario_ram_mb has both ends of the range.
+	FastMB, SlowMB, FastBiggest int
 }
 
 // planLanes decides the split from what a previous run measured.
 //
-// A directory goes to the slow lane when its longest case took at least
-// slowSecs. By directory and not by case because a directory is the unit a slot
-// owns -- see dispatch.Queue -- and by its longest case because the whole
-// directory lands in one lane.
+// A directory goes to the slow lane when it holds at least slowMB, or when its
+// longest case took at least slowSecs. Either criterion alone is enough; a run
+// that sets both is asking for the union, which is the only combination that
+// makes sense when each names a different reason a case should not be in memory.
+//
+// By directory and not by case because a directory is the unit a slot owns --
+// see dispatch.Queue -- and by its longest case because the whole directory
+// lands in one lane.
 //
 // The slots are divided in proportion to the case-seconds each lane holds, which
 // is what makes the two lanes finish together: a lane with 40% of the work and
 // 40% of the slots takes the same wall clock as the other. Both lanes get at
 // least one slot, and a run whose split would starve a lane keeps every slot in
 // the fast one.
-func planLanes(cases []string, took map[string]time.Duration, slowSecs int, slots int) (laneSplit, error) {
-	if slowSecs <= 0 {
+func planLanes(cases []string, took map[string]time.Duration, held map[string]int, slowSecs, slowMB, slots int) (laneSplit, error) {
+	if slowSecs <= 0 && slowMB <= 0 {
 		return laneSplit{}, nil
 	}
-	if len(took) == 0 {
-		return laneSplit{}, fmt.Errorf("lanes need durations: run once with case_plan set, or unset lane_slow_secs")
+	if slowSecs > 0 && len(took) == 0 {
+		return laneSplit{}, fmt.Errorf("lane_slow_secs needs durations: run once with case_plan set, or unset lane_slow_secs")
+	}
+	if slowMB > 0 && len(held) == 0 {
+		return laneSplit{}, fmt.Errorf("lane_slow_mb needs footprints: run once with case_sizes set, or unset lane_slow_mb")
 	}
 	if slots < 2 {
 		return laneSplit{}, fmt.Errorf("lanes need at least two slots, and parallel_slots is %d", slots)
@@ -79,14 +108,23 @@ func planLanes(cases []string, took map[string]time.Duration, slowSecs int, slot
 
 	out := laneSplit{byDir: map[string]dispatch.Lane{}}
 	for dir, w := range worst {
-		if w >= float64(slowSecs) {
+		slow := slowSecs > 0 && w >= float64(slowSecs)
+		if slowMB > 0 && held[dir] >= slowMB {
+			slow = true
+		}
+		if slow {
 			out.byDir[dir] = dispatch.LaneSlow
 			out.SlowWork += total[dir]
 			out.SlowCases += count[dir]
+			out.SlowMB += held[dir]
 		} else {
 			out.byDir[dir] = dispatch.LaneFast
 			out.FastWork += total[dir]
 			out.FastCases += count[dir]
+			out.FastMB += held[dir]
+			if held[dir] > out.FastBiggest {
+				out.FastBiggest = held[dir]
+			}
 		}
 	}
 	work := out.FastWork + out.SlowWork
@@ -123,28 +161,48 @@ func (l laneSplit) laneOf(i int) dispatch.Lane {
 
 // describe is the line the run prints, because a split chosen from a file is a
 // decision an operator has to be able to check.
-func (l laneSplit) describe(slowSecs int) string {
+func (l laneSplit) describe(slowSecs, slowMB int) string {
+	at := ""
+	switch {
+	case slowSecs > 0 && slowMB > 0:
+		at = fmt.Sprintf("at %ds or %d MB", slowSecs, slowMB)
+	case slowMB > 0:
+		at = fmt.Sprintf("at %d MB", slowMB)
+	default:
+		at = fmt.Sprintf("at %ds", slowSecs)
+	}
 	return fmt.Sprintf(
-		"[INFO] lanes at %ds: tmpfs %d slots for %d cases (%.0f case-s), disk %d slots for %d cases (%.0f case-s)",
-		slowSecs, l.FastSlots, l.FastCases, l.FastWork, l.SlowSlots, l.SlowCases, l.SlowWork)
+		"[INFO] lanes %s: tmpfs %d slots for %d cases (%.0f case-s, %d MB over %d dirs, biggest %d MB), "+
+			"disk %d slots for %d cases (%.0f case-s, %d MB)",
+		at, l.FastSlots, l.FastCases, l.FastWork, l.FastMB, l.FastCases, l.FastBiggest,
+		l.SlowSlots, l.SlowCases, l.SlowWork, l.SlowMB)
 }
 
-// slowest names the directories the slow lane took, longest first, for the
+// slowest names the directories the slow lane took, biggest first, for the
 // operator who wants to see what the threshold actually selected.
-func (l laneSplit) slowest(took map[string]time.Duration, cases []string, n int) []string {
+//
+// Ordered by footprint when there is one, because that is what the threshold is
+// now usually chosen against, and by duration otherwise.
+func (l laneSplit) slowest(took map[string]time.Duration, held map[string]int, cases []string, n int) []string {
 	type row struct {
 		name string
 		secs float64
+		mb   int
 	}
+	seen := map[string]bool{}
 	var rows []row
 	for _, c := range cases {
 		split, err := Split(c)
-		if err != nil || l.byDir[split.Dir] != dispatch.LaneSlow {
+		if err != nil || l.byDir[split.Dir] != dispatch.LaneSlow || seen[split.Dir] {
 			continue
 		}
-		rows = append(rows, row{c, took[c].Seconds()})
+		seen[split.Dir] = true
+		rows = append(rows, row{split.Dir, took[c].Seconds(), held[split.Dir]})
 	}
 	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].mb != rows[j].mb {
+			return rows[i].mb > rows[j].mb
+		}
 		if rows[i].secs != rows[j].secs {
 			return rows[i].secs > rows[j].secs
 		}
@@ -155,7 +213,7 @@ func (l laneSplit) slowest(took map[string]time.Duration, cases []string, n int)
 		if i >= n {
 			break
 		}
-		out = append(out, fmt.Sprintf("%.0fs %s", r.secs, r.name))
+		out = append(out, fmt.Sprintf("%d MB %.0fs %s", r.mb, r.secs, r.name))
 	}
 	return out
 }

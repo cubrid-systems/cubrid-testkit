@@ -77,6 +77,15 @@ type Corpus struct {
 	// database for its sibling would find it gone.
 	pending map[string]int
 	freed   int
+	// held is how many megabytes each directory was holding when it retired,
+	// which is the measurement lanes need: the ceiling is made of space, so the
+	// lane that gives space away has to be chosen by space.
+	//
+	// The tmpfs is measured whole, so a directory reclaimed while other slots are
+	// writing reads low. It is the right kind of wrong -- the figure selects the
+	// directories worth keeping off memory, and those are the ones whose own
+	// gigabytes dwarf what seven other slots move in the same instant.
+	held map[string]int
 
 	peak int
 	stop chan struct{}
@@ -115,6 +124,7 @@ func OpenCorpus(root string, mb int, lanes bool) (*Corpus, error) {
 		root:    root,
 		ram:     ram,
 		pending: map[string]int{},
+		held:    map[string]int{},
 		slots:   map[string]*slotStore{},
 		stop:    make(chan struct{}),
 		mb:      mb,
@@ -214,6 +224,22 @@ func (c *Corpus) Plan(cases []string) {
 }
 
 // Ram is the tmpfs, for the panel that reports how full it is.
+// Held is what each case directory was holding when it retired, in megabytes.
+// A copy, because the run writes it to a file after the slots have stopped and
+// the corpus may still be sampling.
+func (c *Corpus) Held() map[string]int {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]int, len(c.held))
+	for d, mb := range c.held {
+		out[d] = mb
+	}
+	return out
+}
+
 func (c *Corpus) Ram() string {
 	if c == nil {
 		return ""
@@ -254,8 +280,12 @@ func (c *Corpus) Retire(slot, dir string) {
 		if st.onRAM {
 			if freed := before - c.used(); freed > 0 {
 				c.freed += freed
+				c.held[dir] = freed
 			}
 		}
+		// A slow-lane directory writes to disk, so there is nothing on the tmpfs
+		// to measure and none is recorded. It keeps the figure that sent it to
+		// disk, which is what ContinueSizes is for.
 		return
 	}
 	// The high-water mark is read here as well as on the ticker: reclaiming is
@@ -268,6 +298,7 @@ func (c *Corpus) Retire(slot, dir string) {
 	c.dropAdditions(dir, c.pristineOf(dir))
 	if freed := before - c.used(); freed > 0 {
 		c.freed += freed
+		c.held[dir] = freed
 	}
 }
 

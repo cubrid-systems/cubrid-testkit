@@ -322,3 +322,45 @@ func TestASharedCorpusHasNoPerSlotUpper(t *testing.T) {
 		t.Error("a shared corpus handed out a per-slot upper")
 	}
 }
+
+// The lane that gives memory away is chosen by footprint, and the footprint has
+// to come from somewhere. It comes from here: the megabytes a directory gives
+// back when it retires are the megabytes it was holding.
+func TestRetiringADirectoryRecordsWhatItHeld(t *testing.T) {
+	contained(t)
+	root, dir, cases := caseTree(t, "a")
+
+	c, err := OpenCorpus(root, 128, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Plan(cases)
+
+	if len(c.Held()) != 0 {
+		t.Error("a directory that has not retired has no measurement yet")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "db_lgat"), make([]byte, 48<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.Retire("slot0", dir)
+
+	held := c.Held()
+	got, ok := held[dir]
+	if !ok {
+		t.Fatalf("no footprint recorded for the directory that just retired: %v", held)
+	}
+	// Whole-tmpfs statfs in megabytes, so allow a megabyte either way for the
+	// overlay's own bookkeeping. The figure has to be the 48 that was written,
+	// not the 128 the ceiling allows or the 0 a missed measurement would give.
+	if got < 47 || got > 49 {
+		t.Errorf("the directory held 48 MB and was recorded at %d", got)
+	}
+
+	// Held is a copy: the run writes it out while the corpus may still be
+	// sampling, and a map handed out by reference would race.
+	held[dir] = 999
+	if c.Held()[dir] == 999 {
+		t.Error("Held handed out its own map")
+	}
+}

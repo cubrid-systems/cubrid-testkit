@@ -225,7 +225,9 @@ always did; the second is this runner's and is off unless set.
 | `scenario_ram_mb` | off | put the corpus behind an overlay whose upper layer is a tmpfs of this size |
 | `status_http` | off | serve the progress page |
 | `case_plan` | off | a file of per-case durations, read to order the run and written from what it measured |
+| `case_sizes` | off | a file of per-directory footprints in MB, written from what the run measured |
 | `lane_slow_secs` | off | split the slots into a tmpfs lane and a disk lane at this duration |
+| `lane_slow_mb` | off | the same split, at this footprint. Needs `case_sizes` |
 
 And the environment:
 
@@ -289,7 +291,9 @@ on purpose.
 | `scenario_ram_mb` | off | put the corpus behind an overlay whose upper layer is a tmpfs of this size. The corpus stays read-only, the run's writes go to memory, and a directory's writes are dropped when its last case finishes |
 | `status_http` | off | serve a progress page. `on` takes `127.0.0.1:51523`; a bare port takes every interface |
 | `case_plan` | off | a file of per-case durations. The run reads it to hand the longest cases out first and writes it back from what it measured |
-| `lane_slow_secs` | off | split the slots into a fast lane whose writes go to memory and a slow lane whose writes go to disk, with cases assigned by duration |
+| `case_sizes` | off | a file of per-directory footprints in MB — how much each case directory was holding when its last case finished. Written from what the run measured, and read by `lane_slow_mb` |
+| `lane_slow_secs` | off | split the slots into a fast lane whose writes go to memory and a slow lane whose writes go to disk, assigning directories by duration |
+| `lane_slow_mb` | off | the same split, assigning directories by footprint instead. Needs `case_sizes`. Set with `lane_slow_secs` to get the union of the two |
 
 Namespaces are what make a slot cost nothing to configure, and they need the run to be contained:
 
@@ -407,6 +411,7 @@ with, in `shell.conf`:
 parallel_slots=8
 scenario_ram_mb=14336
 case_plan=/path/to/plan          # written on the first run, read on the next
+case_sizes=/path/to/sizes        # likewise, and what lane_slow_mb thresholds
 status_http=on
 ```
 

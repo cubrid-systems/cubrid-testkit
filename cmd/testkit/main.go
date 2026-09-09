@@ -59,11 +59,16 @@ func main() {
 	if code := contain.Enter(); code >= 0 {
 		os.Exit(code)
 	}
+	// PID 1 of that namespace becomes an init and forks the work: collecting
+	// orphans is Wait4(-1), which would otherwise take os/exec's own children
+	// out from under it. -1 again means this process is the one doing the work.
+	if code := contain.Init(); code >= 0 {
+		os.Exit(code)
+	}
 	if err := contain.Setup(); err != nil {
 		fmt.Fprintf(os.Stderr, "testkit: %v\n", err)
 		os.Exit(exitEnvironment)
 	}
-	contain.Reap()
 
 	os.Exit(run(os.Args[1:]))
 }

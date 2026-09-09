@@ -173,7 +173,7 @@ func (h *Headroom) Describe() string {
 	if h == nil {
 		return ""
 	}
-	return fmt.Sprintf("nothing new while %s is over %d%% full", h.what, h.percent)
+	return fmt.Sprintf("start nothing new while %s is over %d%% full", h.what, h.percent)
 }
 
 // Heaviest names the n longest cases in a plan, for HeavyCap.
@@ -202,10 +202,10 @@ func Heaviest(took map[string]float64, n int) []string {
 func Describe(hard, soft Policy) string {
 	var parts []string
 	if hard != nil {
-		parts = append(parts, "never "+hard.Describe())
+		parts = append(parts, "always: "+hard.Describe())
 	}
 	if soft != nil {
-		parts = append(parts, "and while other work is left, "+soft.Describe())
+		parts = append(parts, "while other work is left: "+soft.Describe())
 	}
 	if len(parts) == 0 {
 		return "the plan's order alone"

@@ -138,3 +138,36 @@ func TestSlotTmpFallsBackWhenThePathWouldNotFit(t *testing.T) {
 		t.Errorf("the fallback is %d bytes with the socket, over the %d available", n, sunPathMax)
 	}
 }
+
+// A user namespace maps one uid, so tar cannot restore an archive's recorded
+// ownership: it prints "Cannot change ownership" and exits non-zero even though
+// the files are there. 51 case scripts in this corpus unpack something, and the
+// exit status is what fails them.
+func TestASlotCanUnpackAnArchiveSomebodyElseOwned(t *testing.T) {
+	if os.Getenv("TESTKIT_CONTAINED") != "1" {
+		t.Skip("not contained; run under TESTKIT_CONTAIN=1")
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "src", "f"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("tar", "-czf", filepath.Join(dir, "a.tar.gz"), "-C", dir, "src").CombinedOutput(); err != nil {
+		t.Fatalf("cannot make the archive: %v: %s", err, out)
+	}
+	if err := os.RemoveAll(filepath.Join(dir, "src")); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("tar", "-zxf", "a.tar.gz")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "TAR_OPTIONS=--no-same-owner")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("TAR_OPTIONS did not let the slot unpack it: %v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "src", "f")); err != nil {
+		t.Errorf("the archive did not unpack: %v", err)
+	}
+}

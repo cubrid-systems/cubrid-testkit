@@ -383,6 +383,10 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	var board *status.Board
 	if addr := status.Addr(cfg.GetOr("status_http", "")); addr != "" {
 		board = status.New(len(cases))
+		// The page's "remaining" is a guess unless the run has a plan, and with the
+		// longest cases first the guess opens at its worst: two cases into this
+		// corpus the rate said 82 hours where the plan says 2.2.
+		board.Expect(cases, known, slots)
 		// A second run on the same machine would find the default port taken, and
 		// killing the run over the page it was only asked to serve is the wrong
 		// trade -- so the default moves along until it finds a free one and says

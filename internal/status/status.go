@@ -136,6 +136,16 @@ type Board struct {
 	// replay is the playback's position, when this board is one. It is what the
 	// controls move.
 	replay *replayer
+	// workLeft is the planned seconds of the cases still to come, and slots is
+	// how many run at once. Together they are what is left; zero means no plan
+	// was given and the rate has to do.
+	workLeft time.Duration
+	slots    int
+	// planned is what each case took last time, so finishing one can take the
+	// right amount off workLeft. typical stands in for a case the plan does not
+	// mention.
+	planned map[string]time.Duration
+	typical time.Duration
 	// replayAt is the knobs' state as the replayer last published it.
 	//
 	// Published rather than asked for. The replayer takes its own lock and then
@@ -249,6 +259,38 @@ func (b *Board) Lane(slot, lane string) {
 	}
 }
 
+// Expect tells the board what the run is expected to cost, from the plan an
+// earlier run wrote. Without it the page falls back to the rate so far.
+func (b *Board) Expect(cases []string, planned map[string]time.Duration, slots int) {
+	if b == nil || slots < 1 || len(planned) == 0 {
+		return
+	}
+	// The median rather than the mean: this corpus's mean is more than twice its
+	// median, and a case nobody measured is far more likely to be an ordinary
+	// one than one of the sixty-six that own two fifths of the run.
+	known := make([]time.Duration, 0, len(planned))
+	for _, d := range planned {
+		known = append(known, d)
+	}
+	sort.Slice(known, func(i, j int) bool { return known[i] < known[j] })
+	typical := known[len(known)/2]
+	if len(known)%2 == 0 {
+		typical = (known[len(known)/2-1] + typical) / 2
+	}
+
+	var total time.Duration
+	for _, c := range cases {
+		if d, ok := planned[c]; ok {
+			total += d
+		} else {
+			total += typical
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.planned, b.typical, b.workLeft, b.slots = planned, typical, total, slots
+}
+
 func (b *Board) Begin(slot, name string) {
 	if b == nil {
 		return
@@ -284,6 +326,15 @@ func (b *Board) endWith(slot, name string, ok bool, took time.Duration) {
 }
 
 func (b *Board) end(slot, name string, ok bool, took time.Duration) {
+	if b.slots > 0 {
+		expect, known := b.planned[name]
+		if !known {
+			expect = b.typical
+		}
+		if b.workLeft -= expect; b.workLeft < 0 {
+			b.workLeft = 0
+		}
+	}
 	delete(b.running, slot)
 	b.done++
 	if ok {
@@ -468,10 +519,22 @@ func (b *Board) snapshot() view {
 		Finished:  b.done >= b.total && len(b.running) == 0,
 		Replaying: b.replaying,
 	}
-	// Remaining time from the rate so far. Wrong early and wrong for a corpus
-	// whose long cases are all at the end, which is the reason to order the
-	// queue by duration rather than to make this cleverer.
-	if b.done > 0 && b.total > b.done {
+	// What is left, from what the run already knows it is.
+	//
+	// The rate so far is a bad estimate and ordering made it worse rather than
+	// better: with the longest cases first, the opening rate is the worst the run
+	// will ever have, and two cases into a 3,444-case run the page said 82 hours
+	// where the answer was 2.2. The old comment claimed ordering was the fix for
+	// this. It inverted the bias instead.
+	//
+	// A run with a plan does not have to guess. It knows what every case took
+	// last time, so what is left is the planned seconds of the cases still to
+	// come, divided by the slots that will run them -- which is the same
+	// arithmetic the whole schedule already lands within 2% of.
+	switch {
+	case b.slots > 0 && b.workLeft > 0:
+		v.Remain = int((b.workLeft / time.Duration(b.slots)).Seconds())
+	case b.done > 0 && b.total > b.done:
 		per := elapsed / time.Duration(b.done)
 		v.Remain = int((per * time.Duration(b.total-b.done)).Seconds())
 	}

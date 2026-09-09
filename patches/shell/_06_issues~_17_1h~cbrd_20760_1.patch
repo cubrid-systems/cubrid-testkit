@@ -8,11 +8,10 @@
 +# [common]. test1.answer expects "[C ] db_volume_size=512.0M (512.0M)" and
 +# "[C ] log_volume_size=512.0M (512.0M)" -- the engine's own defaults, with
 +# nothing overriding them. The conf this run starts from sets both, so the
-+# parameter dump shows them as changed and the case fails on a value it never
-+# names. Measured: it was NOK at 512M too, so this is not one run's setting.
-+# Clearing the two parameters the case is about makes the default it asserts the
-+# default it gets. Only here: from testcase 2 on, the case sets these itself and
-+# is entitled to what it sets.
++# parameter dump reports them as changed and the case fails on values it never
++# names. Measured: it was NOK at db_volume_size=512M too, so this is not one
++# run's setting. Clearing them makes the default it asserts the default it gets;
++# only here, since from testcase 2 on the case sets these itself.
 +sed -i '/^[[:space:]]*db_volume_size[[:space:]]*=/d;/^[[:space:]]*log_volume_size[[:space:]]*=/d' $CUBRID/conf/cubrid.conf
 +
  echo "[@tdb2]" >> $CUBRID/conf/cubrid.conf

@@ -250,6 +250,14 @@ so do the shell suite's switches, `SKIP_CHECK_RECOVERY_ERROR`, `SKIP_CHECK_FATAL
 
 ### Watching a run
 
+Clicking a case in **slots** shows what it has written *so far*. A running case
+has nothing in `feedback.log` — the block is written when it ends — but it
+appends a line to its own result file at every check, so this is where a case
+that has held a slot for 325 seconds against a plan of 6 says which check it is
+stuck on. The panel polls while it is open and stops when the case leaves the
+slots table. Clicking a case in **finished** shows the recorded block instead.
+
+
 ```bash
 # in the conf
 status_http=on              # 127.0.0.1:51523

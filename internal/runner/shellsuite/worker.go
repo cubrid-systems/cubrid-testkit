@@ -14,6 +14,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/plan"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
+	"path/filepath"
 )
 
 // Worker runs cases on one instance, one at a time, until the queue is empty.
@@ -122,6 +123,10 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		w.Report.CaseStart(ticket.Case, w.envIdentify())
 		w.Board.Begin(w.SlotID, ticket.Case)
+		// Where this case writes its verdicts while it runs, so the page can
+		// show them arriving. Cleared when it finishes: the file is about to be
+		// reclaimed with the rest of the directory.
+		w.Board.Live(ticket.Case, filepath.Join(c.Dir, c.Result))
 		w.hold()
 		w.log("[TESTCASE] " + ticket.Case)
 
@@ -296,6 +301,7 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 		return
 	}
 
+	w.Board.Live(ticket.Case, "")
 	ev.LastPassResultCont = ev.ResultText
 	if c, err := Split(ticket.Case); err == nil {
 		// The registry outlives the files unless it is told, and a name that

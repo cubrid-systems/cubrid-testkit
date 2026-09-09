@@ -516,7 +516,8 @@ async function tick() {
     return '<tr' + (s.held > HELD || over ? ' class=held' : '') +
       '><td class=slot>' + esc(s.slot) +
       '<td class=lanecol>' + esc(s.lane || '') +
-      '<td class=case title="' + esc(s.case) + '">' + short(s.case) +
+      '<td class=case title="' + esc(s.case) + '"><a href="#" data-live="' + esc(s.case) + '">' +
+        short(s.case) + '</a>' +
       '<td class=num>' + secs(s.held) +
       '<td class=num' + (over ? ' style="color:var(--fail)"' : '') + '>' +
         (s.plan > 0 ? secs(s.plan) : '\u2014') + '</tr>'
@@ -764,6 +765,7 @@ document.addEventListener('click', e => {
   const a = e.target.closest('a[data-case]')
   if (!a) return
   e.preventDefault()
+  stopLive()
   const name = a.getAttribute('data-case')
   $('detailname').textContent = short(name)
   // Which patch this verdict is about, said above the output rather than only in
@@ -790,7 +792,47 @@ document.addEventListener('click', e => {
     .then(t => { $('detail').textContent = t })
     .catch(err => { $('detail').textContent = String(err) })
 })
-$('detailclose').addEventListener('click', () => { $('detailwrap').hidden = true })
+// Clicking a case that is still running shows what it has written so far.
+//
+// feedback.log has nothing for it -- the block is written when the case ends --
+// but the case appends a line to its own result file at every check, so this is
+// where a slow case says which check it is on. It polls while the panel is open
+// and the case is still that slot's.
+let livePoll = null
+function stopLive() {
+  if (livePoll) { clearInterval(livePoll); livePoll = null }
+}
+function openLive(name) {
+  stopLive()
+  $('detailname').textContent = short(name) + ' \u00b7 running'
+  $('detailpatch').hidden = true
+  $('detail').textContent = 'loading…'
+  $('detailwrap').hidden = false
+  $('detailwrap').scrollIntoView({block: 'nearest'})
+  const pull = () => fetch('/live?name=' + encodeURIComponent(name))
+    .then(r => r.text())
+    .then(t => {
+      if ($('detailwrap').hidden) { stopLive(); return }
+      $('detail').textContent = t
+      // Still running? The slots table is the authority; when the case leaves
+      // it, stop polling a file that is about to be reclaimed.
+      const still = (lastView && (lastView.slots || [])).some(sl => sl.case === name)
+      if (!still) {
+        stopLive()
+        $('detailname').textContent = short(name) + ' \u00b7 finished'
+      }
+    })
+    .catch(err => { $('detail').textContent = String(err); stopLive() })
+  pull()
+  livePoll = setInterval(pull, 2000)
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[data-live]')
+  if (!a) return
+  e.preventDefault()
+  openLive(a.getAttribute('data-live'))
+})
+$('detailclose').addEventListener('click', () => { stopLive(); $('detailwrap').hidden = true })
 
 // Dragging the scrub bar seeks; while a finger is down the poll must not fight
 // it for the slider's value.

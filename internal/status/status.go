@@ -148,6 +148,9 @@ type Board struct {
 	typical time.Duration
 	// setup is how the run was configured, recorded once before the first case.
 	setup setupBox
+	// live is where each running case writes its verdicts, so the page can show
+	// them as they arrive rather than only once the case is over.
+	live liveFiles
 	// patched maps a case to the compatibility patch it ran against, and refused
 	// to the patch that would not apply.
 	patched map[string]string
@@ -691,6 +694,7 @@ func (b *Board) Serve(addr string) (string, func(), error) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/case", b.serveDetail)
+	mux.HandleFunc("/live", b.serveLive)
 	// The replay's knobs. A GET so the page can drive it with fetch and nothing
 	// else has to exist.
 	mux.HandleFunc("/replay", func(w http.ResponseWriter, r *http.Request) {

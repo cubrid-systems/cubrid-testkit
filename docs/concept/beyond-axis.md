@@ -1085,6 +1085,65 @@ now because they were found now, and because they say what that layer is for.
 
 ---
 
+## B-T15. The lane is chosen by space, not by time
+
+Recorded after the duration-selected lane was measured and lost: predicted
+440 s, measured 696. The reasoning that produced it was about bandwidth and was
+right about bandwidth. It was wrong about **selection**, and the error is worth
+stating plainly because it repeated a mistake the plan file had already made
+once.
+
+Duration was being asked to answer two different questions:
+
+| question | right answer | duration |
+|---|---|---|
+| which case should a free slot take next? | the longest | correct — makespan |
+| which cases should not be given memory? | the ones that fill it | a proxy, and a bad one |
+
+Duration selects the I/O-heavy cases, and those are the ones memory helps most.
+It is anti-correlated with what the lane wants.
+
+**The ceiling is made of space, so the lane is chosen by space.** Measured on the
+full corpus at `db_volume_size=20M`, eighteen cases in:
+
+```
+09:43:06     17/3444   tmpfs  12805/18432 MB  69%
+09:43:36     18/3444   tmpfs  18417/18432 MB  99%     <- and the true demand is unknown,
+09:45:06     20/3444   tmpfs  12087/18432 MB  65%        because the ceiling truncated it
+```
+
+Not accumulation — it recovers within ninety seconds. **Coincidence**: three
+directories that each hold gigabytes start within a hundred seconds of each
+other. They coincide *because* they are also long, so longest-first starts them
+together. Ordering and lanes were pulling on the same rope in opposite
+directions, and only one of them was right to be holding it.
+
+Simulating the schedule from the plan confirms raising `testcase_timeout_in_secs`
+does not separate them:
+
+```
+timeout 720s                    timeout 1500s
+bug_bts_12913   start  720s     bug_bts_12913   start  750s
+bug_bts_12913   start  720s     bug_bts_12913   start  814s
+bug_bts_4823    start  720s     bug_bts_4823    start  841s
+```
+
+`case_sizes` records what each directory was holding when its last case retired
+— the figure `Corpus.Retire` was already computing to report reclaim, and
+throwing away. `lane_slow_mb` thresholds it. Both files carry forward what a run
+did not measure, which for footprints is not an edge case: a slow-lane directory
+writes to disk and is never measured, so a record that kept only this run's
+figures would forget why it sent them there and empty the lane on the next run.
+
+| | |
+|---|---|
+| Today | one ceiling for every slot, and whether it holds depends on which large directories happen to overlap |
+| Beyond | the directories that cannot fit are known by name and never in memory at the same time, because they are never in memory |
+| Evidence | wall clock and peak ceiling at the same slot count, footprint-selected lane against no lane. The duration-selected lane is the control that already lost |
+| Open | the threshold is a blunt instrument for a packing problem. What the ceiling bounds is the *peak overlap*, not the sum, and a scheduler that knew both footprints and durations could keep the big directories apart without giving any of them away to disk |
+
+---
+
 ## What is not here
 
 Anything that adds a **new kind of testing** belongs in §6a, not here (ADR-015). SQLancer, fuzzing

@@ -1,6 +1,7 @@
 package shellsuite
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +44,7 @@ func TestTheSlotsFollowTheWork(t *testing.T) {
 	}
 	cases, took := corpus(pairs...)
 
-	sp, err := planLanes(cases, took, 30, 10)
+	sp, err := planLanes(cases, took, nil, 30, 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +79,7 @@ func TestNeitherLaneIsStarved(t *testing.T) {
 		pairs = append(pairs, "s"+string(rune('a'+i%26))+string(rune('a'+i/26)), 1)
 	}
 	cases, took := corpus(pairs...)
-	sp, err := planLanes(cases, took, 30, 2)
+	sp, err := planLanes(cases, took, nil, 30, 0, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestNeitherLaneIsStarved(t *testing.T) {
 // whole directory goes to one slot and a slot is in one lane.
 func TestADirectoryGoesByItsLongestCase(t *testing.T) {
 	cases, took := corpus("multi#a", 5, "multi#b", 90, "solo", 5)
-	sp, err := planLanes(cases, took, 30, 4)
+	sp, err := planLanes(cases, took, nil, 30, 0, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,15 +116,15 @@ func TestADirectoryGoesByItsLongestCase(t *testing.T) {
 // guess, and the run says so rather than guessing.
 func TestLanesRefuseWithoutDurations(t *testing.T) {
 	cases, _ := corpus("a", 1)
-	if _, err := planLanes(cases, nil, 30, 4); err == nil {
+	if _, err := planLanes(cases, nil, nil, 30, 0, 4); err == nil {
 		t.Error("lanes were planned with no durations")
 	}
-	if _, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, 30, 1); err == nil {
+	if _, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, nil, 30, 0, 1); err == nil {
 		t.Error("lanes were planned for one slot")
 	}
 	// And a threshold nothing reaches is not a split, it is a mistake worth
 	// reporting -- an empty slow lane would leave its slots idle all run.
-	sp, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, 30, 4)
+	sp, err := planLanes(cases, map[string]time.Duration{"/x/a/cases/a.sh": time.Second}, nil, 30, 0, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,11 +136,108 @@ func TestLanesRefuseWithoutDurations(t *testing.T) {
 // Off is off: no threshold means no lanes and no error.
 func TestNoThresholdIsNoLanes(t *testing.T) {
 	cases, took := corpus("a", 100)
-	sp, err := planLanes(cases, took, 0, 8)
+	sp, err := planLanes(cases, took, nil, 0, 0, 8)
 	if err != nil || sp.on() {
 		t.Errorf("lane_slow_secs=0 gave %+v %v", sp, err)
 	}
 	if sp.laneOf(0) != dispatch.LaneAny {
 		t.Error("with lanes off a slot is not in LaneAny")
+	}
+}
+
+// The ceiling is made of space, so the lane that gives space away is chosen by
+// space. Duration must not get a vote when only lane_slow_mb is set.
+func TestLanesSelectByFootprintNotDuration(t *testing.T) {
+	const root = "/c/shell"
+	// A big slow directory, a big fast one, and a small slow one. Only the two
+	// big ones belong on disk.
+	cases := []string{
+		root + "/_a/big_slow/cases/big_slow.sh",
+		root + "/_b/big_fast/cases/big_fast.sh",
+		root + "/_c/small_slow/cases/small_slow.sh",
+		root + "/_d/small_fast/cases/small_fast.sh",
+	}
+	took := map[string]time.Duration{
+		cases[0]: 600 * time.Second,
+		cases[1]: 3 * time.Second,
+		cases[2]: 600 * time.Second,
+		cases[3]: 3 * time.Second,
+	}
+	held := map[string]int{
+		root + "/_a/big_slow/cases":   5000,
+		root + "/_b/big_fast/cases":   4000,
+		root + "/_c/small_slow/cases": 20,
+		root + "/_d/small_fast/cases": 20,
+	}
+
+	sp, err := planLanes(cases, took, held, 0, 1000, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		dir  string
+		want dispatch.Lane
+	}{
+		{root + "/_a/big_slow/cases", dispatch.LaneSlow},
+		{root + "/_b/big_fast/cases", dispatch.LaneSlow},
+		{root + "/_c/small_slow/cases", dispatch.LaneFast},
+		{root + "/_d/small_fast/cases", dispatch.LaneFast},
+	} {
+		if got := sp.byDir[c.dir]; got != c.want {
+			t.Errorf("%s: lane %v, want %v", c.dir, got, c.want)
+		}
+	}
+	// The fast lane keeps a 600-second case, which is the whole point: long is
+	// not the same as large, and the duration threshold got exactly this wrong.
+	if sp.FastMB != 40 || sp.SlowMB != 9000 {
+		t.Errorf("fast %d MB slow %d MB, want 40 and 9000", sp.FastMB, sp.SlowMB)
+	}
+	if sp.FastBiggest != 20 {
+		t.Errorf("biggest directory left in memory is %d MB, want 20", sp.FastBiggest)
+	}
+}
+
+// Both thresholds set is the union: each names a different reason a directory
+// should not be in memory, so either reason is enough.
+func TestBothThresholdsAreAUnion(t *testing.T) {
+	const root = "/c/shell"
+	cases := []string{
+		root + "/_a/big/cases/big.sh",
+		root + "/_b/long/cases/long.sh",
+		root + "/_c/neither/cases/neither.sh",
+	}
+	took := map[string]time.Duration{
+		cases[0]: 3 * time.Second,
+		cases[1]: 600 * time.Second,
+		cases[2]: 3 * time.Second,
+	}
+	held := map[string]int{
+		root + "/_a/big/cases":     5000,
+		root + "/_b/long/cases":    10,
+		root + "/_c/neither/cases": 10,
+	}
+	sp, err := planLanes(cases, took, held, 300, 1000, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp.SlowCases != 2 {
+		t.Fatalf("slow lane holds %d cases, want 2 (the big one and the long one)", sp.SlowCases)
+	}
+	if sp.byDir[root+"/_c/neither/cases"] != dispatch.LaneFast {
+		t.Error("a directory that is neither big nor long belongs in memory")
+	}
+}
+
+// A threshold with nothing measured to threshold against is an operator error,
+// and it has to be said rather than silently ignored.
+func TestFootprintLaneNeedsMeasurements(t *testing.T) {
+	cases := []string{"/c/shell/_a/x/cases/x.sh"}
+	took := map[string]time.Duration{cases[0]: time.Second}
+	_, err := planLanes(cases, took, nil, 0, 1000, 4)
+	if err == nil {
+		t.Fatal("lane_slow_mb with no footprints should refuse")
+	}
+	if !strings.Contains(err.Error(), "case_sizes") {
+		t.Errorf("the refusal should name the file that supplies them: %v", err)
 	}
 }

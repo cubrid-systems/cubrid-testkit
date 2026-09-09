@@ -178,17 +178,37 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// Seeded with what is already known, so an interrupted run refreshes the
 	// cases it reached instead of forgetting the ones it did not.
 	record := plan.Continue(known)
+
+	// Footprints are the other half of what the corpus costs, and they live in
+	// their own file because they are keyed by directory rather than by case: a
+	// directory is what a slot owns, what a reclaim drops, and what a lane holds.
+	sizePath := strings.TrimSpace(cfg.GetOr("case_sizes", ""))
+	var heldMB map[string]int
+	if sizePath != "" {
+		h, err := plan.ReadSizes(sizePath)
+		if err != nil {
+			return quit("cannot read case_sizes %s: %v", sizePath, err)
+		}
+		heldMB = h
+	}
+	sizes := plan.ContinueSizes(heldMB)
+
 	slowSecs := cfg.Int("lane_slow_secs", 0)
+	slowMB := cfg.Int("lane_slow_mb", 0)
+	lanes := slowSecs > 0 || slowMB > 0
 	slots := cfg.Int("parallel_slots", 1)
 	ramMB := cfg.Int("scenario_ram_mb", 0)
-	if slowSecs > 0 && ramMB <= 0 {
-		return quit("lane_slow_secs needs scenario_ram_mb: a fast lane is a lane whose writes go to memory")
+	if lanes && ramMB <= 0 {
+		return quit("lanes need scenario_ram_mb: a fast lane is a lane whose writes go to memory")
+	}
+	if slowMB > 0 && sizePath == "" {
+		return quit("lane_slow_mb needs case_sizes: the footprints it thresholds are measured by a run, not guessed")
 	}
 
 	var corpus *Corpus
 	var split laneSplit
 	if ramMB > 0 {
-		if slowSecs > 0 {
+		if lanes {
 			// Decided here, before a slot exists, because a slot's lane decides
 			// where its overlay's upper layer goes. The plan's own keys are the
 			// case list it needs: a plan is the previous run's case list with a
@@ -198,17 +218,16 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 			for c := range known {
 				measured = append(measured, c)
 			}
-			sp, err := planLanes(measured, known, slowSecs, slots)
+			sp, err := planLanes(measured, known, heldMB, slowSecs, slowMB, slots)
 			if err != nil {
 				return quit("%v", err)
 			}
 			if !sp.on() {
-				return quit("lane_slow_secs=%d selects no case in %s; nothing would run in the slow lane",
-					slowSecs, planPath)
+				return quit("no directory reaches the lane threshold; nothing would run in the slow lane")
 			}
 			split = sp
 		}
-		c, err := OpenCorpus(cfg.GetOr("scenario", ""), ramMB, slowSecs > 0)
+		c, err := OpenCorpus(cfg.GetOr("scenario", ""), ramMB, lanes)
 		if err != nil {
 			return quit("%v", err)
 		}
@@ -372,8 +391,8 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		// A directory this corpus has and the plan did not mention takes the
 		// fast lane, which planLanes already decided by omission.
 		queue.Assign(split.byDir)
-		fmt.Println(split.describe(slowSecs))
-		for _, line := range split.slowest(known, cases, 5) {
+		fmt.Println(split.describe(slowSecs, slowMB))
+		for _, line := range split.slowest(known, heldMB, cases, 5) {
 			fmt.Printf("[INFO]   slow lane: %s\n", line)
 		}
 	}
@@ -427,6 +446,12 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	if planPath != "" {
 		if werr := record.Write(planPath); werr != nil {
 			fmt.Printf("[ERROR] cannot write case_plan %s: %v\n", planPath, werr)
+		}
+	}
+	if sizePath != "" {
+		sizes.Merge(corpus.Held())
+		if werr := sizes.Write(sizePath); werr != nil {
+			fmt.Printf("[ERROR] cannot write case_sizes %s: %v\n", sizePath, werr)
 		}
 	}
 

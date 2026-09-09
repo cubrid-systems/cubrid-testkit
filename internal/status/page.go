@@ -308,6 +308,14 @@ const page = `<!doctype html>
   </table></div>
 </section>
 
+<section id=detailwrap hidden>
+  <h2>case detail <span class=count id=detailname></span>
+    <span class=seg><button id=detailclose>close</button></span>
+  </h2>
+  <p id=detailpatch class=detailpatch hidden></p>
+  <pre id=detail class=detail></pre>
+</section>
+
 <section>
   <h2>finished
     <span class=seg role=group aria-label="which cases">
@@ -330,13 +338,6 @@ const page = `<!doctype html>
   </table></div>
 </section>
 
-<section id=detailwrap hidden>
-  <h2>case detail <span class=count id=detailname></span>
-    <span class=seg><button id=detailclose>close</button></span>
-  </h2>
-  <p id=detailpatch class=detailpatch hidden></p>
-  <pre id=detail class=detail></pre>
-</section>
 
 <script>
 const $ = id => document.getElementById(id)

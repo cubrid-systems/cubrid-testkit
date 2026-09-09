@@ -3,7 +3,7 @@ package shellsuite
 import (
 	"context"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
 )
 
@@ -130,7 +131,7 @@ func TestParamListIsOrderedSoTwoRunsMatch(t *testing.T) {
 
 func TestKillScriptIsValidShell(t *testing.T) {
 	for _, local := range []bool{true, false} {
-		cmd := exec.Command("bash", "-n")
+		cmd := osexec.Command("bash", "-n")
 		cmd.Stdin = strings.NewReader(KillScript(local, false))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Errorf("local=%v: bash -n rejected the script: %v\n%s", local, err, out)
@@ -160,7 +161,7 @@ func TestTheJVMSweepIsKeptExactlyAsBrokenAsItWas(t *testing.T) {
 		t.Fatal("the JVM sweep was repaired; see the comment on KillScript")
 	}
 
-	out, err := exec.Command("bash", "-c",
+	out, err := osexec.Command("bash", "-c",
 		`x=1; if [ $x -eq 0]; then echo taken; else echo "not taken"; fi`).CombinedOutput()
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +176,7 @@ func TestRestoreAndSnapshotAreValidShell(t *testing.T) {
 		"snapshot": SnapshotScript(),
 		"restore":  RestoreScript(),
 	} {
-		cmd := exec.Command("bash", "-n")
+		cmd := osexec.Command("bash", "-n")
 		cmd.Stdin = strings.NewReader(script)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Errorf("%s: bash -n rejected the script: %v\n%s", name, err, out)
@@ -269,7 +270,7 @@ func TestTheResetRefusesWithoutACubridInstall(t *testing.T) {
 			// Run from the temporary directory so that a find rooted at "/" would
 			// still have to walk to reach the victim -- what is being asserted is
 			// that the script exits before any of it runs.
-			cmd := exec.Command("bash", "-c", script+RestoreScript())
+			cmd := osexec.Command("bash", "-c", script+RestoreScript())
 			cmd.Dir = dir
 			out, err := cmd.CombinedOutput()
 			if err == nil {
@@ -295,7 +296,7 @@ func TestTheSweepCannotReachOutsideTheSlot(t *testing.T) {
 		t.Skip("not contained; run under TESTKIT_CONTAIN=1")
 	}
 	// A process outside the slot, named like something the sweep hunts.
-	outside := exec.Command("bash", "-c", "exec -a cub_master_decoy sleep 120")
+	outside := osexec.Command("bash", "-c", "exec -a cub_master_decoy sleep 120")
 	if err := outside.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -336,5 +337,30 @@ func TestAContainedRunDoesNotUseTheMachineWideSelector(t *testing.T) {
 	loose := KillScript(true, false)
 	if !strings.Contains(loose, "ps -u $USER") {
 		t.Error("the uncontained sweep is CTP's and is kept verbatim")
+	}
+}
+
+// The reset refuses when $CUBRID is not an installation, and the refusal has to
+// reach a log. It did not: Run reports a command's own non-zero exit in the
+// Result and keeps err for not being able to run it at all, quietly checked err
+// alone, and the guard exits 1 with its explanation on stderr. All three
+// together meant the reset could refuse 3,244 times in silence while every case
+// ran against the previous case's leftovers.
+func TestARefusedResetIsReportedAndNotSwallowed(t *testing.T) {
+	res, err := (&exec.Local{}).Run(context.Background(),
+		"unset CUBRID\n"+RestoreScript())
+	if err != nil {
+		t.Fatalf("the script ran, so err must be nil: %v", err)
+	}
+	if res.ExitCode == 0 {
+		t.Fatal("the reset must refuse without a CUBRID installation")
+	}
+	// The explanation is on stderr, which Output() does not carry -- so anything
+	// that reports this failure has to read Stderr.
+	if !strings.Contains(res.Stderr, "refuses to run") {
+		t.Errorf("the refusal should explain itself on stderr, got %q / %q", res.Stdout, res.Stderr)
+	}
+	if strings.Contains(res.Output(), "refuses to run") {
+		t.Error("this test is meaningless if the explanation is on stdout")
 	}
 }

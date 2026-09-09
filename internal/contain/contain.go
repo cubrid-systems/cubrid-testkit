@@ -68,6 +68,15 @@ func Enter() int {
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if ok := asExit(err, &ee); ok {
+			// Exited() before ExitCode(). A process killed by a signal has no
+			// exit code and ExitCode() answers -1 for it -- the same -1 this
+			// function uses for "there was nothing to contain". The caller reads
+			// that as "carry on", and carries on *uncontained*: the reset then
+			// empties the real $CUBRID/conf and the process sweep selects across
+			// the whole machine. An OOM kill or a stray SIGKILL is enough.
+			if ee.ProcessState != nil && !ee.ProcessState.Exited() {
+				fail("the contained run was killed: %v", ee.ProcessState)
+			}
 			return ee.ExitCode()
 		}
 		fail("cannot contain the run: %v", err)

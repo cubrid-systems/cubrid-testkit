@@ -431,6 +431,10 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		// is already writing, so a click costs a scan and nothing is recorded
 		// twice.
 		board.Detail(filepath.Join(sink.Dir(), "feedback.log"))
+		// What the run was told to do, which the verdicts do not say and which
+		// changes what they mean: an engine default that is not the engine's, and
+		// switches that decide how faithful the run is.
+		board.Setup(describeSetup(cfg, slots, ramMB, slowSecs, slowMB, planPath, sizePath))
 		// The template cache is CTP's, turned on with an environment variable and
 		// keeping its own store, so the page reads that store rather than asking
 		// the shell to report. Off unless the run asked for a cache, and then the

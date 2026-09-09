@@ -150,6 +150,21 @@ const page = `<!doctype html>
  table.kv td:first-child{color:var(--ink-faint);width:9rem}
  table.kv td.warn{color:var(--warn)}
 
+ /* Three groups side by side, each a narrow key/value list. They are read by
+    scanning for the one line that is not the default, so the changed rows carry
+    the only colour in the panel. */
+ .setupgrid{display:grid;gap:.5rem 2.4rem;grid-template-columns:repeat(auto-fit,minmax(17rem,1fr))}
+ .setupgrid h3{font-size:.68rem;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+               color:var(--ink-faint);margin:0 0 .3rem;padding-bottom:.25rem;
+               border-bottom:1px solid var(--line)}
+ .setupgrid table{width:100%;min-width:0}
+ .setupgrid td{border:0;padding:.14rem .7rem .14rem 0;vertical-align:baseline}
+ .setupgrid td.k{color:var(--ink-faint);white-space:nowrap}
+ .setupgrid td.v{color:var(--ink);word-break:break-all}
+ .setupgrid tr.changed td.v{color:var(--warn)}
+ .setupgrid tr.changed td.k{color:var(--warn);opacity:.75}
+ .setupgrid .was{color:var(--ink-faint);font-size:.92em}
+
  /* The distribution is bars rather than a curve: the buckets are the shape,
     and a reader wants to know how many cases sit in each rather than to read a
     value off an axis. */
@@ -218,6 +233,11 @@ const page = `<!doctype html>
 <section class=panel id=machinewrap style="margin-bottom:1.6rem">
   <h2>machine <span class=count id=mwhen>every second</span></h2>
   <div class=mgrid id=machine></div>
+</section>
+
+<section class=panel id=setupwrap hidden style="margin-bottom:1.6rem">
+  <h2>configuration <span class=count id=setupwhen>what the run was told to do</span></h2>
+  <div class=setupgrid id=setup></div>
 </section>
 
 <div class=panels>
@@ -433,6 +453,7 @@ async function tick() {
   groups('slot', v.slot || [], true)
   document.body.classList.toggle('onelane', (v.lanes || []).length < 2)
   lanes(v.lanes || [])
+  setup(v.setup || [])
   templates(v.templates)
   lastView = v
   draw(v)
@@ -584,6 +605,41 @@ function templates(t) {
     '<td class=num>' + gb(r.mb) +
     '<td class=case title="' + (r.origin || '') + '">' + (r.origin || '') + '</tr>').join('')
     : '<tr><td colspan=4 class=empty>the store is empty</tr>'
+}
+
+// The configuration is static, so it is drawn once and then left alone. A row
+// whose value differs from the default the engine shipped is the row the reader
+// came for, so it says what the default was rather than only that it changed.
+var setupDrawn = false;
+function setup(rows) {
+  var wrap = document.getElementById('setupwrap');
+  if (!rows || !rows.length) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  if (setupDrawn) return;
+  setupDrawn = true;
+
+  var order = [], byGroup = {};
+  rows.forEach(function (r) {
+    if (!byGroup[r.group]) { byGroup[r.group] = []; order.push(r.group); }
+    byGroup[r.group].push(r);
+  });
+  var nch = 0;
+  var html = order.map(function (g) {
+    var body = byGroup[g].map(function (r) {
+      var changed = r.default && r.value !== r.default;
+      if (changed) nch++;
+      var v = esc(r.value);
+      if (changed) v += ' <span class=was>(default ' + esc(r.default) + ')</span>';
+      else if (r.note) v += ' <span class=was>' + esc(r.note) + '</span>';
+      return '<tr class="' + (changed ? 'changed' : '') + '">' +
+             '<td class=k>' + esc(r.key) + '<td class=v>' + v + '</tr>';
+    }).join('');
+    return '<div><h3>' + esc(g) + '</h3><table><tbody>' + body + '</tbody></table></div>';
+  }).join('');
+  document.getElementById('setup').innerHTML = html;
+  document.getElementById('setupwhen').textContent =
+    nch ? nch + (nch === 1 ? ' value differs from the engine default' : ' values differ from the engine defaults')
+        : 'what the run was told to do';
 }
 
 function lanes(ls) {

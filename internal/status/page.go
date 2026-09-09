@@ -639,6 +639,16 @@ function templates(t) {
 // whose value differs from the default the engine shipped is the row the reader
 // came for, so it says what the default was rather than only that it changed.
 var setupDrawn = false;
+// Text into markup. Everything the page interpolates is a case path, a patch
+// path or a configuration value -- none of it hostile, all of it capable of
+// holding a character that ends an attribute early and silently swallows the
+// rest of a row.
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
 function setup(rows) {
   var wrap = document.getElementById('setupwrap');
   if (!rows || !rows.length) { wrap.hidden = true; return; }

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -694,6 +695,70 @@ func TestFamilyOfFindsTheFamilyAtAnyDepth(t *testing.T) {
 // updating, silently, with the API still serving the data they wanted.
 //
 // So: every function the script calls has to be defined in the script.
+// A page that calls a helper it does not define stops at that line, and
+// everything after it in tick() never runs -- so one missing name empties a
+// panel and quietly takes the ones below it too.
+//
+// The names are read out of the script rather than listed here. A list is a
+// second place to keep correct, and it was wrong: esc() was added, called from
+// two places, never defined, and this test passed because esc was not on the
+// list. The configuration panel came up empty and took the template panel and
+// the case detail with it.
+// calledInScript is every identifier the script calls.
+//
+// By index rather than by a regexp that also matches what precedes the name: a
+// match consumes the "(" it ends on, so in draw(nope(1)) the inner call starts
+// where the outer match stopped and a look-behind group never sees it. Missing
+// nested calls is exactly the blind spot this test exists to close.
+var callName = regexp.MustCompile(`[A-Za-z_$][\w$]*\s*\(`)
+
+func calledInScript(script string) map[string]bool {
+	out := map[string]bool{}
+	for _, at := range callName.FindAllStringIndex(script, -1) {
+		if at[0] > 0 {
+			switch c := script[at[0]-1]; {
+			case c == '.', c == '_', c == '$',
+				c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+				continue // a method call, or the tail of a longer name
+			}
+		}
+		name := strings.TrimRight(script[at[0]:at[1]-1], " \t\n")
+		out[name] = true
+	}
+	return out
+}
+
+// And the derivation has to catch a nested call, or it is a test that only ever
+// passes. esc() was called from two places and defined nowhere, and the
+// list-based version of this test did not notice.
+func TestTheDerivationCatchesAMissingHelper(t *testing.T) {
+	got := calledInScript("function tick(){ draw(nope(1)) }\nfunction draw(x){}\n")
+	if !got["nope"] {
+		t.Errorf("a nested call was not seen: %v", keysOf(got))
+	}
+	if !got["draw"] {
+		t.Errorf("an ordinary call was not seen: %v", keysOf(got))
+	}
+}
+
+func keysOf(m map[string]bool) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// A page that calls a helper it does not define stops at that line, and
+// everything after it in tick() never runs -- so one missing name empties a
+// panel and quietly takes the ones below it too.
+//
+// The names are read out of the script rather than listed here. A list is a
+// second place to keep correct, and it was wrong: esc() was added, called from
+// two places, never defined, and this test passed because esc was not on the
+// list. The configuration panel came up empty and took the template panel and
+// the case detail with it.
 func TestThePageDefinesEveryFunctionItCalls(t *testing.T) {
 	res, err := http.Get(mustServe(t) + "/")
 	if err != nil {
@@ -706,14 +771,37 @@ func TestThePageDefinesEveryFunctionItCalls(t *testing.T) {
 		script = script[at:]
 	}
 
-	// The helpers tick() and its callees depend on, by name.
-	for _, fn := range []string{
-		"machine", "hist", "groups", "lanes", "templates", "lane",
-		"spark", "draw", "secs", "short", "gb", "tick", "replayBar", "rpSend",
-	} {
-		if !strings.Contains(script, "function "+fn+"(") &&
-			!strings.Contains(script, "const "+fn+" =") {
-			t.Errorf("the script calls %s() and does not define it", fn)
+	defined := map[string]bool{}
+	for _, m := range regexp.MustCompile(`function\s+([A-Za-z_$][\w$]*)\s*\(`).FindAllStringSubmatch(script, -1) {
+		defined[m[1]] = true
+	}
+	for _, m := range regexp.MustCompile(`(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:function|\(|[A-Za-z_$][\w$]*\s*=>)`).FindAllStringSubmatch(script, -1) {
+		defined[m[1]] = true
+	}
+
+	// What the browser brings, and the shapes that look like a call and are not.
+	builtin := map[string]bool{
+		"if": true, "for": true, "while": true, "switch": true, "catch": true, "return": true,
+		"function": true, "typeof": true, "await": true, "new": true, "do": true, "else": true,
+		"var": true, "const": true, "let": true, "in": true, "of": true, "delete": true, "void": true,
+		"Number": true, "String": true, "Boolean": true, "Object": true, "Array": true,
+		"Math": true, "JSON": true, "Date": true, "RegExp": true, "Error": true, "Set": true,
+		"Map": true, "parseInt": true, "parseFloat": true, "isNaN": true, "encodeURIComponent": true,
+		"decodeURIComponent": true, "fetch": true, "setTimeout": true, "setInterval": true,
+		"clearTimeout": true, "clearInterval": true, "requestAnimationFrame": true,
+		"document": true, "window": true, "console": true, "alert": true, "$": true,
+	}
+
+	for name := range calledInScript(script) {
+		if !builtin[name] && !defined[name] {
+			t.Errorf("the script calls %s() and does not define it", name)
+		}
+	}
+	// And the ones tick() cannot do without, in case the derivation above ever
+	// stops finding call sites at all.
+	for _, fn := range []string{"tick", "draw", "machine", "setup", "esc"} {
+		if !defined[fn] {
+			t.Errorf("%s() is not defined", fn)
 		}
 	}
 }

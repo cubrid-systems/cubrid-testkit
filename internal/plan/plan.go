@@ -42,7 +42,22 @@ type Record struct {
 	took map[string]time.Duration
 }
 
-func NewRecord() *Record { return &Record{took: map[string]time.Duration{}} }
+func NewRecord() *Record { return Continue(nil) }
+
+// Continue starts a record from a plan already on disk, so a case this run does
+// not reach keeps the duration an earlier run measured for it.
+//
+// A plan is what the corpus costs, not what one run did. Writing only this run's
+// cases replaces the first with the second, and a run killed after thirty cases
+// leaves a thirty-case plan behind -- which is how a 3,444-case plan became a
+// 31-case one, taking the schedule and the page's estimate with it.
+func Continue(prior map[string]time.Duration) *Record {
+	took := make(map[string]time.Duration, len(prior))
+	for n, d := range prior {
+		took[n] = d
+	}
+	return &Record{took: took}
+}
 
 // Add records what a case took. A retried case is added once, when it retires,
 // so the duration is the attempt that produced the verdict.

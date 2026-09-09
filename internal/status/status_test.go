@@ -959,3 +959,63 @@ func TestANestedHelperDoesNotCountAsDefined(t *testing.T) {
 		t.Errorf("a top-level function after a comment was missed: %v", keysOf(got))
 	}
 }
+
+// A running case has nothing in feedback.log -- the block is written when it
+// ends -- but it appends a line to its own result file at every check. That is
+// where a slow case says which check it is on, and it is the difference between
+// knowing a case is slow and knowing where.
+func TestARunningCaseShowsWhatItHasWrittenSoFar(t *testing.T) {
+	dir := t.TempDir()
+	result := filepath.Join(dir, "x.result")
+	if err := os.WriteFile(result, []byte("x-1 : OK\nx-2 : OK\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := New(1)
+	addr, stop, err := b.Serve("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	base := "http://" + addr
+
+	const name = "/c/shell/_01_a/x/cases/x.sh"
+	b.Begin("slot0", name)
+	b.Live(name, result)
+
+	got := fetch(t, base+"/live?name="+url.QueryEscape(name))
+	if !strings.Contains(got, "x-2 : OK") {
+		t.Errorf("the live view should show what the case has written: %q", got)
+	}
+
+	// It grows as the case does.
+	if err := os.WriteFile(result, []byte("x-1 : OK\nx-2 : OK\nx-3 : NOK\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := fetch(t, base+"/live?name="+url.QueryEscape(name)); !strings.Contains(got, "x-3 : NOK") {
+		t.Errorf("the live view should follow the file: %q", got)
+	}
+
+	// A case that is not running here says so rather than 404ing or leaking a
+	// path the reader cannot use.
+	if got := fetch(t, base+"/live?name=/c/shell/other/cases/other.sh"); !strings.Contains(got, "not running here") {
+		t.Errorf("an unknown case should be explained: %q", got)
+	}
+
+	// And when the case finishes, the file is about to be reclaimed, so the
+	// board stops offering it.
+	b.Live(name, "")
+	if got := fetch(t, base+"/live?name="+url.QueryEscape(name)); !strings.Contains(got, "not running here") {
+		t.Errorf("a finished case should not still be offered live: %q", got)
+	}
+}
+
+func fetch(t *testing.T, u string) string {
+	t.Helper()
+	res, err := http.Get(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	b, _ := io.ReadAll(res.Body)
+	return string(b)
+}

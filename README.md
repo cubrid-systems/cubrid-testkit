@@ -243,6 +243,7 @@ and one overlay covers both.
 | `lane_slow_secs` | off | split the slots into a tmpfs lane and a disk lane at this duration |
 | `lane_slow_mb` | off | the same split, at this footprint. Needs `case_sizes` |
 | `heavy_in_flight_max` | `slots/4` | how many of the heaviest cases may run at once |
+| `lane_slow_mbps` | — | send directories to the disk lane until their summed write rate reaches this, longest-first. Needs `case_sizes` and `case_plan`: a rate is megabytes over seconds and both are measured |
 | `scenario_ram_high_water` | `80` | percent of `scenario_ram_mb` above which no new case starts |
 
 And the environment:

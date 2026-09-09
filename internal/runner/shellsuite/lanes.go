@@ -22,7 +22,29 @@ import (
 // ones memory helps most. It is kept because the argument is worth reading and
 // the knob is worth having, not because it worked.
 //
-// By footprint (lane_slow_mb) is the second, and it is chosen to relieve the
+// By rate (lane_slow_mbps) is the third, and the one the measurements point at.
+// It exists because footprint and duration turned out to be unrelated: over
+// 2,949 directories measured at their peak, Spearman(footprint, duration) is
+// +0.02. Selecting by footprint therefore picks the rate at random, and rate is
+// the quantity the disk is bounded by. Measured on this corpus:
+//
+//	peak      longest   MB/s
+//	8,662 MB     17 s   512.5   <- worst possible thing to put on disk
+//	6,153 MB     40 s   155.4
+//	9,289 MB    160 s    58.1
+//	9,093 MB    523 s    17.4   <- same bytes, a thirtieth of the load
+//
+// The disk delivered 88 MB/s under four concurrent writers, so lane_slow_mb
+// cannot tell the last row from the first: it sees similar megabytes.
+//
+// What the two lanes want is a knapsack -- move as many bytes as possible off
+// the tmpfs without asking the disk for more MB/s than it has -- and its greedy
+// order falls out of the arithmetic: value over weight is bytes divided by
+// bytes-per-second, which is seconds. So take the longest directories first and
+// stop when the summed rate reaches the budget. Duration is the right *order*
+// even though, on its own, it was the wrong *criterion*.
+//
+// By footprint (lane_slow_mb) is the second, and it was chosen to relieve the
 // bound that actually breaks: the ceiling is made of space. Eighteen cases into
 // this corpus, three directories that each hold gigabytes overlap and take
 // 18,417 MB of an 18,432 MB ceiling -- and they overlap precisely because they
@@ -75,8 +97,8 @@ type laneSplit struct {
 // 40% of the slots takes the same wall clock as the other. Both lanes get at
 // least one slot, and a run whose split would starve a lane keeps every slot in
 // the fast one.
-func planLanes(cases []string, took map[string]time.Duration, held map[string]int, slowSecs, slowMB, slots int) (laneSplit, error) {
-	if slowSecs <= 0 && slowMB <= 0 {
+func planLanes(cases []string, took map[string]time.Duration, held map[string]int, slowSecs, slowMB, slowMBps, slots int) (laneSplit, error) {
+	if slowSecs <= 0 && slowMB <= 0 && slowMBps <= 0 {
 		return laneSplit{}, nil
 	}
 	if slowSecs > 0 && len(took) == 0 {
@@ -84,6 +106,9 @@ func planLanes(cases []string, took map[string]time.Duration, held map[string]in
 	}
 	if slowMB > 0 && len(held) == 0 {
 		return laneSplit{}, fmt.Errorf("lane_slow_mb needs footprints: run once with case_sizes set, or unset lane_slow_mb")
+	}
+	if slowMBps > 0 && (len(held) == 0 || len(took) == 0) {
+		return laneSplit{}, fmt.Errorf("lane_slow_mbps needs both footprints and durations: run once with case_sizes and case_plan set, or unset lane_slow_mbps")
 	}
 	if slots < 2 {
 		return laneSplit{}, fmt.Errorf("lanes need at least two slots, and parallel_slots is %d", slots)
@@ -106,10 +131,37 @@ func planLanes(cases []string, took map[string]time.Duration, held map[string]in
 		}
 	}
 
+	// The rate budget, spent longest-first: that is the greedy order for
+	// "as many bytes as possible within a bandwidth", because bytes over
+	// bytes-per-second is seconds. A directory with no footprint asks nothing of
+	// the disk and is left where it is.
+	byRate := map[string]bool{}
+	if slowMBps > 0 {
+		dirs := make([]string, 0, len(worst))
+		for dir := range worst {
+			if held[dir] > 0 && worst[dir] > 0 {
+				dirs = append(dirs, dir)
+			}
+		}
+		sort.Slice(dirs, func(i, j int) bool { return worst[dirs[i]] > worst[dirs[j]] })
+		budget := float64(slowMBps)
+		for _, dir := range dirs {
+			rate := float64(held[dir]) / worst[dir]
+			if rate > budget {
+				continue // no room for this one; a slower one may still fit
+			}
+			byRate[dir] = true
+			budget -= rate
+		}
+	}
+
 	out := laneSplit{byDir: map[string]dispatch.Lane{}}
 	for dir, w := range worst {
 		slow := slowSecs > 0 && w >= float64(slowSecs)
 		if slowMB > 0 && held[dir] >= slowMB {
+			slow = true
+		}
+		if byRate[dir] {
 			slow = true
 		}
 		if slow {

@@ -148,8 +148,10 @@ type Board struct {
 	typical time.Duration
 	// setup is how the run was configured, recorded once before the first case.
 	setup setupBox
-	// patched names the cases a compatibility patch was applied to.
-	patched map[string]bool
+	// patched maps a case to the compatibility patch it ran against, and refused
+	// to the patch that would not apply.
+	patched map[string]string
+	refused map[string]string
 	// replayAt is the knobs' state as the replayer last published it.
 	//
 	// Published rather than asked for. The replayer takes its own lock and then
@@ -263,25 +265,43 @@ func (b *Board) Lane(slot, lane string) {
 	}
 }
 
-// Patched records that a case ran against a compatibility patch. A verdict from
-// patched source is a claim about the patched case, not about the corpus, and
-// every place the page shows the verdict has to show that too.
-func (b *Board) Patched(name string) {
+// Patched records that a case ran against a compatibility patch, and which one.
+// A verdict from patched source is a claim about the patched case, not about the
+// corpus, and every place the page shows the verdict has to show that too --
+// including which patch, because "patched" without a name is a caveat the reader
+// cannot follow up.
+func (b *Board) Patched(name, patch string) {
 	if b == nil || name == "" {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.patched == nil {
-		b.patched = map[string]bool{}
+		b.patched = map[string]string{}
 	}
-	b.patched[name] = true
+	b.patched[name] = patch
 }
 
-// WasPatched reports whether a case ran against a patch.
-func (b *Board) WasPatched(name string) bool {
+// Refused records that a patch would not apply, so the case ran as neither the
+// corpus nor the patch has it. That is a third state and the one most worth
+// seeing: without it the page shows an ordinary failure and the reader has no
+// way to tell that the run's own tooling is what went wrong.
+func (b *Board) Refused(name, patch string) {
+	if b == nil || name == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.refused == nil {
+		b.refused = map[string]string{}
+	}
+	b.refused[name] = patch
+}
+
+// WasPatched reports the patch a case ran against, or "".
+func (b *Board) WasPatched(name string) string {
 	if b == nil {
-		return false
+		return ""
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -491,8 +511,10 @@ type view struct {
 	// Setup is how the run was configured. Static, and sent with every snapshot
 	// because a reader who opens the page an hour in needs it too.
 	Setup []Setting `json:"setup,omitempty"`
-	// NPatched is how many finished cases ran against a compatibility patch.
+	// NPatched is how many finished cases ran against a compatibility patch, and
+	// NRefused how many had one that would not apply.
 	NPatched int `json:"npatched,omitempty"`
+	NRefused int `json:"nrefused,omitempty"`
 	// Templates is nil unless the run uses the database-template cache, and the
 	// page leaves the panel out when it is.
 	Templates *templateView `json:"templates,omitempty"`
@@ -541,10 +563,13 @@ type doneView struct {
 	Case string `json:"case"`
 	OK   bool   `json:"ok"`
 	Took int    `json:"took"`
-	// Patched marks a verdict produced from a case this run changed before it
-	// ran it. It is a different claim from a verdict about the corpus, and the
-	// page has to say which one it is showing.
-	Patched bool `json:"patched,omitempty"`
+	// Patch is the compatibility patch this case ran against, and Refused says
+	// the patch would not apply -- so the case ran as neither the corpus nor the
+	// patch has it. Both are different claims from an ordinary verdict, and
+	// naming the patch matters: "patched" without a name is a caveat the reader
+	// cannot follow up.
+	Patch   string `json:"patch,omitempty"`
+	Refused bool   `json:"refused,omitempty"`
 }
 
 func (b *Board) snapshot() view {
@@ -591,7 +616,7 @@ func (b *Board) snapshot() view {
 		f := b.failed[i]
 		v.Failed = append(v.Failed, doneView{
 			Slot: f.Slot, Case: f.Case, OK: false, Took: int(f.Took.Seconds()),
-			Patched: b.patched[f.Case],
+			Patch: b.patchOf(f.Case), Refused: b.refused[f.Case] != "",
 		})
 	}
 	v.Rate = append([]int(nil), b.buckets...)
@@ -611,6 +636,7 @@ func (b *Board) snapshot() view {
 	v.Lanes = b.lanes()
 	v.Setup = b.setupRows()
 	v.NPatched = len(b.patched)
+	v.NRefused = len(b.refused)
 	v.Templates = b.templates.snapshot()
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()
@@ -618,7 +644,7 @@ func (b *Board) snapshot() view {
 		f := b.recent[i]
 		v.Recent = append(v.Recent, doneView{
 			Slot: f.Slot, Case: f.Case, OK: f.OK, Took: int(f.Took.Seconds()),
-			Patched: b.patched[f.Case],
+			Patch: b.patchOf(f.Case), Refused: b.refused[f.Case] != "",
 		})
 	}
 	return v

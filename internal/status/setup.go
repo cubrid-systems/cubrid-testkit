@@ -43,6 +43,15 @@ func (b *Board) Setup(rows []Setting) {
 	b.setup.rows = append([]Setting(nil), rows...)
 }
 
+// patchOf is the patch a case used, or the one it was refused. Called with
+// b.mu held.
+func (b *Board) patchOf(name string) string {
+	if p := b.patched[name]; p != "" {
+		return p
+	}
+	return b.refused[name]
+}
+
 func (b *Board) setupRows() []Setting {
 	b.setup.mu.Lock()
 	defer b.setup.mu.Unlock()

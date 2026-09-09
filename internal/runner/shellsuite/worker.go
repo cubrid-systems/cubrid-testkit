@@ -167,6 +167,16 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		}
 		w.log("[PATCH] applied " + pf)
 		w.Board.Patched(c.Script)
+		// Put it back. Behind the overlay the writes go anyway when the
+		// directory retires, but that is a property of how the run was
+		// configured, and "does the corpus come out as it went in" must not
+		// have "it depends" as its answer.
+		defer func() {
+			if _, rerr := runIn(context.Background(), w.Channel, RevertScript(c.Dir, pf)); rerr != nil {
+				w.log("[ERROR] the compatibility patch " + pf + " could not be reverted, so " +
+					c.Dir + " is left patched: " + rerr.Error())
+			}
+		}()
 	}
 
 	res, err := runIn(ctx, w.Channel, RunScript(c, w.Options))

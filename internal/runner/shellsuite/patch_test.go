@@ -25,8 +25,8 @@ func TestAPatchIsFoundByTheCasePath(t *testing.T) {
 	pdir := t.TempDir()
 	script := filepath.Join(scenario, "_08_shard", "x", "cases", "x.sh")
 	writeFile(t, script, "echo hi\n")
-	writeFile(t, filepath.Join(pdir, "_08_shard", "x", "cases", "x.sh.patch"), "")
-	writeFile(t, filepath.Join(pdir, "_99_gone", "y", "cases", "y.sh.patch"), "")
+	writeFile(t, filepath.Join(pdir, "_08_shard~x.patch"), "")
+	writeFile(t, filepath.Join(pdir, "_99_gone~y.patch"), "")
 
 	p, err := LoadPatches(pdir, scenario, []string{script})
 	if err != nil {
@@ -49,6 +49,55 @@ func TestAPatchIsFoundByTheCasePath(t *testing.T) {
 	}
 	if !strings.Contains(said, "_99_gone") {
 		t.Error("the orphan should appear in what the run prints")
+	}
+}
+
+// The name drops the two segments that carry no information.
+func TestPatchNameDropsWhatCarriesNoInformation(t *testing.T) {
+	for _, c := range []struct{ script, want string }{
+		{"/c/_06_issues/_17_1h/cbrd_20760_1/cases/cbrd_20760_1.sh", "_06_issues~_17_1h~cbrd_20760_1"},
+		{"/c/_08_shard/_02_cubrid_broker01/cases/_02_cubrid_broker01.sh", "_08_shard~_02_cubrid_broker01"},
+		// A directory with more than one case keeps both names, because there
+		// the file name is the only thing telling them apart.
+		{"/c/_06_issues/_25_1h/cbrd_24741/01_basic/cases/01_basic.sh", "_06_issues~_25_1h~cbrd_24741~01_basic"},
+		{"/elsewhere/x.sh", ""},
+	} {
+		if got := PatchName("/c", c.script); got != c.want {
+			t.Errorf("PatchName(%s) = %q, want %q", c.script, got, c.want)
+		}
+	}
+}
+
+// The corpus has to come out as it went in whether or not the run had an
+// overlay, so the revert is explicit rather than a side effect of the reclaim.
+func TestTheCaseIsPutBack(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "x.sh")
+	const original = "echo hi\n"
+	writeFile(t, script, original)
+	patch := filepath.Join(dir, "p.patch")
+	writeFile(t, patch, `--- x.sh
++++ x.sh
+@@ -1 +1 @@
+-echo hi
++echo hello
+`)
+	if out, err := exec.Command("bash", "-c", ApplyScript(dir, patch)).CombinedOutput(); err != nil {
+		t.Fatalf("apply: %v: %s", err, out)
+	}
+	if b, _ := os.ReadFile(script); string(b) == original {
+		t.Fatal("the patch did not change the case")
+	}
+	if out, err := exec.Command("bash", "-c", RevertScript(dir, patch)).CombinedOutput(); err != nil {
+		t.Fatalf("revert: %v: %s", err, out)
+	}
+	if b, _ := os.ReadFile(script); string(b) != original {
+		t.Errorf("the case was not put back:\n%q", b)
+	}
+	// A second revert has nothing to undo and must not re-apply it backwards.
+	_ = exec.Command("bash", "-c", RevertScript(dir, patch)).Run()
+	if b, _ := os.ReadFile(script); string(b) != original {
+		t.Errorf("reverting twice changed the case:\n%q", b)
 	}
 }
 
@@ -138,7 +187,7 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 			return err
 		}
 		rel, _ := filepath.Rel(pdir, path)
-		caseScript := filepath.Join(shell, strings.TrimSuffix(rel, ".patch"))
+		caseScript := scriptFor(shell, strings.TrimSuffix(rel, ".patch"))
 		if _, serr := os.Stat(caseScript); serr != nil {
 			t.Errorf("%s patches a case that is not in the corpus: %s", rel, caseScript)
 			return nil
@@ -170,4 +219,18 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("%d patches apply", n)
+}
+
+// scriptFor turns a patch name back into the case it patches, for the test that
+// checks the shipped patches against a real checkout.
+func scriptFor(shell, name string) string {
+	parts := strings.Split(name, "~")
+	last := parts[len(parts)-1]
+	// The generated name drops a file that repeats its directory, so try that
+	// shape first and the two-case shape second.
+	a := filepath.Join(append(append([]string{shell}, parts...), "cases", last+".sh")...)
+	if _, err := os.Stat(a); err == nil {
+		return a
+	}
+	return filepath.Join(append(append([]string{shell}, parts[:len(parts)-1]...), "cases", last+".sh")...)
 }

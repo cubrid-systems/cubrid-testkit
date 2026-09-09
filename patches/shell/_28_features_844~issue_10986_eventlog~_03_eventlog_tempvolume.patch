@@ -1,17 +1,18 @@
 --- _03_eventlog_tempvolume.sh
 +++ _03_eventlog_tempvolume.sh
-@@ -12,6 +12,14 @@
- . $init_path/init.sh
- init test
+@@ -20,6 +20,15 @@
  
-+
-+# testkit compatibility: this case names a volume size on its own createdb,
-+# but the volumes it then extends into take their size from cubrid.conf -- so
-+# the verdict still depends on a global the case never named. CUBRID ships
-+# 512M and the answers were written under it. cubrid.conf is restored before
-+# every case, so this is the case's own setting and nothing else's.
-+change_db_parameter "db_volume_size=512M"
-+
- set -x
+ mkdir $db
+ cd $db
++# testkit compatibility: the case pins --db-volume-size on createdb, which
++# sizes the permanent volume only. The temporary volumes this test is about
++# take their size from cubrid.conf, which the case never names, and it then
++# counts DISK_ADD_VOLUME / DISK_EXTEND / TEMPORARY_VOLUME events exactly
++# (4, 6 and 10). This run lowers db_volume_size so 24 slots fit in memory, so
++# the temp volumes come out smaller and extend more often than the answer
++# records. Restoring what CUBRID ships puts the count back where it was
++# measured. cubrid.conf is restored before every case.
++sed -i 's/^[[:space:]]*db_volume_size[[:space:]]*=.*/db_volume_size=512M/' $CUBRID/conf/cubrid.conf
+ cubrid_createdb $db --db-volume-size=20M -r
+ cd ..
  
- db=bug10986

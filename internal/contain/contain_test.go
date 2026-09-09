@@ -1,6 +1,7 @@
 package contain
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -231,4 +232,25 @@ func TestSlotRootIsPerRun(t *testing.T) {
 	if got := SlotRoot(); got != "/somewhere/else" {
 		t.Errorf("SlotRoot() = %q, want the override", got)
 	}
+}
+
+// Enter uses -1 for "there was nothing to contain", and Go uses -1 for "killed
+// by a signal". The caller tests code >= 0, so the second reads as the first and
+// the run continues uncontained -- where the reset empties the real $CUBRID and
+// the process sweep selects across the whole machine.
+func TestASignalIsNotTheSameAsNothingToContain(t *testing.T) {
+	cmd := exec.Command("bash", "-c", "kill -9 $$")
+	err := cmd.Run()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		t.Fatalf("a signalled process should give an ExitError: %v", err)
+	}
+	if ee.ExitCode() != -1 {
+		t.Skipf("this platform reports %d for a signalled process, not -1", ee.ExitCode())
+	}
+	if ee.ProcessState.Exited() {
+		t.Fatal("a signalled process must not report Exited()")
+	}
+	// Which is the whole point: the code alone cannot tell the two apart, and
+	// Exited() can.
 }

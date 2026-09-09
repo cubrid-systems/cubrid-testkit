@@ -414,8 +414,18 @@ $('fBad').onclick = () => pick(true)
 function sortBy(k) {
   sortDir = sortKey === k ? -sortDir : -1
   sortKey = k
-  function slotLess(a, b) {
-  // slot10 after slot9: the names are slotN and a plain compare puts 10 before 9.
+  for (const th of document.querySelectorAll('th.sortable')) {
+    th.setAttribute('aria-sort', th.dataset.k !== k ? 'none' : (sortDir < 0 ? 'descending' : 'ascending'))
+    const base = th.dataset.k
+    th.innerHTML = base + (th.dataset.k === k ? ' <span class=caret>' + (sortDir < 0 ? '\u25be' : '\u25b4') + '</span>' : '')
+  }
+  if (lastView) draw(lastView)
+}
+
+// slot10 belongs after slot9: the names are slotN and a plain compare puts 10
+// before 9. Returns the same sense as the other comparators here: positive when
+// a should come first.
+function slotLess(a, b) {
   const na = parseInt(String(a).replace(/\D+/g, ''), 10)
   const nb = parseInt(String(b).replace(/\D+/g, ''), 10)
   if (!isNaN(na) && !isNaN(nb) && na !== nb) return na < nb ? 1 : -1
@@ -435,13 +445,6 @@ for (const th of document.querySelectorAll('th[data-sk]')) {
   th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortSlotsBy(th.dataset.sk) } }
 }
 
-for (const th of document.querySelectorAll('th.sortable')) {
-    th.setAttribute('aria-sort', th.dataset.k !== k ? 'none' : (sortDir < 0 ? 'descending' : 'ascending'))
-    const base = th.dataset.k
-    th.innerHTML = base + (th.dataset.k === k ? ' <span class=caret>' + (sortDir < 0 ? '\u25be' : '\u25b4') + '</span>' : '')
-  }
-  if (lastView) draw(lastView)
-}
 for (const th of document.querySelectorAll('th.sortable')) {
   th.onclick = () => sortBy(th.dataset.k)
   th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th.dataset.k) } }

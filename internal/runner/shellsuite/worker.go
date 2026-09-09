@@ -3,6 +3,7 @@ package shellsuite
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -336,13 +337,31 @@ func resultText(v Verdict, console string) string {
 
 // quietly runs a script whose output belongs in the worker log and whose failure
 // is not the case's fault.
+// quietly runs a housekeeping script and logs what it said.
+//
+// Both failures, not one. Run reports a command's own non-zero exit in the
+// Result and keeps err for not being able to run it at all, so checking err
+// alone sees a script that refused as a script that succeeded -- which is how
+// the reset's own "$CUBRID is not a CUBRID installation" guard came to do
+// nothing: it exits 1 and explains itself on stderr, and neither reached a log.
+//
+// Stderr is logged on failure for the same reason. Output() is stdout, because
+// that is what the frozen logs contain; an explanation the runner discards is
+// an explanation nobody has.
 func (w *Worker) quietly(ctx context.Context, script, label, onError string) {
 	res, err := runIn(ctx, w.Channel, script)
-	if err != nil {
+	switch {
+	case err != nil:
 		w.log("[ERROR] " + onError + " (" + err.Error() + ")")
-		return
+	case res.ExitCode != 0:
+		why := strings.TrimSpace(res.Stderr)
+		if why == "" {
+			why = strings.TrimSpace(res.Output())
+		}
+		w.log("[ERROR] " + onError + " (exit " + strconv.Itoa(res.ExitCode) + "): " + why)
+	default:
+		w.log("[INFO] " + label + " " + res.Output())
 	}
-	w.log("[INFO] " + label + " " + res.Output())
 }
 
 // diskSpace calls the deployed check. CTP passed it two mail addresses and let it

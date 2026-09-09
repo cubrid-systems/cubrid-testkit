@@ -728,3 +728,59 @@ func mustServe(t *testing.T) string {
 	t.Cleanup(stop)
 	return "http://" + addr
 }
+
+// The rate so far is a bad estimate for a queue ordered longest-first: the
+// opening rate is the worst the run will ever have. A run with a plan should
+// not be using it.
+func TestRemainingComesFromThePlanNotTheRate(t *testing.T) {
+	cases := []string{"a", "b", "c", "d"}
+	planned := map[string]time.Duration{
+		"a": 800 * time.Second,
+		"b": 800 * time.Second,
+		"c": 100 * time.Second,
+		"d": 100 * time.Second,
+	}
+	b := New(len(cases))
+	b.Expect(cases, planned, 2)
+
+	// Two slots, 1,800 planned seconds: 900 to go before anything has finished.
+	if got := b.snapshot().Remain; got != 900 {
+		t.Fatalf("before any case finished: remain %d, want 900", got)
+	}
+
+	// Finishing a long case takes its own planned cost off, not the average.
+	b.Begin("slot0", "a")
+	b.End("slot0", "a", true)
+	if got := b.snapshot().Remain; got != 500 {
+		t.Fatalf("after the first long case: remain %d, want 500", got)
+	}
+}
+
+// A case the plan has never seen has to be guessed at, and the median is the
+// guess: this corpus's mean is more than twice its median, because sixty-six
+// cases own two fifths of the run.
+func TestAnUnplannedCaseCostsTheMedian(t *testing.T) {
+	planned := map[string]time.Duration{
+		"a": 800 * time.Second,
+		"b": 10 * time.Second,
+		"c": 10 * time.Second,
+	}
+	b := New(2)
+	b.Expect([]string{"x", "y"}, planned, 1)
+	if got := b.snapshot().Remain; got != 20 {
+		t.Fatalf("two unplanned cases on one slot: remain %d, want 20 (2x the 10s median, not 2x the 273s mean)", got)
+	}
+}
+
+// Without a plan there is nothing better than the rate, and the page should
+// still say something rather than nothing.
+func TestRemainingFallsBackToTheRate(t *testing.T) {
+	b := New(10)
+	b.started = time.Now().Add(-100 * time.Second)
+	b.Begin("slot0", "a")
+	b.End("slot0", "a", true)
+	// One of ten done in 100 s: nine more at 100 s each.
+	if got := b.snapshot().Remain; got != 900 {
+		t.Fatalf("with no plan: remain %d, want 900 from the rate", got)
+	}
+}

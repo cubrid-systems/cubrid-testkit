@@ -162,9 +162,21 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 	// c.Path and not c.Script: Script is only the part after cases/, and a patch
 	// is keyed by the case's whole path.
 	if pf := w.Patches.For(c.Path); pf != "" {
-		if _, perr := runIn(ctx, w.Channel, ApplyScript(c.Dir, pf)); perr != nil {
+		// Two different failures, and they were being reported as one. A patch
+		// that does not apply exits non-zero with err nil -- Run reports a
+		// command's own status in the Result, and keeps err for not being able to
+		// run it at all. Checking err alone therefore called a transport hiccup
+		// "the case changed upstream", and would have called a patch that really
+		// did not apply a success and run the case unpatched while the run
+		// claimed it was patched.
+		res, perr := runIn(ctx, w.Channel, ApplyScript(c.Dir, pf))
+		switch {
+		case perr != nil:
+			add("NOK", "the compatibility patch "+pf+" could not be run: "+perr.Error())
+			return items, console
+		case res.ExitCode != 0:
 			add("NOK", "the compatibility patch "+pf+" does not apply to this case any more, "+
-				"which usually means the case changed upstream: "+perr.Error())
+				"which usually means the case changed upstream: "+strings.TrimSpace(res.Output()))
 			return items, console
 		}
 		w.log("[PATCH] applied " + pf)
@@ -175,9 +187,16 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		// configured, and "does the corpus come out as it went in" must not
 		// have "it depends" as its answer.
 		defer func() {
-			if _, rerr := runIn(context.Background(), w.Channel, RevertScript(c.Dir, pf)); rerr != nil {
+			res, rerr := runIn(context.Background(), w.Channel, RevertScript(c.Dir, pf))
+			why := ""
+			if rerr != nil {
+				why = rerr.Error()
+			} else if res.ExitCode != 0 {
+				why = strings.TrimSpace(res.Output())
+			}
+			if why != "" {
 				w.log("[ERROR] the compatibility patch " + pf + " could not be reverted, so " +
-					c.Dir + " is left patched: " + rerr.Error())
+					c.Dir + " is left patched: " + why)
 			}
 		}()
 	}

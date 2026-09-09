@@ -146,6 +146,8 @@ type Board struct {
 	// mention.
 	planned map[string]time.Duration
 	typical time.Duration
+	// setup is how the run was configured, recorded once before the first case.
+	setup setupBox
 	// replayAt is the knobs' state as the replayer last published it.
 	//
 	// Published rather than asked for. The replayer takes its own lock and then
@@ -459,6 +461,9 @@ type view struct {
 	Family   []groupView `json:"family"`
 	Slot     []groupView `json:"slot"`
 	Lanes    []laneView  `json:"lanes"`
+	// Setup is how the run was configured. Static, and sent with every snapshot
+	// because a reader who opens the page an hour in needs it too.
+	Setup []Setting `json:"setup,omitempty"`
 	// Templates is nil unless the run uses the database-template cache, and the
 	// page leaves the panel out when it is.
 	Templates *templateView `json:"templates,omitempty"`
@@ -570,6 +575,7 @@ func (b *Board) snapshot() view {
 		v.Slot[i].Lane = b.laneOf[v.Slot[i].Name]
 	}
 	v.Lanes = b.lanes()
+	v.Setup = b.setupRows()
 	v.Templates = b.templates.snapshot()
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()

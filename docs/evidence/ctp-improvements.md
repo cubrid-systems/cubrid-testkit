@@ -143,6 +143,51 @@ reproduce in isolation.
 
 ---
 
+## C2. `xgcc` puts the library before the source, so C cases do not link
+
+`shell/init_path/init.sh:1534`
+
+```sh
+gcc_option="-g -I$CUBRID/include -L$CUBRID/lib -lcascci $gcc_option"
+```
+
+`$gcc_option` is what the case passed, which is `-o <out> <src>.c`. So the
+library is named **before** the object that needs it. GNU `ld` resolves left to
+right, and with `--as-needed` — the default on Debian and Ubuntu, not on
+RHEL/Rocky — a shared library reached before any symbol requires it is dropped.
+Every reference then comes out undefined.
+
+Measured on this machine, same source, same library, same compiler, only the
+order changed:
+
+```
+$ gcc -g -I$CUBRID/include -L$CUBRID/lib -lcascci -o lb1 cci_loadbalance1.c   # CTP's order
+/usr/bin/ld: cci_loadbalance1.c:37: undefined reference to `cci_connect'
+collect2: error: ld returned 1 exit status
+
+$ gcc -g -I$CUBRID/include -o lb2 cci_loadbalance1.c -L$CUBRID/lib -lcascci    # source first
+$                                                                             # links
+
+$ gcc -Wl,--no-as-needed -g -I... -lcascci -o lb3 cci_loadbalance1.c          # CTP's order again
+$                                                                             # links
+```
+
+The third line is the point: the compiler and the library are fine, and the CI
+image only works because RHEL's toolchain does not default to `--as-needed`. This
+is the same shape as item A — CTP is correct on one distribution and the failure
+elsewhere looks like broken test cases.
+
+Observed on a full-corpus run: **5 of the first 19 failures** were this, with
+`undefined reference` and `collect2: error` in the case log and a verdict that
+says nothing about it. **173 case scripts call `xgcc`**, so that is the ceiling
+on how many it can reach.
+
+| Cost | move `$gcc_option` before `-lcascci` on one line, or add `-Wl,--no-as-needed` |
+| Risk | none where it already links: link order does not change the resulting binary |
+| Gain | the C cases become runnable on a developer machine, and the link order stops depending on the distribution |
+
+---
+
 ## D. A Linux run calls `taskkill`
 
 `shell/_01_utility/_37_cubrid/_01_service/cases/_01_service.sh:9`
@@ -247,6 +292,7 @@ one machine, with the verdicts identical case for case.
 | | CTP today | here |
 |---|---|---|
 | A | `sh <case>` | `bash`, and bash bound over `/bin/sh` in the run's own mount namespace |
+| C2 | `-lcascci` before the source | nothing yet: it is CTP's `init.sh`, and the run uses CTP's copy |
 | B | kills by `$USER` across the machine | a PID namespace per slot, so `ps -e` *is* the slot |
 | C | 512M, unchanged | measured both ways; 512M kept until the two cases are fixed |
 | D | — | nothing: it is the corpus's, and the corpus is not ours to change |

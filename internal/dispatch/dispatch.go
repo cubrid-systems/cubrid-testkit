@@ -89,9 +89,17 @@ type Queue struct {
 	// them has to go back to the general queue or nobody would ever run it.
 	departed map[string]bool
 
-	// policy decides which of the waiting cases a free slot may start. The order
-	// proposes; this disposes. Nil is the order alone -- see policy.go.
-	policy Policy
+	// hard is a constraint the run must not cross; soft is a preference about
+	// order. Both refuse cases, and the difference only shows at the tail: when
+	// nothing the soft rule likes is left, a slot should take what remains rather
+	// than idle, and when nothing the hard rule allows is left, it must wait.
+	//
+	// Measured, with the two treated alike: a 24-slot run finished its last 150
+	// cases six at a time because every one of them was in the heavy set, and
+	// eighteen slots sat idle for half an hour. Longest-first exists to prevent
+	// exactly that tail; the stagger rule had rebuilt it.
+	hard Policy
+	soft Policy
 	// running is what is in flight, which is what a policy is given to judge
 	// against. A slice rather than a count because a policy asks about the cases
 	// and not only how many there are.
@@ -202,11 +210,12 @@ func (q *Queue) Claim() (Ticket, bool) { return q.ClaimFor("", LaneAny) }
 // enough that a refused claimant is not a spin loop.
 const admissionPoll = 200 * time.Millisecond
 
-// Policy sets the admission rule. Nil, and the queue hands out its own order.
-func (q *Queue) Policy(p Policy) {
+// Policy sets the admission rules: hard is a constraint, soft a preference.
+// Either may be nil.
+func (q *Queue) Policy(hard, soft Policy) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.policy = p
+	q.hard, q.soft = hard, soft
 }
 
 // admissible is the first waiting case the policy will admit, and where it sits.
@@ -223,16 +232,39 @@ func (q *Queue) admissible() (string, int, bool) {
 	if q.next >= len(q.cases) {
 		return "", 0, false
 	}
-	if q.policy == nil {
-		return q.cases[q.next], q.next, true
+	// What both rules allow, in the order's own preference.
+	if c, at, ok := q.scanPolicy(q.hard, q.soft); ok {
+		return c, at, ok
 	}
-	for i := q.next; i < len(q.cases); i++ {
-		if q.policy.Admit(q.cases[i], q.running) {
-			return q.cases[i], i, true
-		}
+	// Nothing the preference likes remains -- which is the tail, and only the
+	// tail: while ordinary work is left the scan above finds some. Take what the
+	// constraint allows rather than leave slots idle through it.
+	if c, at, ok := q.scanPolicy(q.hard, nil); ok {
+		return c, at, ok
 	}
+	// The constraint refuses everything. Wait -- unless nothing at all is
+	// running, because a rule that can refuse every case is a rule that can stop
+	// the run.
 	if len(q.running) == 0 {
 		return q.cases[q.next], q.next, true
+	}
+	return "", 0, false
+}
+
+// scanPolicy is the first case in the remaining window that every given policy
+// admits. A nil policy admits everything.
+func (q *Queue) scanPolicy(ps ...Policy) (string, int, bool) {
+	for i := q.next; i < len(q.cases); i++ {
+		ok := true
+		for _, p := range ps {
+			if p != nil && !p.Admit(q.cases[i], q.running) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return q.cases[i], i, true
+		}
 	}
 	return "", 0, false
 }

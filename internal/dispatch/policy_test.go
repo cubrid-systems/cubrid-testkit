@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -11,7 +12,7 @@ import (
 func TestHeavyCasesDoNotFillEverySlotAtTheStart(t *testing.T) {
 	cases := []string{"h1", "h2", "h3", "h4", "l1", "l2", "l3", "l4"}
 	q := New(cases, 0)
-	q.Policy(NewHeavyCap([]string{"h1", "h2", "h3", "h4"}, 2))
+	q.Policy(nil, NewHeavyCap([]string{"h1", "h2", "h3", "h4"}, 2))
 
 	var got []string
 	for i := 0; i < 4; i++ {
@@ -46,27 +47,25 @@ func TestHeavyCasesDoNotFillEverySlotAtTheStart(t *testing.T) {
 // A policy that can refuse every case is a policy that can stop the run.
 func TestAPolicyIsNeverAskedToAdmitTheOnlyCase(t *testing.T) {
 	q := New([]string{"h1", "h2"}, 0)
-	q.Policy(NewHeavyCap([]string{"h1", "h2"}, 1))
+	q.Policy(nil, NewHeavyCap([]string{"h1", "h2"}, 1))
 
 	first, ok, again := q.claimOnce("slot0", LaneAny)
 	if !ok || again {
 		t.Fatal("the first case was refused")
 	}
-	// Held, not refused. Telling a claimant "the run is over" closes its slot
-	// for good, so a policy that will not have a case yet has to say "wait".
-	if _, ok, again := q.claimOnce("slot1", LaneAny); ok || !again {
-		t.Fatalf("the second heavy case should be held: ok=%v again=%v", ok, again)
+	// Both cases are heavy, so there is no other work: the preference relaxes
+	// rather than idle a slot through the tail. That is the whole difference
+	// between a preference and a constraint.
+	if _, ok, _ := q.claimOnce("slot1", LaneAny); !ok {
+		t.Fatal("with nothing else to run, the stagger has to yield")
 	}
 	q.Complete(first, true, false)
-	if _, ok, _ := q.claimOnce("slot1", LaneAny); !ok {
-		t.Fatal("with nothing running the queue must hand out a case whatever the policy says")
-	}
 }
 
 func TestHeadroomStopsNewCasesWhenTheCeilingIsFull(t *testing.T) {
 	used, limit := 0, 1000
 	q := New([]string{"a", "b", "c"}, 0)
-	q.Policy(NewHeadroom("the corpus tmpfs", func() (int, int) { return used, limit }, 80))
+	q.Policy(NewHeadroom("the corpus tmpfs", func() (int, int) { return used, limit }, 80), nil)
 
 	if _, ok, _ := q.claimOnce("slot0", LaneAny); !ok {
 		t.Fatal("an empty ceiling should admit")
@@ -114,5 +113,65 @@ func TestHeaviestNamesTheLongest(t *testing.T) {
 	}
 	if Heaviest(nil, 3) != nil || Heaviest(map[string]float64{"a": 1}, 0) != nil {
 		t.Error("nothing to rank is nothing")
+	}
+}
+
+// The stagger must not shape the tail.
+//
+// Measured with the two rules treated alike: a 24-slot run finished its last 150
+// cases six at a time, because every case left was in the heavy set and the cap
+// allowed six. Eighteen slots idled for half an hour, rebuilding the long tail
+// that ordering longest-first exists to prevent.
+func TestTheStaggerYieldsWhenThereIsNothingElseToRun(t *testing.T) {
+	// Four heavy cases, a cap of one, and nothing else in the queue.
+	q := New([]string{"h1", "h2", "h3", "h4"}, 0)
+	q.Policy(nil, NewHeavyCap([]string{"h1", "h2", "h3", "h4"}, 1))
+
+	var got []string
+	for i := 0; i < 4; i++ {
+		tk, ok, again := q.claimOnce("slot"+strconv.Itoa(i), LaneAny)
+		if again || !ok {
+			t.Fatalf("slot %d idled through a tail of heavy cases: ok=%v again=%v", i, ok, again)
+		}
+		got = append(got, tk.Case)
+	}
+	if len(got) != 4 {
+		t.Fatalf("four slots should be working, got %v", got)
+	}
+}
+
+// And it still binds while there is other work, which is what it is for.
+func TestTheStaggerBindsWhileOrdinaryWorkRemains(t *testing.T) {
+	q := New([]string{"h1", "h2", "h3", "l1", "l2", "l3"}, 0)
+	q.Policy(nil, NewHeavyCap([]string{"h1", "h2", "h3"}, 1))
+
+	var heavy int
+	for i := 0; i < 4; i++ {
+		tk, ok, _ := q.claimOnce("slot"+strconv.Itoa(i), LaneAny)
+		if !ok {
+			t.Fatalf("claim %d refused with work left", i)
+		}
+		if strings.HasPrefix(tk.Case, "h") {
+			heavy++
+		}
+	}
+	if heavy != 1 {
+		t.Errorf("the cap should hold at one heavy case while light ones remain, got %d", heavy)
+	}
+}
+
+// A constraint never yields, tail or no tail: the ceiling is not a preference.
+func TestTheConstraintDoesNotYieldAtTheTail(t *testing.T) {
+	q := New([]string{"a", "b"}, 0)
+	q.Policy(NewHeadroom("tmpfs", func() (int, int) { return 95, 100 }, 80), nil)
+
+	// The first is handed out because nothing is running -- a rule that can
+	// refuse every case is a rule that can stop the run.
+	if _, ok, _ := q.claimOnce("slot0", LaneAny); !ok {
+		t.Fatal("the first case must be handed out whatever the rules say")
+	}
+	// The second must wait, even though there is nothing else to run.
+	if _, ok, again := q.claimOnce("slot1", LaneAny); ok || !again {
+		t.Fatalf("a full ceiling must hold, tail or not: ok=%v again=%v", ok, again)
 	}
 }

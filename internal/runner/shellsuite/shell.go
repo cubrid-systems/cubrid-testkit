@@ -411,13 +411,15 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		// that the cap does not hold back the ordinary long cases.
 		heavy = dispatch.Heaviest(secs, len(known)/10)
 	}
-	policy := dispatch.All(
-		dispatch.NewHeavyCap(heavy, heavyMax),
-		dispatch.NewHeadroom("the corpus tmpfs", corpus.Usage, highWater),
-	)
-	if policy != nil {
-		queue.Policy(policy)
-		fmt.Println("[INFO] admission: " + policy.Describe())
+	// The ceiling is a constraint: nothing may cross it. The heavy cap is a
+	// preference about order: it stops N slots starting N heavy cases at once,
+	// and it must not be allowed to shape the tail, where taking a heavy case is
+	// the only thing left to do.
+	hard := dispatch.NewHeadroom("the corpus tmpfs", corpus.Usage, highWater)
+	soft := dispatch.NewHeavyCap(heavy, heavyMax)
+	if hard != nil || soft != nil {
+		queue.Policy(hard, soft)
+		fmt.Println("[INFO] admission: " + dispatch.Describe(hard, soft))
 	}
 	if split.on() {
 		// A directory this corpus has and the plan did not mention takes the

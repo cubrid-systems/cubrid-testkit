@@ -196,3 +196,19 @@ func Heaviest(took map[string]float64, n int) []string {
 	}
 	return names[:n]
 }
+
+// Describe is the line the run prints. Nil members are skipped, and a constraint
+// is named as one so a reader can tell which of the two will bend at the tail.
+func Describe(hard, soft Policy) string {
+	var parts []string
+	if hard != nil {
+		parts = append(parts, "never "+hard.Describe())
+	}
+	if soft != nil {
+		parts = append(parts, "and while other work is left, "+soft.Describe())
+	}
+	if len(parts) == 0 {
+		return "the plan's order alone"
+	}
+	return strings.Join(parts, ", ")
+}

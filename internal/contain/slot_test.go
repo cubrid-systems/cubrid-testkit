@@ -204,3 +204,30 @@ func TestSlotsDoNotShareDevShm(t *testing.T) {
 		t.Error("a slot's POSIX shared memory reached the machine's /dev/shm")
 	}
 }
+
+// A slot has to answer "how do I reach this machine", because 108 case scripts
+// in this corpus ask -- and a fresh network namespace answers with nothing.
+func TestASlotHasAnAddressItWillAdmitTo(t *testing.T) {
+	ns := namespace(t)
+
+	out, err := ns.run(context.Background(), 10*time.Second, "hostname -I")
+	if err != nil {
+		t.Fatalf("hostname -I: %v: %s", err, out)
+	}
+	got := strings.TrimSpace(out)
+	if got == "" {
+		t.Fatal("`hostname -I` is empty in the slot, which is what breaks the 108 cases that read it")
+	}
+	if !strings.Contains(got, SlotAddress) {
+		t.Errorf("`hostname -I` says %q, want it to contain %s", got, SlotAddress)
+	}
+
+	// And the address has to be usable, not just present: the cases that read it
+	// go on to connect to it.
+	out, err = ns.run(context.Background(), 15*time.Second,
+		"(timeout 5 nc -l "+SlotAddress+" 15999 >/dev/null 2>&1 &); sleep 0.4; "+
+			"timeout 3 bash -c 'echo hi > /dev/tcp/"+SlotAddress+"/15999' && echo reachable")
+	if err != nil || !strings.Contains(out, "reachable") {
+		t.Errorf("nothing can be reached on the slot's own address: %v: %s", err, out)
+	}
+}

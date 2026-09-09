@@ -118,8 +118,51 @@ func Open(label string) (*Namespace, error) {
 		ns.Close()
 		return nil, fmt.Errorf("%s: prepare: %w: %s", label, err, strings.TrimSpace(out))
 	}
+
+	// And an address the machine will admit to having.
+	//
+	// A fresh network namespace has loopback and nothing else, and `hostname -I`
+	// reports addresses on every interface *except* loopback -- deliberately, so
+	// that it answers "how do I reach this machine" rather than "what does it
+	// call itself". In a slot it therefore answers with an empty string, and 108
+	// case scripts in this corpus begin with some form of
+	//
+	//	hostip=$(hostname -I | awk '{print $1}')
+	//
+	// after which they connect to :port, register a dblink server at [dba].[srv],
+	// or hand the empty string to a utility that says "Incorrect hostname
+	// format". Every one of those failures is the runner's, produced by the
+	// isolation rather than by the case.
+	//
+	// A dummy interface fixes it and costs nothing: the address is local, so a
+	// server bound to the wildcard is reachable on it, and the namespace has
+	// nothing else to collide with. 192.0.2.0/24 is TEST-NET-1, reserved by
+	// RFC 5737 for documentation, so it cannot be mistaken for a real host in
+	// anything a case records. Every slot gets the same address for the same
+	// reason every slot keeps the shipped port: a slot should look like a
+	// machine, and they are machines that cannot see each other.
+	//
+	// Best effort. The dummy driver may not be there, and a slot without an
+	// address is what every slot had until now -- worse for those 108 cases, no
+	// worse than before for the rest.
+	if out, err := ns.run(context.Background(), 10*time.Second,
+		"ip link add "+slotLink+" type dummy && ip addr add "+SlotAddress+"/24 dev "+slotLink+
+			" && ip link set "+slotLink+" up"); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] %s: no address on %s (%v: %s); "+
+			"cases that read `hostname -I` will see an empty string\n",
+			label, slotLink, err, strings.TrimSpace(out))
+	}
 	return ns, nil
 }
+
+// SlotAddress is the address a slot answers `hostname -I` with. TEST-NET-1,
+// RFC 5737: reserved for documentation, so it cannot be mistaken for a real
+// host anywhere a case records it.
+const SlotAddress = "192.0.2.1"
+
+// slotLink is the interface that address sits on. Not "eth0": a case that greps
+// for a real interface name should not find one that is not real.
+const slotLink = "tkslot0"
 
 // Shell is the interpreter the keeper and every command run under.
 const Shell = "bash"

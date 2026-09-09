@@ -88,6 +88,14 @@ type Queue struct {
 	// them has to go back to the general queue or nobody would ever run it.
 	departed map[string]bool
 
+	// policy decides which of the waiting cases a free slot may start. The order
+	// proposes; this disposes. Nil is the order alone -- see policy.go.
+	policy Policy
+	// running is what is in flight, which is what a policy is given to judge
+	// against. A slice rather than a count because a policy asks about the cases
+	// and not only how many there are.
+	running []string
+
 	// --- lanes and slot affinity -----------------------------------------
 	//
 	// With lanes, a slot's corpus writes go to an overlay of its own, so two
@@ -188,6 +196,65 @@ func (q *Queue) Claim() (Ticket, bool) { return q.ClaimFor("", LaneAny) }
 // ran and its state is in this slot's overlay. Then the first pass, skipping
 // what belongs to the other lane. Then retries, which go back to the slot that
 // owns the directory for the same reason.
+// Policy sets the admission rule. Nil, and the queue hands out its own order.
+func (q *Queue) Policy(p Policy) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.policy = p
+}
+
+// admissible is the first waiting case the policy will admit, and where it sits.
+//
+// Scanning forward rather than waiting: the order's next case may be one the
+// machine cannot take yet, and the slot asking is free now. A later case that
+// the policy admits is a case run instead of a slot idle, and the order is a
+// preference rather than a contract.
+//
+// When the policy admits nothing, the next case is handed out anyway if nothing
+// is running. A policy that can refuse every case is a policy that can stop the
+// run, and no admission rule is worth that.
+func (q *Queue) admissible() (string, int, bool) {
+	if q.next >= len(q.cases) {
+		return "", 0, false
+	}
+	if q.policy == nil {
+		return q.cases[q.next], q.next, true
+	}
+	for i := q.next; i < len(q.cases); i++ {
+		if q.policy.Admit(q.cases[i], q.running) {
+			return q.cases[i], i, true
+		}
+	}
+	if len(q.running) == 0 {
+		return q.cases[q.next], q.next, true
+	}
+	return "", 0, false
+}
+
+// take removes the case at i, keeping the rest in order.
+func (q *Queue) take(i int) {
+	if i == q.next {
+		q.next++
+		return
+	}
+	copy(q.cases[q.next+1:i+1], q.cases[q.next:i])
+	q.next++
+}
+
+func (q *Queue) start(c string) {
+	q.inFlight++
+	q.running = append(q.running, c)
+}
+
+func (q *Queue) stop(c string) {
+	for i, r := range q.running {
+		if r == c {
+			q.running = append(q.running[:i], q.running[i+1:]...)
+			return
+		}
+	}
+}
+
 func (q *Queue) ClaimFor(slot string, lane Lane) (Ticket, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -204,14 +271,13 @@ func (q *Queue) ClaimFor(slot string, lane Lane) (Ticket, bool) {
 		return Ticket{Case: c, Retry: retry}, true
 	}
 	if !q.lanes {
-		if q.next < len(q.cases) {
-			c := q.cases[q.next]
-			q.next++
-			q.inFlight++
+		if c, at, ok := q.admissible(); ok {
+			q.take(at)
+			q.start(c)
 			return Ticket{Case: c}, true
 		}
 	} else if c, ok := q.scan(slot, lane); ok {
-		q.inFlight++
+		q.start(c)
 		return Ticket{Case: c}, true
 	}
 	// The first pass is done for this claimant, so retries come now -- but only
@@ -290,6 +356,7 @@ func (q *Queue) Complete(t Ticket, success, hasCore bool) (retrying bool) {
 	if q.inFlight > 0 {
 		q.inFlight--
 	}
+	q.stop(t.Case)
 	retrying = !success && !hasCore && t.Retry < q.maxRetry
 	if retrying {
 		q.enqueue(t.Case, t.Retry+1)

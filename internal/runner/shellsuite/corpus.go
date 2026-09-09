@@ -224,6 +224,18 @@ func (c *Corpus) Plan(cases []string) {
 }
 
 // Ram is the tmpfs, for the panel that reports how full it is.
+// Usage is what the corpus holds and what it is allowed, in megabytes, for a
+// policy that decides whether the machine can take another case. Zero and zero
+// when there is no ceiling.
+func (c *Corpus) Usage() (used, limit int) {
+	if c == nil || c.mb <= 0 {
+		return 0, 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.used(), c.mb
+}
+
 // Held is what each case directory was holding when it retired, in megabytes.
 // A copy, because the run writes it to a file after the slots have stopped and
 // the corpus may still be sampling.

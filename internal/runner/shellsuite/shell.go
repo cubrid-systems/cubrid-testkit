@@ -613,7 +613,22 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 			closeAll()
 			return nil, nil, err
 		}
-		env := []string{"CUBRID_TMP=" + tmp}
+		env := []string{
+			"CUBRID_TMP=" + tmp,
+			// A user namespace maps one uid, so a case that unpacks an archive
+			// recorded with somebody else's ownership cannot restore it: tar
+			// prints "Cannot change ownership to uid 1001, gid 1001: Invalid
+			// argument" and exits non-zero. The files are there -- it is the exit
+			// status that fails the case, and 51 case scripts in this corpus
+			// unpack something.
+			//
+			// On a QA machine the run is a real account and the chown succeeds,
+			// so this is the isolation's bill and not the case's. GNU tar reads
+			// TAR_OPTIONS, and --no-same-owner is what tar does for an ordinary
+			// user anyway: extract the files, own them yourself. No case here
+			// asserts anything about ownership.
+			"TAR_OPTIONS=--no-same-owner",
+		}
 		// And a linker that keeps the libraries the command line names, where
 		// the machine's would drop them. Measured per run rather than assumed,
 		// and absent on a toolchain that needs no correction -- see

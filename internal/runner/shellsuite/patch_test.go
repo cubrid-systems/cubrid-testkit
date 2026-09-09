@@ -234,3 +234,73 @@ func scriptFor(shell, name string) string {
 	}
 	return filepath.Join(append(append([]string{shell}, parts[:len(parts)-1]...), "cases", last+".sh")...)
 }
+
+// The lookup key has to be the key the index was built with.
+//
+// It was not: LoadPatches indexes by the case's whole path and the worker asked
+// with Case.Script, which Split returns as only the part after cases/. Every
+// patch matched at startup, was announced, and was then never applied -- the
+// run said it had patched a case it had not.
+func TestTheLookupUsesTheKeyTheIndexWasBuiltWith(t *testing.T) {
+	scenario := t.TempDir()
+	pdir := t.TempDir()
+	script := filepath.Join(scenario, "_06_issues", "_11_1h", "bug_bts_5106", "cases", "bug_bts_5106.sh")
+	writeFile(t, script, "echo hi\n")
+	writeFile(t, filepath.Join(pdir, "_06_issues~_11_1h~bug_bts_5106.patch"), "")
+
+	p, err := LoadPatches(pdir, scenario, []string{script})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := Split(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.For(c.Path) == "" {
+		t.Error("the worker looks a patch up by Case.Path, and that must be what the index holds")
+	}
+	if c.Script == c.Path {
+		t.Fatal("this test is meaningless if Script and Path are the same")
+	}
+	if p.For(c.Script) != "" {
+		t.Error("Case.Script is a bare file name; it must not match, so the mistake cannot come back quietly")
+	}
+}
+
+// What a run intended to patch and what it did are not the same thing, and a
+// reader of finished results has only the files: feedback.log keeps a case's
+// console output for failures only, so an OK case that ran patched leaves no
+// trace there at all.
+func TestTheRunRecordsWhatItActuallyPatched(t *testing.T) {
+	dir := t.TempDir()
+	p := &Patches{dir: "patches/shell"}
+
+	// Nothing applied, nothing written: the file's presence is itself the
+	// answer to "did this run patch anything".
+	if err := p.Report(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "patched.txt")); err == nil {
+		t.Fatal("a run that patched nothing should not leave a record saying it did")
+	}
+
+	p.Applied("/c/shell/_08_shard/x/cases/x.sh", "patches/shell/_08_shard~x.patch")
+	p.Applied("/c/shell/_06_issues/y/cases/y.sh", "patches/shell/_06_issues~y.patch")
+	if err := p.Report(dir); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "patched.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	for _, want := range []string{"_08_shard/x/cases/x.sh", "_06_issues~y.patch", "verdicts are about the patched case"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the record should carry %q:\n%s", want, text)
+		}
+	}
+	// Sorted, so two runs of the same corpus produce a file that diffs cleanly.
+	if strings.Index(text, "_06_issues/y") > strings.Index(text, "_08_shard/x") {
+		t.Error("the record should be sorted")
+	}
+}

@@ -477,6 +477,9 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 			fmt.Printf("[ERROR] cannot write case_plan %s: %v\n", planPath, werr)
 		}
 	}
+	if werr := patches.Report(sink.Dir()); werr != nil {
+		fmt.Printf("[ERROR] cannot record which cases were patched: %v\n", werr)
+	}
 	if sizePath != "" {
 		sizes.Merge(corpus.Held())
 		if werr := sizes.Write(sizePath); werr != nil {

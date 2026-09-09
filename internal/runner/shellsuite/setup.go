@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 )
 
@@ -71,6 +72,7 @@ func describeSetup(cfg *conf.Config, slots, ramMB, slowSecs, slowMB int, planPat
 		{"TESTKIT_NATIVE_SHELL", "run cases here rather than through CTP"},
 		{"TESTKIT_CONTAIN", "namespaces of the run's own"},
 		{"TESTKIT_CONTAIN_SH", "shell bound over /bin/sh"},
+		{contain.LinkerEnv, "leave the machine linker as it is"},
 		{"CTP_SERVER_START_NOWAIT", "do not wait for the server to come up"},
 		{"CTP_DB_TEMPLATE_CACHE", "reuse a built database instead of createdb"},
 		{"CTP_ERROR_BACKUP", "pack a failing case's databases"},

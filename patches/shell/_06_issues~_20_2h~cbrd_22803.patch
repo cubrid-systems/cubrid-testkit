@@ -1,0 +1,17 @@
+--- cbrd_22803.sh
++++ cbrd_22803.sh
+@@ -2,6 +2,14 @@
+ . $init_path/init.sh
+ init test
+ 
++# testkit compatibility: the answer records "Pool_size : 32768" -- 32768 pages
++# of 16K, which is data_buffer_size=512M, the value CUBRID ships. The case
++# pins its own --db-volume-size and --log-volume-size on createdb but never
++# names data_buffer_size, so it takes it from cubrid.conf. This run lowers it
++# to 64M (4096 pages) to fit 24 slots in memory, and the case reports that
++# instead. cubrid.conf is restored before every case.
++sed -i 's/^[[:space:]]*data_buffer_size[[:space:]]*=.*/data_buffer_size=512M/' $CUBRID/conf/cubrid.conf
++
+ db1=db228031
+ mkdir $db1
+ cd $db1

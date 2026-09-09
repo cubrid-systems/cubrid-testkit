@@ -1,0 +1,18 @@
+--- cbrd_20760_2.sh
++++ cbrd_20760_2.sh
+@@ -3,6 +3,15 @@
+ . $init_path/init.sh
+ init test
+ 
++# testkit compatibility: this case asserts the size CUBRID ships. Its first
++# testcase says so in its own comment -- "do not set db_volume_size and
++# log_volume_size (use the defaule value)" -- and then checks that tdb1 is 512M
++# and tdb1_lgat is 512M. This run lowers both in cubrid.conf so that 24 slots
++# fit in memory, and the case then measures this run's setting instead of the
++# engine's default. Deleting the two lines restores the default it is about.
++# cubrid.conf is restored before every case, so this reaches nothing else.
++sed -i '/^[[:space:]]*db_volume_size[[:space:]]*=/d;/^[[:space:]]*log_volume_size[[:space:]]*=/d' $CUBRID/conf/cubrid.conf
++
+ #do not set db_volume_size and log_volume_size (use the defaule value)
+ mkdir tdb1
+ cd tdb1

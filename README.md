@@ -226,6 +226,7 @@ always did; the second is this runner's and is off unless set.
 | `status_http` | off | serve the progress page |
 | `case_plan` | off | a file of per-case durations, read to order the run and written from what it measured |
 | `case_sizes` | off | a file of per-directory footprints in MB, written from what the run measured |
+| `case_patch_dir` | off | apply a per-case compatibility patch where one exists. See `patches/README.md` |
 | `lane_slow_secs` | off | split the slots into a tmpfs lane and a disk lane at this duration |
 | `lane_slow_mb` | off | the same split, at this footprint. Needs `case_sizes` |
 
@@ -292,6 +293,7 @@ on purpose.
 | `status_http` | off | serve a progress page. `on` takes `127.0.0.1:51523`; a bare port takes every interface |
 | `case_plan` | off | a file of per-case durations. The run reads it to hand the longest cases out first and writes it back from what it measured |
 | `case_sizes` | off | a file of per-directory footprints in MB — how much each case directory was holding when its last case finished. Written from what the run measured, and read by `lane_slow_mb` |
+| `case_patch_dir` | off | a tree of per-case patches, mirroring the corpus. Where one exists it is applied into the run's overlay before the case runs, and the run says so on standard output, in the case log, and on the page. The corpus on disk is unchanged. See [`patches/README.md`](patches/README.md) |
 | `lane_slow_secs` | off | split the slots into a fast lane whose writes go to memory and a slow lane whose writes go to disk, assigning directories by duration |
 | `lane_slow_mb` | off | the same split, assigning directories by footprint instead. Needs `case_sizes`. Set with `lane_slow_secs` to get the union of the two |
 

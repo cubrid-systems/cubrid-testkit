@@ -150,6 +150,13 @@ const page = `<!doctype html>
  table.kv td:first-child{color:var(--ink-faint);width:9rem}
  table.kv td.warn{color:var(--warn)}
 
+ /* A verdict from patched source is a different claim from a verdict about the
+    corpus. It is marked wherever the verdict is shown, and marked in the warning
+    hue rather than a decorative one, because it is a caveat and not a feature. */
+ .patched{font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;
+          color:var(--warn);border:1px solid var(--warn);border-radius:2px;
+          padding:0 .28rem;margin-left:.4rem;opacity:.85;white-space:nowrap}
+
  /* Three groups side by side, each a narrow key/value list. They are read by
     scanning for the one line that is not the default, so the changed rows carry
     the only colour in the panel. */
@@ -408,10 +415,12 @@ function draw(v) {
   if (showN) list = list.slice(0, showN)
   $('fcount').textContent = (showFailed
     ? (v.failed || []).length + ' failed of ' + v.done
-    : rows.length + ' kept') + (showN && rows.length > showN ? ', showing ' + showN : '')
+    : rows.length + ' kept') + (showN && rows.length > showN ? ', showing ' + showN : '') +
+    (v.npatched ? ' \u00b7 ' + v.npatched + ' patched' : '')
   $('recent').innerHTML = list.length ? list.map(r =>
     '<tr><td class=slot>' + r.slot +
     '<td class=case title="' + r.case + '"><a href="#" data-case="' + r.case + '">' + short(r.case) + '</a>' +
+    (r.patched ? ' <span class=patched title="this case ran against a compatibility patch, so the verdict is about the patched case and not about the corpus">patched</span>' : '') +
     '<td class=num><span class="v ' + (r.ok?'ok':'no') + '">' + (r.ok?'OK':'NOK') + '</span>' +
     '<td class=num>' + secs(r.took) + '</tr>').join('')
     : '<tr><td colspan=4 class=empty>' + (showFailed ? 'nothing has failed' : 'nothing yet') + '</tr>'

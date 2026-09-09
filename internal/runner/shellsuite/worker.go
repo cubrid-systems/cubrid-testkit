@@ -48,6 +48,8 @@ type Worker struct {
 	Sink    *result.Sink
 	Report  feedback.Feedback
 	Options CaseOptions
+	// Patches are the corpus changes this run carries. Nil is the ordinary case.
+	Patches *Patches
 
 	// MaxRetry is only used to decide whether the retry count is printed at all:
 	// CTP appended it whenever retries were configured, even to a case that failed
@@ -151,6 +153,20 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 	w.quietly(ctx, RestoreScript(), "Reset CUBRID:", "Fail to reset CUBRID")
 	if w.CheckDiskSpace {
 		w.diskSpace(ctx)
+	}
+
+	// A compatibility patch, applied into the run's overlay rather than into the
+	// corpus, so the checkout is unchanged and the change is visible. Refused
+	// rather than skipped when it does not fit: the case has moved, and running
+	// it unpatched would answer a question nobody asked.
+	if pf := w.Patches.For(c.Script); pf != "" {
+		if _, perr := runIn(ctx, w.Channel, ApplyScript(c.Dir, pf)); perr != nil {
+			add("NOK", "the compatibility patch "+pf+" does not apply to this case any more, "+
+				"which usually means the case changed upstream: "+perr.Error())
+			return items, console
+		}
+		w.log("[PATCH] applied " + pf)
+		w.Board.Patched(c.Script)
 	}
 
 	res, err := runIn(ctx, w.Channel, RunScript(c, w.Options))

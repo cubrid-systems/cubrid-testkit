@@ -20,6 +20,7 @@ package dispatch
 import (
 	"strings"
 	"sync"
+	"time"
 )
 
 // Lane is which pool of slots a case runs in.
@@ -196,6 +197,11 @@ func (q *Queue) Claim() (Ticket, bool) { return q.ClaimFor("", LaneAny) }
 // ran and its state is in this slot's overlay. Then the first pass, skipping
 // what belongs to the other lane. Then retries, which go back to the slot that
 // owns the directory for the same reason.
+// admissionPoll is how long a claimant waits before asking again when the policy
+// refuses everything. Short enough that a freed slot is not idle for long, long
+// enough that a refused claimant is not a spin loop.
+const admissionPoll = 200 * time.Millisecond
+
 // Policy sets the admission rule. Nil, and the queue hands out its own order.
 func (q *Queue) Policy(p Policy) {
 	q.mu.Lock()
@@ -255,12 +261,31 @@ func (q *Queue) stop(c string) {
 	}
 }
 
+// ClaimFor hands a case to a slot, waiting while the policy will not admit one.
+//
+// false means the run is over for this claimant, and only that. It used to mean
+// only "nothing left", and adding a policy quietly gave it a second meaning --
+// "not right now" -- which the worker read as the first and closed the slot for
+// good. Ten of twenty-four slots died in the first seconds of a run that way.
+// So a refusal waits here rather than travelling.
 func (q *Queue) ClaimFor(slot string, lane Lane) (Ticket, bool) {
+	for {
+		t, ok, again := q.claimOnce(slot, lane)
+		if !again {
+			return t, ok
+		}
+		time.Sleep(admissionPoll)
+	}
+}
+
+// claimOnce is one attempt. again reports that the policy refused while work
+// remains, which is a wait rather than an answer.
+func (q *Queue) claimOnce(slot string, lane Lane) (t Ticket, ok, again bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
 	if q.stopped {
-		return Ticket{}, false
+		return Ticket{}, false, false
 	}
 	if held := q.held[slot]; len(held) > 0 {
 		c := held[0]
@@ -268,17 +293,22 @@ func (q *Queue) ClaimFor(slot string, lane Lane) (Ticket, bool) {
 		retry := q.retryCount[c]
 		delete(q.queued, c)
 		q.inFlight++
-		return Ticket{Case: c, Retry: retry}, true
+		return Ticket{Case: c, Retry: retry}, true, false
 	}
 	if !q.lanes {
 		if c, at, ok := q.admissible(); ok {
 			q.take(at)
 			q.start(c)
-			return Ticket{Case: c}, true
+			return Ticket{Case: c}, true, false
+		}
+		// Cases remain and the policy will not have them yet. Wait, rather than
+		// tell the claimant the run is over.
+		if q.next < len(q.cases) {
+			return Ticket{}, false, true
 		}
 	} else if c, ok := q.scan(slot, lane); ok {
 		q.start(c)
-		return Ticket{Case: c}, true
+		return Ticket{Case: c}, true, false
 	}
 	// The first pass is done for this claimant, so retries come now -- but only
 	// when nothing else is running.
@@ -301,11 +331,11 @@ func (q *Queue) ClaimFor(slot string, lane Lane) (Ticket, bool) {
 			q.retryQueue = append(q.retryQueue[:i:i], q.retryQueue[i+1:]...)
 			delete(q.queued, c)
 			q.inFlight++
-			return Ticket{Case: c, Retry: q.retryCount[c]}, true
+			return Ticket{Case: c, Retry: q.retryCount[c]}, true, false
 		}
 	}
 	q.departed[slot] = true
-	return Ticket{}, false
+	return Ticket{}, false, false
 }
 
 func (q *Queue) laneMatch(casePath string, want Lane) bool {

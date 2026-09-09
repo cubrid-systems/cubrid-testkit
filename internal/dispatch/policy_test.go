@@ -48,35 +48,35 @@ func TestAPolicyIsNeverAskedToAdmitTheOnlyCase(t *testing.T) {
 	q := New([]string{"h1", "h2"}, 0)
 	q.Policy(NewHeavyCap([]string{"h1", "h2"}, 1))
 
-	first, ok := q.Claim()
-	if !ok {
+	first, ok, again := q.claimOnce("slot0", LaneAny)
+	if !ok || again {
 		t.Fatal("the first case was refused")
 	}
-	if _, ok := q.Claim(); ok {
-		t.Fatal("the second heavy case should be held while the first runs")
+	// Held, not refused. Telling a claimant "the run is over" closes its slot
+	// for good, so a policy that will not have a case yet has to say "wait".
+	if _, ok, again := q.claimOnce("slot1", LaneAny); ok || !again {
+		t.Fatalf("the second heavy case should be held: ok=%v again=%v", ok, again)
 	}
 	q.Complete(first, true, false)
-	if _, ok := q.Claim(); !ok {
+	if _, ok, _ := q.claimOnce("slot1", LaneAny); !ok {
 		t.Fatal("with nothing running the queue must hand out a case whatever the policy says")
 	}
 }
 
-// Feedback, for everything after the start. Late by construction: it can only
-// stop the next case, never the ones already running.
 func TestHeadroomStopsNewCasesWhenTheCeilingIsFull(t *testing.T) {
 	used, limit := 0, 1000
 	q := New([]string{"a", "b", "c"}, 0)
 	q.Policy(NewHeadroom("the corpus tmpfs", func() (int, int) { return used, limit }, 80))
 
-	if _, ok := q.Claim(); !ok {
+	if _, ok, _ := q.claimOnce("slot0", LaneAny); !ok {
 		t.Fatal("an empty ceiling should admit")
 	}
 	used = 850
-	if _, ok := q.Claim(); ok {
-		t.Fatal("a ceiling over 80% should not admit another case")
+	if _, ok, again := q.claimOnce("slot1", LaneAny); ok || !again {
+		t.Fatalf("a full ceiling should hold the claimant, not end it: ok=%v again=%v", ok, again)
 	}
 	used = 100
-	if _, ok := q.Claim(); !ok {
+	if _, ok, _ := q.claimOnce("slot1", LaneAny); !ok {
 		t.Fatal("room again should admit again")
 	}
 }

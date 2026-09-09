@@ -37,7 +37,11 @@ const LinkerEnv = "TESTKIT_NO_LINK_SHIM"
 // The third line is why the shim is the right shape: the fix is to stop the
 // linker dropping a library the command line asked for, which is what CI's
 // toolchain already does. 173 case scripts call xgcc, and on a full-corpus run
-// this was 26 of the first 75 failures.
+// this was 112 of 279 failures; re-running those with the shim left 2.
+//
+// The 2 were g++. Cases build C++ clients with their own makefiles rather than
+// through xgcc, in the same order and against the same library, so every driver
+// a case might reach has to be covered and not only the one CTP's helper names.
 //
 // It does not paper over a defect that would fail in CI. CTP's link order is
 // wrong and stays wrong -- it is item C2 in docs/evidence/ctp-improvements.md
@@ -47,13 +51,13 @@ func GccShim(dir string) (string, error) {
 	if os.Getenv(LinkerEnv) != "" {
 		return "", nil
 	}
-	real, err := exec.LookPath("gcc")
+	gcc, err := exec.LookPath("gcc")
 	if err != nil {
 		// No compiler: the cases that need one fail for a reason of their own,
 		// and a shim for a compiler that is not there helps nobody.
 		return "", nil
 	}
-	if !linkerDropsUnusedLibraries(real) {
+	if !linkerDropsUnusedLibraries(gcc) {
 		// RHEL, Rocky, and anything else whose driver does not pass --as-needed.
 		// Nothing to correct, and no shim in the mount table.
 		return "", nil
@@ -61,15 +65,35 @@ func GccShim(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	shim := filepath.Join(dir, "gcc")
-	body := "#!/bin/sh\n" +
-		"# Written by testkit. See internal/contain/linker.go.\n" +
-		"exec " + real + " -Wl,--no-as-needed \"$@\"\n"
-	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
-		return "", fmt.Errorf("write gcc shim: %w", err)
+	// One probe, every driver: --as-needed is passed by the specs the drivers
+	// share, so what is true of gcc is true of g++ on the same machine. Only
+	// drivers that exist get a shim, so a machine without a C++ compiler does
+	// not grow one that fails differently.
+	var wrote int
+	for _, name := range Drivers {
+		real, lerr := exec.LookPath(name)
+		if lerr != nil {
+			continue
+		}
+		body := "#!/bin/sh\n" +
+			"# Written by testkit. See internal/contain/linker.go.\n" +
+			"exec " + real + " -Wl,--no-as-needed \"$@\"\n"
+		if werr := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); werr != nil {
+			return "", fmt.Errorf("write %s shim: %w", name, werr)
+		}
+		wrote++
+	}
+	if wrote == 0 {
+		return "", nil
 	}
 	return dir, nil
 }
+
+// Drivers are the compiler front ends a case might reach. CTP's xgcc calls gcc,
+// but cases build C++ clients with makefiles of their own, and two of them were
+// the only link failures left after the first version of this shim covered gcc
+// alone.
+var Drivers = []string{"gcc", "g++", "cc", "c++"}
 
 // linkerDropsUnusedLibraries asks the toolchain rather than the distribution.
 //

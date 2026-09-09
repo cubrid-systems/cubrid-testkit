@@ -190,8 +190,25 @@ func shellForSh() string {
 // double-forks becomes one. Left unreaped it stays a zombie its parent never
 // learns about -- which is how a `cubrid server stop` was seen polling for a
 // server that had already exited, for twenty-three minutes.
+//
+// Only when this process actually is PID 1, because that is the only time
+// orphans reparent to it. Under the shell wrapper this project runs with, PID 1
+// is a shell -- the wrapper says so itself, "PID 1 stays a shell, and that is
+// load-bearing rather than incidental" -- so the reaper installed here was
+// collecting nothing and only Wait4(-1)-ing over os/exec's own children.
+//
+// Whether that ever cost a verdict is not established. Wait4(-1) reaps any
+// child, and losing that race would give os/exec ECHILD -- "waitid: no child
+// processes", which is neither an ExitError nor ErrWaitDelay, so the case's
+// verdict is discarded as a runtime error. That error does appear in runs, twice
+// in three failures reproduced from a 24-slot run. But a probe that started
+// 1,600 children against the unconditional reaper stole none, because os/exec
+// waits on a pidfd where the kernel provides one, and this kernel does. So the
+// mechanism is available and unproven; what is certain is that the reaper had
+// nothing to collect here, and a Wait4(-1) that can only interfere should not
+// run.
 func Reap() {
-	if !Active() {
+	if !Active() || os.Getpid() != 1 {
 		return
 	}
 	ch := make(chan os.Signal, 8)

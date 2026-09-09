@@ -444,6 +444,21 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		}
 	}
 
+	// The registry is inherited, and a run that inherits state it did not make is
+	// a run whose failures are not all its own. Said before the first case rather
+	// than found afterwards in a case log.
+	if stale := staleDatabases(cfg.GetOr("scenario", "")); len(stale) > 0 {
+		fmt.Printf("[WARN] $CUBRID_DATABASES holds %d database(s) from an earlier run. "+
+			"Anything that walks databases.txt -- make_tz -g extend, for one -- will try to use them:\n", len(stale))
+		for i, s := range stale {
+			if i == 5 {
+				fmt.Printf("[WARN]   ... and %d more\n", len(stale)-5)
+				break
+			}
+			fmt.Printf("[WARN]   %s\n", s)
+		}
+	}
+
 	fmt.Println("STARTED")
 	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split)
 

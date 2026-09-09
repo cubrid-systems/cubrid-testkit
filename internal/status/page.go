@@ -414,7 +414,11 @@ $('fBad').onclick = () => pick(true)
 function sortBy(k) {
   sortDir = sortKey === k ? -sortDir : -1
   sortKey = k
-  for (const th of document.querySelectorAll('th.sortable')) {
+  // th[data-k], not th.sortable: the slots table's headers carry the same class
+  // and a data-sk of their own, so a loop over the class rewrote their text with
+  // this table's key -- which they do not have. They came out reading
+  // "undefined".
+  for (const th of document.querySelectorAll('th[data-k]')) {
     th.setAttribute('aria-sort', th.dataset.k !== k ? 'none' : (sortDir < 0 ? 'descending' : 'ascending'))
     const base = th.dataset.k
     th.innerHTML = base + (th.dataset.k === k ? ' <span class=caret>' + (sortDir < 0 ? '\u25be' : '\u25b4') + '</span>' : '')
@@ -436,7 +440,10 @@ function sortSlotsBy(k) {
   slotDir = slotKey === k ? -slotDir : (k === 'held' ? -1 : 1)
   slotKey = k
   for (const th of document.querySelectorAll('th[data-sk]')) {
-    th.setAttribute('aria-sort', th.dataset.sk !== k ? 'none' : (slotDir < 0 ? 'descending' : 'ascending'))
+    const on = th.dataset.sk === k
+    th.setAttribute('aria-sort', on ? (slotDir < 0 ? 'descending' : 'ascending') : 'none')
+    th.innerHTML = (th.dataset.sk === 'held' ? 'for' : th.dataset.sk) +
+      (on ? ' <span class=caret>' + (slotDir < 0 ? '\u25be' : '\u25b4') + '</span>' : '')
   }
   if (lastView) draw(lastView)
 }
@@ -445,7 +452,7 @@ for (const th of document.querySelectorAll('th[data-sk]')) {
   th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortSlotsBy(th.dataset.sk) } }
 }
 
-for (const th of document.querySelectorAll('th.sortable')) {
+for (const th of document.querySelectorAll('th[data-k]')) {
   th.onclick = () => sortBy(th.dataset.k)
   th.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th.dataset.k) } }
 }

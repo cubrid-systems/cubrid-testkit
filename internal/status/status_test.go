@@ -1019,3 +1019,42 @@ func fetch(t *testing.T, u string) string {
 	b, _ := io.ReadAll(res.Body)
 	return string(b)
 }
+
+// Two sortable tables on one page, each with its own key attribute. A loop that
+// selects on the shared class rewrites the other table's headers with a key they
+// do not have, and they come out reading "undefined" -- which is what happened
+// the first time a reader clicked the slots table's headers.
+func TestEachSortableTableOnlyTouchesItsOwnHeaders(t *testing.T) {
+	res, err := http.Get(mustServe(t) + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	page := string(body)
+	script := page
+	if at := strings.Index(script, "<script>"); at >= 0 {
+		script = script[at:]
+	}
+	// A loop that writes innerHTML from dataset.k must not select by class: the
+	// slots headers share it.
+	for _, bad := range []string{
+		"querySelectorAll('th.sortable')",
+		`querySelectorAll("th.sortable")`,
+	} {
+		if strings.Contains(script, bad) {
+			t.Errorf("a sort loop selects %s, which reaches both tables", bad)
+		}
+	}
+	if !strings.Contains(script, "querySelectorAll('th[data-k]')") {
+		t.Error("the finished table's sort should select its own headers by data-k")
+	}
+	if !strings.Contains(script, "querySelectorAll('th[data-sk]')") {
+		t.Error("the slots table's sort should select its own headers by data-sk")
+	}
+	// Both tables still have to declare headers the loops can find -- looked for
+	// in the markup, which is before the script and not inside it.
+	if !strings.Contains(page, "data-k=took") || !strings.Contains(page, "data-sk=held") {
+		t.Error("the markup lost one of the sortable headers")
+	}
+}

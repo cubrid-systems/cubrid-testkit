@@ -254,3 +254,36 @@ func TestASignalIsNotTheSameAsNothingToContain(t *testing.T) {
 	// Which is the whole point: the code alone cannot tell the two apart, and
 	// Exited() can.
 }
+
+// Wait4(-1) reaps any child, including the ones os/exec is waiting on: its Wait
+// is a waitid peek followed by a wait4, and losing that race gives ECHILD --
+// "waitid: no child processes" -- which is neither an ExitError nor
+// ErrWaitDelay, so the case's verdict is discarded as a runtime error.
+//
+// The reaper is only needed when this process is PID 1 of a namespace, because
+// that is the only time orphans reparent to it. Under the shell wrapper this
+// project uses, PID 1 is a shell and does the reaping itself.
+func TestTheReaperOnlyRunsWhenThisProcessIsPidOne(t *testing.T) {
+	if os.Getpid() == 1 {
+		t.Skip("this process is PID 1, which is the case Reap is for")
+	}
+	t.Setenv(Env, "1")
+
+	// Reap must install nothing. Demonstrated by the thing the reaper breaks:
+	// a child started and waited for while SIGCHLD traffic is going on.
+	Reap()
+
+	for i := 0; i < 20; i++ {
+		// Background noise: children that exit while we wait for another.
+		go func() { _ = exec.Command("true").Run() }()
+	}
+	for i := 0; i < 20; i++ {
+		out, err := exec.Command("bash", "-c", "echo ok").Output()
+		if err != nil {
+			t.Fatalf("a child's status was stolen: %v", err)
+		}
+		if strings.TrimSpace(string(out)) != "ok" {
+			t.Fatalf("wrong output: %q", out)
+		}
+	}
+}

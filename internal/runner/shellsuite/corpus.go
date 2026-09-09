@@ -248,35 +248,39 @@ func (c *Corpus) Ram() string {
 }
 
 // Retire records that a case in dir is finished for good, and drops the
-// directory's writes when it was the last one.
+// directory's writes when it was the last one. It reports whether it reclaimed,
+// because a caller has cleaning of its own to do once the files are gone -- see
+// PruneRegistryScript.
 //
 // For good: a case going back for a retry has not finished, and reclaiming under
 // it would delete the state its next attempt is about to look for.
-func (c *Corpus) Retire(slot, dir string) {
+func (c *Corpus) Retire(slot, dir string) bool {
 	if c == nil {
-		return
+		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	n, ok := c.pending[dir]
 	if !ok {
-		return
+		return false
 	}
 	if n > 1 {
 		c.pending[dir] = n - 1
-		return
+		return false
 	}
 	delete(c.pending, dir)
+	reclaimed := false
 	if !c.shared {
 		st := c.slots[slot]
 		if st == nil {
-			return
+			return false
 		}
 		before := c.used()
 		if before > c.peak {
 			c.peak = before
 		}
 		c.dropInSlot(st, dir)
+		reclaimed = true
 		if st.onRAM {
 			if freed := before - c.used(); freed > 0 {
 				c.freed += freed
@@ -286,7 +290,7 @@ func (c *Corpus) Retire(slot, dir string) {
 		// A slow-lane directory writes to disk, so there is nothing on the tmpfs
 		// to measure and none is recorded. It keeps the figure that sent it to
 		// disk, which is what ContinueSizes is for.
-		return
+		return reclaimed
 	}
 	// The high-water mark is read here as well as on the ticker: reclaiming is
 	// exactly when the tmpfs is at its fullest, and a two-second sample can miss
@@ -300,6 +304,7 @@ func (c *Corpus) Retire(slot, dir string) {
 		c.freed += freed
 		c.held[dir] = freed
 	}
+	return true
 }
 
 func (c *Corpus) pristineOf(dir string) string {

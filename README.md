@@ -232,6 +232,8 @@ always did; the second is this runner's and is off unless set.
 | `case_patch_dir` | off | apply a per-case compatibility patch where one exists. See `patches/README.md` |
 | `lane_slow_secs` | off | split the slots into a tmpfs lane and a disk lane at this duration |
 | `lane_slow_mb` | off | the same split, at this footprint. Needs `case_sizes` |
+| `heavy_in_flight_max` | `slots/4` | how many of the heaviest cases may run at once |
+| `scenario_ram_high_water` | `80` | percent of `scenario_ram_mb` above which no new case starts |
 
 And the environment:
 
@@ -422,6 +424,36 @@ how many slots there are.
 memory and a directory's writes dropped when its last case finishes. That is why fifteen directories
 holding more than one case matter: with lanes the overlay becomes per slot, and then the queue has
 to keep a directory's cases together. Without lanes there is one overlay and it does not arise.
+
+### How a case is chosen
+
+The queue's order is the schedule -- longest first, from `case_plan` -- and it is
+right about makespan. What it does not know is that a slot is not free just
+because it is idle: the run shares a memory ceiling and a machine.
+
+Measured at 24 slots on the full corpus: the tmpfs went from empty to
+**25,584 MB of 25,600 in under three minutes, with zero cases finished**. Nothing
+was wrong with the order. The order puts the heaviest cases first, so every slot
+started one at once, and nobody asked whether the machine could take another yet.
+
+So the order proposes and an **admission policy** disposes
+([`internal/dispatch/policy.go`](internal/dispatch/policy.go)). The queue offers
+its candidates in order and hands out the first the policy admits; a run without
+a policy gets the order alone. A policy is never asked to admit the only case --
+one that can refuse everything is one that can stop the run.
+
+Two are implemented, and they answer different halves of that failure:
+
+| | what it does | why it cannot be the other one |
+|---|---|---|
+| `heavy_in_flight_max` | at most N of the heaviest tenth run at once. Default `slots/4` | this is the rule for the **start**. A ceiling is empty when the first case begins, so a rule that watches the ceiling admits every slot at once |
+| `scenario_ram_high_water` | nothing new starts while the corpus tmpfs is over N% full. Default 80 | feedback, not prediction. It is late by construction -- it can only stop the next case, never the ones already running |
+
+Feedback rather than prediction is deliberate. The run does measure per-directory
+footprints, and the twenty-four cases at the head of that queue measured 377 MB
+between them while actually filling 25,584. `case_sizes` records what a directory
+*held when it retired*; a ceiling is about what it *peaked at while running*, and
+those are not the same number.
 
 ### What a lane is
 

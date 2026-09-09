@@ -387,6 +387,38 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// ---- test ------------------------------------------------------------
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, cfg.Int("testcase_retry_num", 0))
+
+	// The order proposes and a policy disposes -- see internal/dispatch/policy.go.
+	//
+	// Two rules, answering different halves of the same failure. At 24 slots the
+	// corpus tmpfs went from empty to 25,584 MB of 25,600 in under three minutes
+	// with zero cases finished: the order puts the heaviest cases first, so every
+	// slot started one at once. A ceiling rule cannot prevent that -- the ceiling
+	// is empty at the moment it happens -- so the cap on concurrent heavy cases
+	// exists for the start, and the ceiling rule for everything after it.
+	//
+	// Both are defaults with knobs rather than settings with defaults: a run that
+	// has the data should be protected without being asked.
+	heavyMax := cfg.Int("heavy_in_flight_max", (slots+3)/4)
+	highWater := cfg.Int("scenario_ram_high_water", 80)
+	var heavy []string
+	if len(known) > 0 && heavyMax > 0 {
+		secs := make(map[string]float64, len(known))
+		for c, d := range known {
+			secs[c] = d.Seconds()
+		}
+		// The heaviest tenth: enough to cover the head of the queue, few enough
+		// that the cap does not hold back the ordinary long cases.
+		heavy = dispatch.Heaviest(secs, len(known)/10)
+	}
+	policy := dispatch.All(
+		dispatch.NewHeavyCap(heavy, heavyMax),
+		dispatch.NewHeadroom("the corpus tmpfs", corpus.Usage, highWater),
+	)
+	if policy != nil {
+		queue.Policy(policy)
+		fmt.Println("[INFO] admission: " + policy.Describe())
+	}
 	if split.on() {
 		// A directory this corpus has and the plan did not mention takes the
 		// fast lane, which planLanes already decided by omission.

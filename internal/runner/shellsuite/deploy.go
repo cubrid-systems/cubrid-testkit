@@ -127,6 +127,33 @@ func SnapshotScript() string {
 // follows are the whole reason a run can fill a disk.
 func RestoreScript() string {
 	return strings.Join([]string{
+		// Nothing below this line may run with $CUBRID unset.
+		//
+		// Every command here is rooted at ${CUBRID}, and every one of them is
+		// destructive. With the variable empty the paths do not fail -- they
+		// become absolute paths at the root of the filesystem, and
+		//
+		//	find ${CUBRID}/ -name "core" | xargs -i rm -rf {}
+		//
+		// becomes `find /`, which deletes every directory named exactly "core"
+		// on the machine. That is not a hypothetical: it ran, and it removed 69
+		// of them across this machine's /data at 01:16:38 on 2026-09-09,
+		// including node_modules/undici/lib/core out of a VS Code server, which
+		// then failed to start every six minutes for the rest of the day. Files
+		// called core.js and core.d.ts survived, which is the signature of
+		// exactly this command and of nothing else.
+		//
+		// The prologue does not set $CUBRID -- it resolves CTP_HOME and
+		// init_path and leaves the engine to the caller's environment -- so an
+		// empty value is one unsourced profile away, and there was no guard.
+		//
+		// Refusing rather than defaulting: a reset that quietly does nothing is
+		// a case that runs against the previous case's leftovers, and that is a
+		// wrong answer rather than a lost one. The run should stop.
+		`if [ -z "${CUBRID:-}" ] || [ ! -d "${CUBRID}/conf" ] || [ ! -x "${CUBRID}/bin/cub_server" ]; then` + "\n" +
+			`  echo "[ERROR] the reset refuses to run: CUBRID is \"${CUBRID:-}\", which is not a CUBRID installation" >&2` + "\n" +
+			`  exit 1` + "\n" +
+			`fi`,
 		"rm -rf ${CUBRID}/conf/*",
 		"cp -rf ~/.CUBRID_SHELL_FM/conf/* ${CUBRID}/conf/",
 		"rm -rf ${CUBRID}/databases/*",
@@ -134,9 +161,12 @@ func RestoreScript() string {
 		"rm -rf ${CUBRID}/lib/libcubrid_??_??.so",
 		"rm -rf ${CUBRID}/lib/libcubrid_all_locales.so",
 		"rm -rf ${CUBRID}/var/* >/dev/null 2>&1",
-		`find ${CUBRID}/log -type f -print | xargs -i rm -rf {} `,
-		`find ${CUBRID}/ -name "core.[0-9][0-9]*" | xargs -i rm -rf {} `,
-		`find ${CUBRID}/ -name "core" | xargs -i rm -rf {} `,
+		// Quoted, and -mindepth 1 so that a find whose root somehow still ends up
+		// wrong cannot delete the root itself. The guard above is the real
+		// defence; this is the belt behind it.
+		`find "${CUBRID}/log" -mindepth 1 -type f -print | xargs -i rm -rf {} `,
+		`find "${CUBRID}/" -mindepth 1 -name "core.[0-9][0-9]*" | xargs -i rm -rf {} `,
+		`find "${CUBRID}/" -mindepth 1 -name "core" | xargs -i rm -rf {} `,
 	}, "\n")
 }
 

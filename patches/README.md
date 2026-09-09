@@ -22,16 +22,35 @@ properties:
 
 ## Layout
 
-The tree mirrors the corpus under a category directory, so finding the patch for
-a case is finding the case:
+One flat directory per category. The file name is the case's path under the
+scenario root, flattened:
 
 ```
-patches/shell/_08_shard/_02_cubrid_broker01/cases/_02_cubrid_broker01.sh.patch
-              └─────────── the case's path under the scenario root ──────────┘
+_06_issues/_17_1h/cbrd_20760_1/cases/cbrd_20760_1.sh
+  ->  patches/shell/_06_issues~_17_1h~cbrd_20760_1.patch
 ```
+
+Flat rather than a mirror of the corpus, because the corpus is five levels deep
+and this set is not: `ls patches/shell` should show everything a run carries, on
+one screen. Two segments come out on the way — `cases`, which every case has, and
+a file name that repeats its directory, which almost every case has. Nothing
+collides: a case always lives under `cases/`, so no case maps to the name another
+case would. A directory holding two cases keeps both names
+(`_06_issues~_25_1h~cbrd_24741~01_basic`).
 
 The diff's own paths are relative to the **case directory**, so one patch may
 touch the case script and its answer files together.
+
+## The corpus comes out as it went in
+
+The patch is applied when the case starts and reverted when it finishes.
+
+Behind the corpus overlay the revert is redundant — the writes are in the upper
+layer and go when the directory retires. It is there because that is a property
+of how the run was configured and not of the patch, and *does the corpus come out
+as it went in* must not have "it depends" as its answer. A run without
+`scenario_ram_mb` writes straight into the checkout, and a patch left behind
+there would be applied to a case the next run reads from git.
 
 ## Turning it on
 
@@ -70,3 +89,12 @@ it did, delete the patch.
 | `_08_shard/_02_cubrid_broker01` | the case normalises paths with `sed s@$HOME@/path@`, which assumes `$CUBRID` is under `$HOME`. Its answer expects `/path/CUBRID/...`, so the patch normalises `$CUBRID` directly |
 | `_08_shard/_03_cubrid_broker02` | the same line, the same fix |
 | `_06_issues/_17_1h/cbrd_20760_1` | `test1.answer` expects an empty `[common]` — `db_volume_size=512.0M (512.0M)`, the engine's own default. CUBRID does not ship that: the stock `cubrid.conf` sets `log_volume_size=20M`, so the case fails on a fresh install. The patch clears the two parameters the case is about, before the baseline it asserts |
+| `_01_utility/_16_restoredb/itrack_10001` | `char(10000)` is over the engine's 2048-byte limit, so the class is never created and all fifteen restore checks fail behind `Unknown class "dba.x"`. The widths are arbitrary — the loader binds the integers 1, 2 and 3, and no answer file mentions them. CBRD-21637, and on the daily exclusion list |
+
+## What is deliberately not here
+
+`_01_utility/_38_csql/csql2` (CBRD-23602) compares against an answer file last
+touched in 2016, with a query that has no `ORDER BY`. Making it pass means
+regenerating the answer, and an answer regenerated from today's engine asserts
+today's behaviour — which is not a compatibility patch, it is deleting the test.
+It needs someone who knows what the query was meant to prove.

@@ -30,10 +30,17 @@ import (
 //     claim as a verdict produced from the corpus, and the run says which is
 //     which -- on standard output, in the case log, and on the page.
 //
-// The layout mirrors the corpus under a category directory, so finding the
-// patch for a case is finding the case:
+// The name of a patch is the case's path under the scenario, flattened:
 //
-//	patches/shell/_08_shard/_02_cubrid_broker01/cases/_02_cubrid_broker01.sh.patch
+//	_06_issues/_17_1h/cbrd_20760_1/cases/cbrd_20760_1.sh
+//	  -> patches/shell/_06_issues~_17_1h~cbrd_20760_1.patch
+//
+// Flat rather than a mirror of the corpus, because the corpus is five levels
+// deep and this set is not: `ls patches/shell` should show everything a run
+// carries, on one screen. Two segments come out on the way -- "cases", which
+// every case has, and a file name that repeats its directory, which almost every
+// case has. Nothing collides: a case always lives under cases/, so no case maps
+// to the name another case would.
 //
 // The diff's own paths are relative to the case directory, so one patch may
 // touch the case script and its answer files together.
@@ -59,37 +66,56 @@ func LoadPatches(dir, scenario string, cases []string) (*Patches, error) {
 	}
 	p := &Patches{dir: dir, byCase: map[string]string{}}
 
-	// Index by the path a case would have relative to the scenario, so the
-	// lookup is a map hit rather than a walk per case.
+	// Index by the name a case's patch would have, so the lookup is a map hit
+	// rather than a walk per case.
 	want := map[string]string{}
 	for _, c := range cases {
-		rel, err := filepath.Rel(root, c)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		if n := PatchName(root, c); n != "" {
+			want[n] = c
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("case_patch_dir %s does not exist", dir)
+		}
+		return nil, fmt.Errorf("cannot read %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".patch") {
 			continue
 		}
-		want[rel] = c
-	}
-	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".patch") {
-			return err
-		}
-		rel, rerr := filepath.Rel(dir, path)
-		if rerr != nil {
-			return nil
-		}
-		rel = strings.TrimSuffix(rel, ".patch")
-		if c, ok := want[rel]; ok {
-			p.byCase[c] = path
+		name := strings.TrimSuffix(e.Name(), ".patch")
+		if c, ok := want[name]; ok {
+			p.byCase[c] = filepath.Join(dir, e.Name())
 		} else {
-			p.orphans = append(p.orphans, rel)
+			p.orphans = append(p.orphans, name)
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("cannot read %s: %w", dir, err)
 	}
 	sort.Strings(p.orphans)
 	return p, nil
+}
+
+// PatchName is what a case's patch file is called, without the extension.
+//
+// The two segments that come out are the ones that carry no information: the
+// "cases" every case sits in, and a file name that repeats its directory.
+func PatchName(scenarioRoot, script string) string {
+	rel, err := filepath.Rel(scenarioRoot, script)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	parts := strings.Split(strings.TrimSuffix(rel, ".sh"), string(filepath.Separator))
+	kept := parts[:0]
+	for _, s := range parts {
+		if s != "cases" {
+			kept = append(kept, s)
+		}
+	}
+	if n := len(kept); n > 1 && kept[n-1] == kept[n-2] {
+		kept = kept[:n-1]
+	}
+	return strings.Join(kept, "~")
 }
 
 // For returns the patch file for a case, or "".
@@ -141,4 +167,26 @@ func ApplyScript(caseDir, patchFile string) string {
 	d, f := shellQuote(caseDir), shellQuote(patchFile)
 	return "patch -p0 --batch --forward --dry-run -d " + d + " -i " + f + " >/dev/null 2>&1 && " +
 		"patch -p0 --batch --forward -d " + d + " -i " + f
+}
+
+// RevertScript puts the case back.
+//
+// Behind the corpus overlay this is redundant: the writes are in the upper layer
+// and go when the directory retires. It is here because that is a property of
+// how the run was configured and not of the patch, and "does the corpus come out
+// as it went in" must not have "it depends" as its answer. A run without
+// scenario_ram_mb writes straight into the checkout, and a patch left there
+// would be applied to a case the next run reads from git.
+//
+// A dry run first for the same reason as forward: if the case's own script was
+// changed underneath -- which nothing should do, but this is the check that says
+// so -- the revert is refused rather than making it worse, and the caller
+// reports it.
+func RevertScript(caseDir, patchFile string) string {
+	d, f := shellQuote(caseDir), shellQuote(patchFile)
+	// --forward alongside --reverse is what stops a second revert re-applying
+	// the patch forwards: to a reversed run, an already-reverted file looks like
+	// a reversed patch, and --forward skips those instead of "fixing" them.
+	return "patch -p0 --batch --reverse --forward --dry-run -d " + d + " -i " + f + " >/dev/null 2>&1 && " +
+		"patch -p0 --batch --reverse --forward -d " + d + " -i " + f
 }

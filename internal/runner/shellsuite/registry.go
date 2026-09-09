@@ -65,3 +65,35 @@ func staleDatabases(scenario string) []string {
 	}
 	return out
 }
+
+// PruneRegistryScript removes from this slot's registry every database whose
+// files were under dir.
+//
+// The reclaim and the registry have to move together. A case creates a database
+// in its own directory, createdb writes the name and that path into
+// $CUBRID_DATABASES/databases.txt, and the case does not always delete it --
+// which upstream can live with, because upstream leaves the files where they
+// are. This runner reclaims the directory when its last case retires, so the
+// entry outlives the database it names.
+//
+// Then the next case in this slot that walks the registry fails on it. Observed
+// on a full-corpus run: db25452 registered at a path this runner had already
+// reclaimed, in the same slot, with 38 timezone cases still to come -- and
+// make_tz -g extend runs `cubrid gen_tz -g extend` against every name it finds.
+//
+// Written through the slot's own channel, because databases.txt is behind a
+// per-slot overlay: this slot's copy is the only one that has the entry, and the
+// only one that should lose it.
+func PruneRegistryScript(dir string) string {
+	// awk rather than sed: the path is data, and a case directory holds every
+	// character sed would treat as syntax.
+	return `f="${CUBRID_DATABASES:-}/databases.txt"; [ -n "${CUBRID_DATABASES:-}" ] && [ -f "$f" ] || exit 0
+awk -v d=` + shellQuote(dir) + ` '
+  /^[[:space:]]*#/ { print; next }
+  NF < 2          { print; next }
+  $2 == d || index($2, d "/") == 1 { next }
+  { print }
+' "$f" > "$f.tkprune" && mv "$f.tkprune" "$f"`
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

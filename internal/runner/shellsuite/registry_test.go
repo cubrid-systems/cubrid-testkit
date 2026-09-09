@@ -2,6 +2,7 @@ package shellsuite
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,5 +46,57 @@ func TestNoRegistryIsNotAComplaint(t *testing.T) {
 	t.Setenv("CUBRID_DATABASES", "")
 	if got := staleDatabases("/x"); got != nil {
 		t.Errorf("no registry configured, nothing to say: %v", got)
+	}
+}
+
+// The reclaim and the registry move together, or the registry names databases
+// whose files are gone and the next case that walks it fails.
+func TestPruningTheRegistryDropsOnlyTheReclaimedDirectory(t *testing.T) {
+	reg := t.TempDir()
+	dir := "/corpus/shell/_39_fig_cake/cbrd_25452/cases"
+	body := strings.Join([]string{
+		"#db-name\tvol-path",
+		"db25452\t\t" + dir + "/db25452\tlocalhost\t" + dir + "/db25452",
+		"db14907\t\t" + dir + "\tlocalhost\t" + dir,
+		"keepme\t\t/corpus/shell/_06_issues/other/cases\tlocalhost",
+		// A path that merely starts with the same characters is a different
+		// directory, and must survive.
+		"neighbour\t\t" + dir + "_backup\tlocalhost",
+		"",
+	}, "\n")
+	path := filepath.Join(reg, "databases.txt")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	script := "export CUBRID_DATABASES=" + reg + "\n" + PruneRegistryScript(dir)
+	out, err := exec.Command("bash", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("prune failed: %v: %s", err, out)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, gone := range []string{"db25452", "db14907"} {
+		if strings.Contains(text, gone) {
+			t.Errorf("%s was under the reclaimed directory and should be gone:\n%s", gone, text)
+		}
+	}
+	for _, kept := range []string{"#db-name", "keepme", "neighbour"} {
+		if !strings.Contains(text, kept) {
+			t.Errorf("%s should have survived:\n%s", kept, text)
+		}
+	}
+}
+
+// No registry configured is the ordinary case for a run without slots, and the
+// script has to be a no-op rather than an error.
+func TestPruningWithoutARegistryIsQuiet(t *testing.T) {
+	out, err := exec.Command("bash", "-c", "unset CUBRID_DATABASES\n"+PruneRegistryScript("/x")).CombinedOutput()
+	if err != nil {
+		t.Fatalf("prune should be a no-op: %v: %s", err, out)
 	}
 }

@@ -247,7 +247,13 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 
 	ev.LastPassResultCont = ev.ResultText
 	if c, err := Split(ticket.Case); err == nil {
-		w.Corpus.Retire(w.SlotID, c.Dir)
+		// The registry outlives the files unless it is told, and a name that
+		// points at a reclaimed directory fails the next case that walks it.
+		if w.Corpus.Retire(w.SlotID, c.Dir) {
+			if _, err := runIn(context.Background(), w.Channel, PruneRegistryScript(c.Dir)); err != nil {
+				w.log("[ERROR] cannot prune the database registry for " + c.Dir + ": " + err.Error())
+			}
+		}
 	}
 	w.Plan.Add(ticket.Case, elapsed)
 	w.Board.End(w.SlotID, ticket.Case, v.Success)

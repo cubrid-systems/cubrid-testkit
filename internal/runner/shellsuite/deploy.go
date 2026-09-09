@@ -114,6 +114,20 @@ func ConfigureScript(inst *topology.Instance) string {
 // configuration, database or log.
 func SnapshotScript() string {
 	return strings.Join([]string{
+		// The registry has to exist before the snapshot is taken, or every case
+		// restored from it starts without one. A CUBRID install ships
+		// databases.txt.sample and nothing else; the file itself appears at the
+		// first createdb, and the cases assume the state after that.
+		//
+		// What it costs when it is missing: `cubrid server start dbnone` should
+		// say the database is unknown, and instead the engine fails earlier with
+		// "Could not obtain write access to database file
+		// ${CUBRID}/databases/databases.txt". Measured on
+		// _06_issues/_14_1h/bug_bts_10639, which passed while the registry lived
+		// outside the install -- where a databases.txt happened to exist -- and
+		// failed the moment it moved to where CUBRID and CTP both put it.
+		`mkdir -p "${CUBRID_DATABASES:-${CUBRID}/databases}"`,
+		`touch "${CUBRID_DATABASES:-${CUBRID}/databases}/databases.txt"`,
 		"rm -rf ~/.CUBRID_SHELL_FM > /dev/null 2>&1",
 		"cp -r ${CUBRID} ~/.CUBRID_SHELL_FM",
 	}, "\n")

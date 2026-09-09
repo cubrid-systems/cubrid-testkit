@@ -1,0 +1,18 @@
+--- bug_bts_5136_4.sh
++++ bug_bts_5136_4.sh
+@@ -4,6 +4,15 @@
+ 
+ set -x
+ 
++# testkit compatibility: step 1 greps cubrid.conf for the literal
++# "db_volume_size = 512M" and "log_volume_size = 512M" -- the values CUBRID
++# ships, which this case exists to confirm before it changes them. This run
++# lowers both so that 24 slots fit in memory, so step 1 measures the run
++# instead of the engine. Restoring the shipped values gives the case the
++# baseline it asserts; the four steps after it set their own sizes and are
++# unaffected. cubrid.conf is restored before every case.
++sed -i 's/^[[:space:]]*db_volume_size[[:space:]]*=.*/db_volume_size=512M/;s/^[[:space:]]*log_volume_size[[:space:]]*=.*/log_volume_size=512M/' $CUBRID/conf/cubrid.conf
++
+ #step 1  check cubrid.conf
+ cubrid spacedb > spacedb.log 2>&1
+ 

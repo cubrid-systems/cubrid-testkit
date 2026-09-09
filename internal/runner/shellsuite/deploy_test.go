@@ -364,3 +364,34 @@ func TestARefusedResetIsReportedAndNotSwallowed(t *testing.T) {
 		t.Error("this test is meaningless if the explanation is on stdout")
 	}
 }
+
+// A CUBRID install ships databases.txt.sample and not databases.txt: the file
+// appears at the first createdb. Every case is restored from the snapshot, so if
+// the snapshot is taken before the registry exists, every case starts without
+// one -- and a case that asks the engine about an unknown database gets
+// "Could not obtain write access to database file .../databases.txt" instead of
+// "Database is unknown". Measured on _06_issues/_14_1h/bug_bts_10639, which
+// passed while the registry lived outside the install and failed the moment it
+// moved to where CUBRID and CTP both put it.
+func TestTheSnapshotHasARegistryToRestore(t *testing.T) {
+	s := SnapshotScript()
+	mk := strings.Index(s, "mkdir -p")
+	touch := strings.Index(s, "databases.txt")
+	cp := strings.Index(s, "cp -r ${CUBRID} ~/.CUBRID_SHELL_FM")
+	if mk < 0 || touch < 0 {
+		t.Fatalf("the snapshot does not make a registry:\n%s", s)
+	}
+	if cp < 0 {
+		t.Fatalf("the snapshot no longer copies the install:\n%s", s)
+	}
+	if touch > cp {
+		t.Error("the registry is created after the snapshot is taken, so the snapshot " +
+			"does not have it and no case restored from it will either")
+	}
+	// $CUBRID_DATABASES is where the engine looks; the default is inside the
+	// install, and hardcoding either one would be wrong for the other.
+	if !strings.Contains(s, "${CUBRID_DATABASES:-${CUBRID}/databases}") {
+		t.Errorf("the registry path must follow $CUBRID_DATABASES, with CUBRID's own "+
+			"default when it is unset:\n%s", s)
+	}
+}

@@ -225,6 +225,16 @@ always did; the second is this runner's and is off unless set.
 | this runner's keys | default | |
 |---|---|---|
 | `parallel_slots` | `1` | how many cases run at once |
+**`$CUBRID_DATABASES` belongs inside `$CUBRID`.** CUBRID's default is
+`$CUBRID/databases`, the install ships `databases.txt.sample` there, and CTP's
+own per-case reset cleans and restores exactly that path. Pointing it elsewhere
+leaves the reset scrubbing a directory nothing uses while the real registry
+carries entries from case to case and from run to run — and it fails the twelve
+cases that write to the documented location. Measured: 12 of 12 NOK with the
+registry outside the install, 12 of 12 OK with it back where CUBRID puts it.
+Slots stay isolated either way, because `$CUBRID` already has a per-slot overlay
+and one overlay covers both.
+
 | `scenario_ram_mb` | off | put the corpus behind an overlay whose upper layer is a tmpfs of this size |
 | `status_http` | off | serve the progress page |
 | `case_plan` | off | a file of per-case durations, read to order the run and written from what it measured |

@@ -1,0 +1,23 @@
+# Cases that assert where the engine puts its Unix socket, which a slotted run
+# cannot honour.
+#
+# CUBRID puts it in $CUBRID/var/CUBRID_SOCK when CUBRID_TMP says nothing --
+# broker_filename.c's FID_SOCK_DIR and pl_comm.c both fall back to it. A slotted
+# run has to set CUBRID_TMP: every slot keeps the shipped port, because the
+# network namespace lets it, so without a per-slot directory they would all want
+# /tmp/CUBRID1523 and only one master would start.
+#
+# $CUBRID/var/CUBRID_SOCK looks like the obvious place to point it, since $CUBRID
+# is already behind a per-slot overlay. Measured, and it does not work: the
+# per-case reset runs `rm -rf ${CUBRID}/var/*`, so the directory is gone after
+# the first case, the master cannot create its socket, and a two-case run went
+# from 26 seconds to 426 with both failing and no output at all. $CUBRID/tmp is
+# what the reset leaves alone, so that is where it goes -- and these two cases
+# name the default and cannot be satisfied.
+#
+# Ends when the socket directory can be both per-slot and at the engine's own
+# default -- which needs the reset to stop emptying $CUBRID/var, and that is
+# CTP's inherited script, not this runner's.
+
+shell/_06_issues/_24_1h/cbrd_25076
+shell/_08_shard/_13_shard_command

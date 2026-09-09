@@ -101,9 +101,15 @@ func TestPruningWithoutARegistryIsQuiet(t *testing.T) {
 	}
 }
 
-// The socket lives where the engine ships it whenever that fits, because the
-// cases normalise their output against $CUBRID and a path outside it is a path
-// their sed does not rewrite.
+// The socket lives under $CUBRID whenever that fits, because the cases normalise
+// their output against $CUBRID and a path outside it is a path their sed does
+// not rewrite.
+//
+// $CUBRID/tmp and not $CUBRID/var/CUBRID_SOCK, which is where the engine itself
+// puts it when CUBRID_TMP says nothing: the per-case reset runs
+// `rm -rf ${CUBRID}/var/*`, so a socket directory there does not survive the
+// first case. Measured -- a two-case run went from 26 seconds to 426 with both
+// failing -- so this assertion is load-bearing rather than arbitrary.
 func TestSlotTmpPrefersTheShippedPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CUBRID", home)

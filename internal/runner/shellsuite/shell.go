@@ -697,14 +697,23 @@ const sunPathMax = 108
 
 // slotTmp is the directory a slot's master keeps its socket in.
 //
-// $CUBRID/tmp first, because that is where the engine puts it when nothing says
-// otherwise and it is already this slot's own: $CUBRID is behind a per-slot
-// overlay, so two slots writing CUBRID1523 there do not meet. Staying at the
-// shipped path also keeps the cases' own normalisation working -- several
-// compare output holding a socket path against an answer that says
+// $CUBRID/tmp first, because it is already this slot's own -- $CUBRID is behind
+// a per-slot overlay, so two slots writing CUBRID1523 there do not meet -- and
+// because staying under $CUBRID keeps the cases' own normalisation working:
+// several compare output holding a socket path against an answer that says
 // "${CUBRID}/...", and a path outside $CUBRID is a path their sed does not
 // rewrite. Observed on _08_shard/_13_shard_command, whose answer expects
 // ${CUBRID}/var/CUBRID_SOCK and got /var/tmp/tk<pid>/slot1.
+//
+// Not $CUBRID/var/CUBRID_SOCK, which is what the engine itself picks when
+// CUBRID_TMP says nothing -- broker_filename.c's FID_SOCK_DIR and pl_comm.c
+// both fall back to it -- and which would make that case's answer match
+// exactly. Measured, and it does not work: the per-case reset runs
+// `rm -rf ${CUBRID}/var/*`, so a socket directory there is gone after the first
+// case, the master cannot create its socket, and a two-case run went from 26
+// seconds to 426 with both cases failing and no shard output at all. The reset
+// leaves $CUBRID/tmp alone. So _13_shard_command and _06_issues/_24_1h/cbrd_25076,
+// which assert the engine's default location, cannot be satisfied here.
 //
 // /var/tmp is the fallback and not the default. It exists because sun_path is
 // 108 bytes: an install deep enough produces a socket path the kernel cannot

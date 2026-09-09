@@ -24,15 +24,32 @@
 #
 # Delete this file from testcase_exclude_from_file the moment a build with the
 # manager exists here; every one of these is expected to pass with it.
+#
+# How this list was built, and how it was got wrong once.
+#
+# The first version came from lines that are concentrated in failures. That is
+# the right test for telling a cause from noise -- "cubrid manager server is not
+# installed." appears 7,647 times in a run whose failures number 80, because
+# `cubrid service` prints it for everyone -- and it is the wrong test here. For
+# a case whose check counts the successes `cubrid service start` printed, or
+# greps ps for cub_manager, that line is not noise, it is the mechanism. Six
+# cases were missed that way and are on this list now, found by looking at the
+# traced commands immediately before the write_nok that fired rather than at the
+# console as a whole.
 
 shell/_01_utility/_34_cub_auto/bug_xdbms212
 shell/_01_utility/_35_cub_js/bug_xdbms212
+shell/_01_utility/_37_cubrid/_01_service
 shell/_01_utility/_37_cubrid/_03_manager
+shell/_01_utility/_37_cubrid/bug_xdbms79
 shell/_03_itrack/bug_xdbms245
 shell/_05_addition/bug_xdbms270
 shell/_05_addition/bug_xdbms_sus315
+shell/_05_addition/bug_xdbms_sus357
 shell/_06_issues/_12_1h/bug_bts_7878
+shell/_06_issues/_12_2h/bug_bts_9582
 shell/_06_issues/_13_1h/bug_bts_9176
+shell/_06_issues/_13_2h/bug_bts_11075
 shell/_06_issues/_14_1h/bug_bts_13279
 shell/_06_issues/_14_1h/bug_bts_13476
 shell/_06_issues/_15_1h/bug_bts_15964
@@ -40,6 +57,7 @@ shell/_06_issues/_21_1h/cbrd_23892
 shell/_06_issues/_24_1h/cbrd_25232
 shell/_06_issues/_24_2h/cbrd_25511
 shell/_06_issues/_25_1h/cbrd_26020
+shell/_06_issues/_25_2h/cbrd_26159
 shell/_06_issues/_25_2h/cbrd_26247
 shell/_06_issues/_26_2h/cbrd_26777
 shell/_11_codecoverage/system_parameter/index_scan_oid_buffer_size

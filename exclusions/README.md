@@ -31,6 +31,8 @@ The run prints how many each file contributed, then the total in CTP's frozen
 |---|---|
 | `no-cubrid-manager.txt` (22 cases) | CUBRID Manager Server does not link on a modern glibc: the prebuilt `libevent-2.1.4-alpha` archive committed under `cubridmanager/server/external/` references `sysctl()`, which glibc removed, and there is no `libevent-dev` here to link against instead. The engine is therefore built `-DWITH_CMSERVER=OFF` and `$CUBRID` has no `cub_manager`, no `conf/cm.conf`, no `log/manager`. **Ends when** a build with the manager exists here — upstream CI has one, on an older glibc, so none of these are upstream's to exclude |
 
+| `socket-dir-is-not-the-default.txt` (2 cases) | both assert the Unix socket directory the engine picks on its own, `$CUBRID/var/CUBRID_SOCK`. A slotted run must set `CUBRID_TMP` — every slot keeps the shipped port, so without a per-slot directory they would all want `/tmp/CUBRID1523` — and it cannot be `$CUBRID/var/CUBRID_SOCK`, because the per-case reset runs `rm -rf ${CUBRID}/var/*` and the directory is gone after the first case. Measured: a two-case run went from 26 s to 426 s with both failing. **Ends when** the reset stops emptying `$CUBRID/var`, which is CTP's script rather than this runner's |
+
 ## What is deliberately not here
 
 `_38_fig/cbrd_24911` drives the manager (`conf/cm.conf`, an HTTPS call to the CMS

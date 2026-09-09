@@ -172,15 +172,17 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		res, perr := runIn(ctx, w.Channel, ApplyScript(c.Dir, pf))
 		switch {
 		case perr != nil:
+			w.Board.Refused(c.Path, pf)
 			add("NOK", "the compatibility patch "+pf+" could not be run: "+perr.Error())
 			return items, console
 		case res.ExitCode != 0:
+			w.Board.Refused(c.Path, pf)
 			add("NOK", "the compatibility patch "+pf+" does not apply to this case any more, "+
 				"which usually means the case changed upstream: "+strings.TrimSpace(res.Output()))
 			return items, console
 		}
 		w.log("[PATCH] applied " + pf)
-		w.Board.Patched(c.Path)
+		w.Board.Patched(c.Path, pf)
 		w.Patches.Applied(c.Path, pf)
 		// Put it back. Behind the overlay the writes go anyway when the
 		// directory retires, but that is a property of how the run was

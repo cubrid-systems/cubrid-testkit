@@ -1,0 +1,18 @@
+--- cbrd_20762.sh
++++ cbrd_20762.sh
+@@ -3,6 +3,15 @@
+ . $init_path/init.sh
+ init test
+ 
++
++# testkit compatibility: this case's answers were written with
++# log_volume_size at 512M, and its verdict depends on it -- "needed is 104.0M"
++# where the answer says 1.1G, Num_active_log_pages 32767 where it says 1279.
++# The size reaches the case through cubrid.conf, which it never names, so a run
++# that lowers it fails the case for a reason the case cannot see. Say it here.
++# cubrid.conf is restored before every case, so this is the case's own setting.
++change_db_parameter "log_volume_size=512M"
++
+ set -x
+ #----------------------------CASE 1: cubrid utility-----------------------------#
+ cubrid_createdb --db-volume-size=2m db20762_1 > a.txt 2>&1

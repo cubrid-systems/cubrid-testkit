@@ -156,6 +156,17 @@ const page = `<!doctype html>
  .patched{font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;
           color:var(--warn);border:1px solid var(--warn);border-radius:2px;
           padding:0 .28rem;margin-left:.4rem;opacity:.85;white-space:nowrap}
+ /* A refused patch is worse than a patched case: the case ran as neither the
+    corpus nor the patch has it, and without a mark of its own it looks like an
+    ordinary failure. */
+ .patched.bad{color:var(--fail);border-color:var(--fail);opacity:1}
+ /* Which patch, above the case's own output, because a caveat the reader cannot
+    follow up is half a caveat. */
+ .detailpatch{font-size:.75rem;margin:0 0 .5rem;padding:.35rem .6rem;
+              border-left:2px solid var(--warn);color:var(--ink-dim);
+              background:var(--line-soft);word-break:break-all}
+ .detailpatch b{color:var(--warn);font-weight:600}
+ .detailpatch.bad{border-left-color:var(--fail)} .detailpatch.bad b{color:var(--fail)}
 
  /* Three groups side by side, each a narrow key/value list. They are read by
     scanning for the one line that is not the default, so the changed rows carry
@@ -320,6 +331,7 @@ const page = `<!doctype html>
   <h2>case detail <span class=count id=detailname></span>
     <span class=seg><button id=detailclose>close</button></span>
   </h2>
+  <p id=detailpatch class=detailpatch hidden></p>
   <pre id=detail class=detail></pre>
 </section>
 
@@ -416,11 +428,18 @@ function draw(v) {
   $('fcount').textContent = (showFailed
     ? (v.failed || []).length + ' failed of ' + v.done
     : rows.length + ' kept') + (showN && rows.length > showN ? ', showing ' + showN : '') +
-    (v.npatched ? ' \u00b7 ' + v.npatched + ' patched' : '')
+    (v.npatched ? ' \u00b7 ' + v.npatched + ' patched' : '') +
+    (v.nrefused ? ' \u00b7 ' + v.nrefused + ' patch refused' : '')
   $('recent').innerHTML = list.length ? list.map(r =>
     '<tr><td class=slot>' + r.slot +
     '<td class=case title="' + r.case + '"><a href="#" data-case="' + r.case + '">' + short(r.case) + '</a>' +
-    (r.patched ? ' <span class=patched title="this case ran against a compatibility patch, so the verdict is about the patched case and not about the corpus">patched</span>' : '') +
+    (r.refused
+       ? ' <span class="patched bad" title="the compatibility patch ' + esc(r.patch) +
+         ' would not apply, so this case ran as neither the corpus nor the patch has it">patch refused</span>'
+       : r.patch
+       ? ' <span class=patched title="ran against ' + esc(r.patch) +
+         ', so the verdict is about the patched case and not about the corpus">patched</span>'
+       : '') +
     '<td class=num><span class="v ' + (r.ok?'ok':'no') + '">' + (r.ok?'OK':'NOK') + '</span>' +
     '<td class=num>' + secs(r.took) + '</tr>').join('')
     : '<tr><td colspan=4 class=empty>' + (showFailed ? 'nothing has failed' : 'nothing yet') + '</tr>'
@@ -683,6 +702,22 @@ document.addEventListener('click', e => {
   e.preventDefault()
   const name = a.getAttribute('data-case')
   $('detailname').textContent = short(name)
+  // Which patch this verdict is about, said above the output rather than only in
+  // a tooltip on a table that may already be scrolled away.
+  const row = ((lastView && (lastView.recent || [])).concat((lastView && lastView.failed) || []))
+    .find(r => r.case === name)
+  const box = $('detailpatch')
+  if (row && row.patch) {
+    box.hidden = false
+    box.classList.toggle('bad', !!row.refused)
+    box.innerHTML = row.refused
+      ? '<b>patch refused</b> \u2014 ' + esc(row.patch) +
+        ' would not apply, so this case ran as neither the corpus nor the patch has it'
+      : '<b>patched</b> \u2014 ran against ' + esc(row.patch) +
+        ', so this verdict is about the patched case and not about the corpus'
+  } else {
+    box.hidden = true
+  }
   $('detail').textContent = 'loading…'
   $('detailwrap').hidden = false
   $('detailwrap').scrollIntoView({block: 'nearest'})

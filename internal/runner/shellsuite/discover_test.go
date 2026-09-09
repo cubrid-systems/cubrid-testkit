@@ -382,3 +382,36 @@ func TestIncludeKeepsOnlyWhatIsNamed(t *testing.T) {
 		t.Errorf("an empty pattern list dropped cases: %d kept", len(kept))
 	}
 }
+
+// One path is what CTP took and it has to keep working; more than one exists so
+// that upstream's judgement about a case and this machine's inability to run it
+// stay in separate files, each deletable on its own.
+func TestExcludeFilesKeepsTheListsApart(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		spec string
+		want []string
+	}{
+		{"CTP's single path", "/ctp/daily_regression", []string{"/ctp/daily_regression"}},
+		{"nothing configured", "", nil},
+		{"whitespace only", "   ", nil},
+		{"two lists", "/a/upstream.txt,/b/no-manager.txt",
+			[]string{"/a/upstream.txt", "/b/no-manager.txt"}},
+		{"spaces around the comma", " /a.txt , /b.txt ", []string{"/a.txt", "/b.txt"}},
+		// An empty entry must not become `cat ""`, which succeeds and excludes
+		// nothing -- a silent way to run a list that was meant to apply.
+		{"a stray comma", "/a.txt,,", []string{"/a.txt"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := ExcludeFiles(c.spec)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %q, want %q", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("got %q, want %q", got, c.want)
+				}
+			}
+		})
+	}
+}

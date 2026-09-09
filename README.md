@@ -212,7 +212,7 @@ always did; the second is this runner's and is off unless set.
 | `testcase_retry_num` | `0` | attempts after the first failure |
 | `testcase_timeout_in_secs` | `0` | 0 is no timeout. CI uses 720 |
 | `testcase_exclude_by_macro` | — | skip any case whose text contains this. CI uses `LINUX_NOT_SUPPORTED`, which is 21 cases |
-| `testcase_exclude_from_file` | — | a file of path fragments to skip. CI uses the corpus's own `daily_regression_test_excluded_list_linux.conf`, which is 9 cases |
+| `testcase_exclude_from_file` | — | files of path fragments to skip, comma-separated. Upstream's list and this machine's stay separate — see `exclusions/README.md`. CI uses the corpus's own `daily_regression_test_excluded_list_linux.conf`, which is 9 cases |
 | `testcase_workspace_dir` | — | where the corpus is prepared |
 | `test_continue_yn` | `false` | resume, skipping what already has a verdict |
 | `cubrid_db_charset` | `en_US` | passed to every `createdb` |

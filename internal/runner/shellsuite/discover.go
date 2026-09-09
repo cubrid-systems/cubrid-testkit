@@ -142,6 +142,27 @@ func ParseSkipped(grepOutput, key string) []string {
 	return out
 }
 
+// ExcludeFiles splits testcase_exclude_from_file into the files it names.
+//
+// CTP took one path and one path still works. More than one is allowed because
+// the reasons are not one reason: the corpus's own daily_regression list is
+// upstream's judgement about a case, while a list of cases this machine cannot
+// run at all is a fact about the machine. Kept in one file they cannot be told
+// apart, and the machine's list can never be deleted when the machine changes.
+// See exclusions/README.md.
+//
+// Commas separate, whitespace around a name is not part of it, and an empty
+// entry is skipped rather than becoming `cat ""`.
+func ExcludeFiles(spec string) []string {
+	var out []string
+	for _, f := range strings.Split(spec, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // ParseExcluded reads an exclusion file. Blank lines and lines starting with #
 // or -- are comments. Every entry gets a trailing slash so that a directory name
 // cannot match a longer name that merely starts with it.

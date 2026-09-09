@@ -1,0 +1,49 @@
+# Cases whose verdict needs CUBRID Manager Server, which this machine cannot build.
+#
+# Why it cannot: the manager's build links a prebuilt static libevent 2.1.4-alpha
+# committed under cubridmanager/server/external/, and that archive references
+# sysctl(), which glibc removed. On this machine:
+#
+#   libevent.a(evutil_rand.o): arc4random.c:192:
+#     undefined reference to `sysctl'
+#
+# There is no libevent-dev here to link against instead, so the engine is built
+# with -DWITH_CMSERVER=OFF and $CUBRID has no cub_manager, no conf/cm.conf and no
+# log/manager. Upstream CI builds on an older glibc where sysctl still exists, so
+# none of this is visible there and none of these cases are upstream's to exclude.
+#
+# Two shapes are on this list, both measured in a 24-slot full run:
+#
+#   - the case drives the manager itself (cub_manager, cm.conf, cm_httpd.conf, or
+#     an HTTPS call to the CMS port 443). 16 cases.
+#   - the case does not, but its expected output records what `cubrid service`
+#     prints on a full install. Without the manager that command says
+#     "cubrid manager server is not installed." where the answer says
+#     "cubrid manager server start: success" or "cubrid service is not running".
+#     6 cases.
+#
+# Delete this file from testcase_exclude_from_file the moment a build with the
+# manager exists here; every one of these is expected to pass with it.
+
+shell/_01_utility/_34_cub_auto/bug_xdbms212
+shell/_01_utility/_35_cub_js/bug_xdbms212
+shell/_01_utility/_37_cubrid/_03_manager
+shell/_03_itrack/bug_xdbms245
+shell/_05_addition/bug_xdbms270
+shell/_05_addition/bug_xdbms_sus315
+shell/_06_issues/_12_1h/bug_bts_7878
+shell/_06_issues/_13_1h/bug_bts_9176
+shell/_06_issues/_14_1h/bug_bts_13279
+shell/_06_issues/_14_1h/bug_bts_13476
+shell/_06_issues/_15_1h/bug_bts_15964
+shell/_06_issues/_21_1h/cbrd_23892
+shell/_06_issues/_24_1h/cbrd_25232
+shell/_06_issues/_24_2h/cbrd_25511
+shell/_06_issues/_25_1h/cbrd_26020
+shell/_06_issues/_25_2h/cbrd_26247
+shell/_06_issues/_26_2h/cbrd_26777
+shell/_11_codecoverage/system_parameter/index_scan_oid_buffer_size
+shell/_35_cherry/issue_21654_server_side_loaddb/loaddb_CS/_06_issues/_12_1h/bug_bts_7878
+shell/_35_cherry/issue_21654_server_side_loaddb/loaddb_CS/_06_issues/_14_1h/bug_bts_11676
+shell/_39_fig_cake/cbrd_25295
+shell/_39_fig_cake/cbrd_25693

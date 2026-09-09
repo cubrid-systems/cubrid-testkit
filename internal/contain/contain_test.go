@@ -29,12 +29,15 @@ func TestNothingHappensUnlessAsked(t *testing.T) {
 	if err := Setup(); err != nil {
 		t.Errorf("Setup tried to do something outside the namespace: %v", err)
 	}
+	if code := Init(); code != -1 {
+		t.Errorf("Init returned %d rather than -1 when there was nothing to contain", code)
+	}
 }
 
-// The re-executed process is PID 1 of its own namespace, keeps $USER, sees its
-// own /proc, and collects orphans. Skipped where the kernel does not allow an
-// unprivileged user namespace, because that is a property of the machine rather
-// than of this code.
+// The re-executed process runs under an init of its own rather than being one,
+// is root in the namespace, sees its own /proc, and has its orphans collected.
+// Skipped where the kernel does not allow an unprivileged user namespace,
+// because that is a property of the machine rather than of this code.
 func TestAContainedRunIsAloneAndReaps(t *testing.T) {
 	if _, err := os.Stat("/proc/self/ns/pid"); err != nil {
 		t.Skip("no namespace support here")
@@ -53,7 +56,19 @@ func TestAContainedRunIsAloneAndReaps(t *testing.T) {
 	}
 
 	got := string(out)
-	for _, want := range []string{"pid=1", "user=probe-user", "proc=ok", "reaped=yes"} {
+	// ispid1=no is the fix, stated as an assertion: PID 1 is the init that
+	// collects orphans, and the process that runs commands is its child. Were
+	// they one process, its Wait4(-1) would take os/exec's own children and the
+	// case would be thrown away as "waitid: no child processes". reaped=yes says
+	// the orphan is still collected -- by the init, on this process's behalf.
+	//
+	// Not pid=2: threads take numbers from the same space, and the Go runtime
+	// has several before it forks anything.
+	//
+	// user=root because inside() says so, and says why at length: in here the
+	// processes really are root's, and 23 of the corpus's 24 uses of $USER are a
+	// process or IPC filter.
+	for _, want := range []string{"ispid1=no", "user=root", "proc=ok", "reaped=yes"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in probe output:\n%s", want, got)
 		}
@@ -75,7 +90,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
@@ -85,13 +99,19 @@ func main() {
 	if code := contain.Enter(); code >= 0 {
 		os.Exit(code)
 	}
+	if code := contain.Init(); code >= 0 {
+		os.Exit(code)
+	}
 	if err := contain.Setup(); err != nil {
 		fmt.Println("proc=failed", err)
 		return
 	}
 	fmt.Println("proc=ok")
-	contain.Reap()
-	fmt.Println("pid=" + strconv.Itoa(os.Getpid()))
+	if os.Getpid() == 1 {
+		fmt.Println("ispid1=yes")
+	} else {
+		fmt.Println("ispid1=no", os.Getpid())
+	}
 	fmt.Println("user=" + os.Getenv("USER"))
 
 	// Orphan a process and give the reaper a chance at it.
@@ -114,17 +134,26 @@ func main() {
 	} else {
 		fmt.Println("alone=no", lines)
 	}
-	_ = syscall.Getpid()
 }
 `
-	if err := os.WriteFile(dir+"/main.go", []byte(src), 0o644); err != nil {
+	// Inside the module, or the probe cannot import internal/ and the build
+	// fails -- which buildProbe reports as a skip, so this test said nothing at
+	// all for as long as it has existed. The leading dot keeps the directory out
+	// of ./... while go build still takes the file by name.
+	root := mustModuleRoot(t)
+	pkg, err := os.MkdirTemp(root, ".probe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(pkg) })
+	if err := os.WriteFile(pkg+"/main.go", []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bin := dir + "/probe"
-	build := exec.Command("go", "build", "-o", bin, dir+"/main.go")
-	build.Dir = mustModuleRoot(t)
+	build := exec.Command("go", "build", "-o", bin, pkg+"/main.go")
+	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Skipf("cannot build the probe here: %v\n%s", err, out)
+		t.Fatalf("cannot build the probe: %v\n%s", err, out)
 	}
 	return bin
 }
@@ -255,26 +284,29 @@ func TestASignalIsNotTheSameAsNothingToContain(t *testing.T) {
 	// Exited() can.
 }
 
-// Wait4(-1) reaps any child, including the ones os/exec is waiting on: its Wait
+// Wait4(-1) takes any child, including the ones os/exec is waiting on: its Wait
 // is a waitid peek followed by a wait4, and losing that race gives ECHILD --
 // "waitid: no child processes" -- which is neither an ExitError nor
-// ErrWaitDelay, so the case's verdict is discarded as a runtime error.
+// ErrWaitDelay, so the case's verdict is discarded as a runtime error. Two of
+// the first 53 cases judged in a 24-slot run died that way and nothing else did.
 //
-// The reaper is only needed when this process is PID 1 of a namespace, because
-// that is the only time orphans reparent to it. Under the shell wrapper this
-// project uses, PID 1 is a shell and does the reaping itself.
-func TestTheReaperOnlyRunsWhenThisProcessIsPidOne(t *testing.T) {
+// So the process that runs commands must never be the one collecting orphans.
+// Init is the split, and here -- where this process is not PID 1 of a namespace
+// -- it must install nothing at all.
+func TestTheProcessThatRunsCommandsCollectsNoOrphans(t *testing.T) {
 	if os.Getpid() == 1 {
-		t.Skip("this process is PID 1, which is the case Reap is for")
+		t.Skip("this process is PID 1, which is the case Init is for")
 	}
 	t.Setenv(Env, "1")
+	t.Setenv(insideEnv, "1")
 
-	// Reap must install nothing. Demonstrated by the thing the reaper breaks:
-	// a child started and waited for while SIGCHLD traffic is going on.
-	Reap()
+	if code := Init(); code != -1 {
+		t.Fatalf("Init returned %d in a process that is not PID 1 of a namespace", code)
+	}
 
+	// Demonstrated by the thing a reaper here would break: children started and
+	// waited for while SIGCHLD traffic is going on.
 	for i := 0; i < 20; i++ {
-		// Background noise: children that exit while we wait for another.
 		go func() { _ = exec.Command("true").Run() }()
 	}
 	for i := 0; i < 20; i++ {

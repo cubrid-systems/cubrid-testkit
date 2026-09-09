@@ -184,46 +184,74 @@ func shellForSh() string {
 	return want
 }
 
-// Reap collects orphans for as long as the process runs.
+// initEnv marks the process the namespace's init forked to do the work.
+const initEnv = "TESTKIT_CONTAINED_INIT"
+
+// Init makes PID 1 of the namespace an init and nothing else: it starts this
+// program again and then does nothing but collect orphans until that child
+// exits, whose exit code it returns. Every other process gets -1 and carries on.
 //
-// PID 1 of a namespace inherits every orphan in it, and a daemon that
-// double-forks becomes one. Left unreaped it stays a zombie its parent never
-// learns about -- which is how a `cubrid server stop` was seen polling for a
-// server that had already exited, for twenty-three minutes.
+// The split is the whole point, and it is what the previous shape got wrong.
+// Collecting orphans means Wait4(-1), which takes *any* child -- including the
+// ones os/exec is waiting for. os/exec then gets ECHILD, which is neither an
+// ExitError nor ErrWaitDelay, so the case's verdict is thrown away as
+// "Runtime error (local run: waitid: no child processes)". Measured: the first
+// two failures of a 24-slot run were that and nothing else, two of 53 judged.
 //
-// Only when this process actually is PID 1, because that is the only time
-// orphans reparent to it. Under the shell wrapper this project runs with, PID 1
-// is a shell -- the wrapper says so itself, "PID 1 stays a shell, and that is
-// load-bearing rather than incidental" -- so the reaper installed here was
-// collecting nothing and only Wait4(-1)-ing over os/exec's own children.
+// The reaping cannot simply be dropped instead. PID 1 inherits every orphan in
+// the namespace, a daemon that double-forks becomes one, and an unreaped zombie
+// is how a `cubrid server stop` was seen polling for a server that had already
+// exited, for twenty-three minutes. So the reaping stays, and moves to a
+// process that runs no commands of its own and therefore has nothing to steal.
 //
-// Whether that ever cost a verdict is not established. Wait4(-1) reaps any
-// child, and losing that race would give os/exec ECHILD -- "waitid: no child
-// processes", which is neither an ExitError nor ErrWaitDelay, so the case's
-// verdict is discarded as a runtime error. That error does appear in runs, twice
-// in three failures reproduced from a 24-slot run. But a probe that started
-// 1,600 children against the unconditional reaper stole none, because os/exec
-// waits on a pidfd where the kernel provides one, and this kernel does. So the
-// mechanism is available and unproven; what is certain is that the reaper had
-// nothing to collect here, and a Wait4(-1) that can only interfere should not
-// run.
-func Reap() {
-	if !Active() || os.Getpid() != 1 {
-		return
+// It was dormant until now: this ran under a wrapper whose PID 1 was a shell,
+// so `os.Getpid() != 1` returned before installing anything. Containment
+// entered through Enter makes this process PID 1 for the first time.
+func Init() int {
+	if !Active() || os.Getpid() != 1 || os.Getenv(initEnv) == "1" {
+		return -1
 	}
-	ch := make(chan os.Signal, 8)
-	signal.Notify(ch, syscall.SIGCHLD)
+	self, err := os.Executable()
+	if err != nil {
+		fail("cannot find own path: %v", err)
+	}
+	child, err := syscall.ForkExec(self, os.Args, &syscall.ProcAttr{
+		Env:   append(os.Environ(), initEnv+"=1"),
+		Files: []uintptr{0, 1, 2},
+	})
+	if err != nil {
+		fail("cannot start the contained run: %v", err)
+	}
+
+	// PID 1 of a namespace receives only the signals it handles, and the run has
+	// to stay stoppable from outside it.
+	sig := make(chan os.Signal, 4)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		for range ch {
-			for {
-				var ws syscall.WaitStatus
-				pid, err := syscall.Wait4(-1, &ws, syscall.WNOHANG, nil)
-				if pid <= 0 || err != nil {
-					break
-				}
+		for s := range sig {
+			if n, ok := s.(syscall.Signal); ok {
+				_ = syscall.Kill(child, n)
 			}
 		}
 	}()
+
+	for {
+		var ws syscall.WaitStatus
+		pid, err := syscall.Wait4(-1, &ws, 0, nil)
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			fail("cannot wait in the namespace: %v", err)
+		}
+		if pid != child {
+			continue // an orphan, which is what this process is here for
+		}
+		if ws.Signaled() {
+			return 128 + int(ws.Signal())
+		}
+		return ws.ExitStatus()
+	}
 }
 
 func asExit(err error, target **exec.ExitError) bool {

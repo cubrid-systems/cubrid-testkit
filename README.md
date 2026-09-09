@@ -449,6 +449,18 @@ Two are implemented, and they answer different halves of that failure:
 | `heavy_in_flight_max` | at most N of the heaviest tenth run at once. Default `slots/4` | this is the rule for the **start**. A ceiling is empty when the first case begins, so a rule that watches the ceiling admits every slot at once |
 | `scenario_ram_high_water` | nothing new starts while the corpus tmpfs is over N% full. Default 80 | feedback, not prediction. It is late by construction -- it can only stop the next case, never the ones already running |
 
+**They are not the same kind of rule, and treating them alike cost half an hour.**
+The ceiling is a **constraint**: crossing it fails cases, so it never yields. The
+heavy cap is a **preference about order**: it exists so that N slots do not start
+N heavy cases at once, and at the tail — where every case left is heavy — holding
+to it means idling slots through exactly the long tail that ordering
+longest-first exists to prevent. Measured: a 24-slot run finished its last 150
+cases six at a time with eighteen slots idle.
+
+So the queue scans for a case both rules allow; failing that, for one the
+constraint allows. The second scan only ever finds something at the tail, because
+while ordinary work remains the first scan finds it.
+
 Feedback rather than prediction is deliberate. The run does measure per-directory
 footprints, and the twenty-four cases at the head of that queue measured 377 MB
 between them while actually filling 25,584. `case_sizes` records what a directory

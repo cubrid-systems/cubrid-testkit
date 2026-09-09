@@ -253,3 +253,34 @@ func TestTheRealShellCanOpenSlots(t *testing.T) {
 		t.Error("NewShell set Channels, which makes the run look like a caller supplied its own")
 	}
 }
+
+// The registry gets an overlay of its own only when it is outside the install.
+// CUBRID's own default puts it at $CUBRID/databases -- and CTP's reset cleans
+// and restores it there -- in which case the install's overlay already covers
+// it and a second one would nest overlayfs on overlayfs for nothing.
+func TestTheRegistryIsCoveredByTheInstallWhenItIsInsideIt(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		parents []string
+		dir     string
+		want    bool
+	}{
+		{"CUBRID's default layout", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases", true},
+		{"the same directory", []string{"/opt/CUBRID"}, "/opt/CUBRID", true},
+		{"a registry kept outside", []string{"/opt/CUBRID"}, "/var/db/registry", false},
+		{"a sibling, not a child", []string{"/opt/CUBRID"}, "/opt/CUBRID-old", false},
+		// The reason this is not a string prefix test: "/a/bc" starts with
+		// "/a/b" and is not inside it. A prefix check would skip a real overlay
+		// and the slot would share the machine's registry with every other one.
+		{"a name that merely starts the same", []string{"/a/b"}, "/a/bc", false},
+		{"a path that climbs back out", []string{"/opt/CUBRID"}, "/opt/CUBRID/../other", false},
+		{"nothing covered yet", nil, "/opt/CUBRID", false},
+		{"deeper inside", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases/x/y", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := under(c.parents, c.dir); got != c.want {
+				t.Errorf("under(%q, %q) = %v, want %v", c.parents, c.dir, got, c.want)
+			}
+		})
+	}
+}

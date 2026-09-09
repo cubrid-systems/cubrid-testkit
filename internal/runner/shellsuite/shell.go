@@ -593,16 +593,22 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 		}
 		opened = append(opened, ns)
 
-		// $CUBRID and the registry are the two trees a case writes to, and the
-		// registry is outside the install, so it takes an overlay of its own.
+		// $CUBRID and the registry are the two trees a case writes to. The
+		// registry takes an overlay of its own only when it is outside the
+		// install; where CUBRID puts it by default -- $CUBRID/databases, which
+		// is also where CTP's own reset cleans and restores it -- the install's
+		// overlay already covers it, and a second overlay on a subdirectory of
+		// the first would nest them for nothing.
+		var covered []string
 		for _, dir := range []string{os.Getenv("CUBRID"), os.Getenv("CUBRID_DATABASES")} {
-			if dir == "" {
+			if dir == "" || under(covered, dir) {
 				continue
 			}
 			if err := ns.Overlay(dir, filepath.Join(root, label, filepath.Base(dir))); err != nil {
 				closeAll()
 				return nil, nil, err
 			}
+			covered = append(covered, dir)
 		}
 		// With lanes, the corpus overlay is this slot's rather than the run's, and
 		// where its upper layer sits is what the lane means: memory for the fast
@@ -869,6 +875,32 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 		return nil, nil, nil, err
 	}
 	return cases, macroSkipped, tempSkipped, nil
+}
+
+// under reports whether dir is one of parents or sits inside one of them.
+//
+// Comparing cleaned strings is not enough: "/a/bc" starts with "/a/b" and is
+// not inside it. filepath.Rel answers the question the mount actually asks --
+// is there a path from the parent down to dir that never climbs.
+func under(parents []string, dir string) bool {
+	d, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	for _, p := range parents {
+		a, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(a, d)
+		if err != nil {
+			continue
+		}
+		if rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Shell) recordSkipped(report feedback.Feedback, cases []string, kind feedback.SkipType) {

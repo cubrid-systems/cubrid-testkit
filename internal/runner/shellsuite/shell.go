@@ -836,12 +836,26 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 		}
 	}
 
-	if file := strings.TrimSpace(cfg.GetOr("testcase_exclude_from_file", "")); file != "" {
-		out, runErr := runIn(ctx, ch, "cat "+file)
-		if runErr != nil {
-			return nil, nil, nil, runErr
+	// More than one file, comma-separated, because the reasons are not one
+	// reason. The corpus's own daily_regression list is upstream's judgement
+	// about a case; a list of cases this machine cannot run is a fact about the
+	// machine, and it has to be readable and deletable on its own -- see
+	// exclusions/README.md. CTP took a single path and that still works.
+	if files := ExcludeFiles(cfg.GetOr("testcase_exclude_from_file", "")); len(files) > 0 {
+		var patterns []string
+		for _, file := range files {
+			out, runErr := runIn(ctx, ch, "cat "+shQuote(file))
+			if runErr != nil {
+				return nil, nil, nil, runErr
+			}
+			from := ParseExcluded(out.Output())
+			if len(files) > 1 {
+				fmt.Printf("[INFO] %d exclusion(s) from %s\n", len(from), file)
+			}
+			patterns = append(patterns, from...)
 		}
-		patterns := ParseExcluded(out.Output())
+		// The two lines around the count are CTP's and are frozen
+		// (docs/concept/external-surface-freeze.md); the count is the total.
 		fmt.Println("****************************************")
 		fmt.Printf("# OF EXCLUDED = %d\n", len(patterns))
 		fmt.Println("****************************************")

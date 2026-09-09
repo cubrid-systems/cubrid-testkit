@@ -30,6 +30,17 @@ func TestTheShimIsWrittenOnlyWhereTheLinkerDropsLibraries(t *testing.T) {
 	if !drops {
 		return
 	}
+	// Every driver that exists, not only the one CTP's helper names: two cases
+	// build C++ clients with makefiles of their own, and they were the only link
+	// failures left when this covered gcc alone.
+	for _, name := range Drivers {
+		if _, lerr := exec.LookPath(name); lerr != nil {
+			continue
+		}
+		if _, serr := os.Stat(filepath.Join(dir, name)); serr != nil {
+			t.Errorf("%s is on this machine and has no shim: %v", name, serr)
+		}
+	}
 	if _, err := os.Stat(filepath.Join(dir, "gcc")); err != nil {
 		t.Fatalf("the shim directory does not hold a gcc: %v", err)
 	}
@@ -66,8 +77,10 @@ func TestTheShimCanBeTurnedOff(t *testing.T) {
 	if err != nil || got != "" {
 		t.Fatalf("%s must leave the toolchain alone: %q %v", LinkerEnv, got, err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "gcc")); err == nil {
-		t.Error("a shim was written with the switch off")
+	for _, name := range Drivers {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			t.Errorf("a %s shim was written with the switch off", name)
+		}
 	}
 }
 

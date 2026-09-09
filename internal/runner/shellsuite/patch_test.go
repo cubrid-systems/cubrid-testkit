@@ -1,11 +1,14 @@
 package shellsuite
 
 import (
+	"context"
 	"os"
-	"os/exec"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 )
 
 func writeFile(t *testing.T, path, body string) {
@@ -82,20 +85,20 @@ func TestTheCaseIsPutBack(t *testing.T) {
 -echo hi
 +echo hello
 `)
-	if out, err := exec.Command("bash", "-c", ApplyScript(dir, patch)).CombinedOutput(); err != nil {
+	if out, err := osexec.Command("bash", "-c", ApplyScript(dir, patch)).CombinedOutput(); err != nil {
 		t.Fatalf("apply: %v: %s", err, out)
 	}
 	if b, _ := os.ReadFile(script); string(b) == original {
 		t.Fatal("the patch did not change the case")
 	}
-	if out, err := exec.Command("bash", "-c", RevertScript(dir, patch)).CombinedOutput(); err != nil {
+	if out, err := osexec.Command("bash", "-c", RevertScript(dir, patch)).CombinedOutput(); err != nil {
 		t.Fatalf("revert: %v: %s", err, out)
 	}
 	if b, _ := os.ReadFile(script); string(b) != original {
 		t.Errorf("the case was not put back:\n%q", b)
 	}
 	// A second revert has nothing to undo and must not re-apply it backwards.
-	_ = exec.Command("bash", "-c", RevertScript(dir, patch)).Run()
+	_ = osexec.Command("bash", "-c", RevertScript(dir, patch)).Run()
 	if b, _ := os.ReadFile(script); string(b) != original {
 		t.Errorf("reverting twice changed the case:\n%q", b)
 	}
@@ -124,7 +127,7 @@ func TestApplyRefusesAPatchThatDoesNotFit(t *testing.T) {
 +echo hello
 `)
 	before, _ := os.ReadFile(filepath.Join(dir, "x.sh"))
-	if err := exec.Command("bash", "-c", ApplyScript(dir, patch)).Run(); err == nil {
+	if err := osexec.Command("bash", "-c", ApplyScript(dir, patch)).Run(); err == nil {
 		t.Fatal("a patch that does not apply must fail")
 	}
 	after, _ := os.ReadFile(filepath.Join(dir, "x.sh"))
@@ -151,7 +154,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 +echo hello
 `)
 	for i := 0; i < 2; i++ {
-		if out, err := exec.Command("bash", "-c", ApplyScript(dir, patch)).CombinedOutput(); err != nil && i == 0 {
+		if out, err := osexec.Command("bash", "-c", ApplyScript(dir, patch)).CombinedOutput(); err != nil && i == 0 {
 			t.Fatalf("first apply failed: %v: %s", err, out)
 		}
 	}
@@ -198,11 +201,11 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 		// not get to write to it.
 		work := t.TempDir()
 		src := filepath.Dir(caseScript)
-		if out, cerr := exec.Command("cp", "-a", src+"/.", work).CombinedOutput(); cerr != nil {
+		if out, cerr := osexec.Command("cp", "-a", src+"/.", work).CombinedOutput(); cerr != nil {
 			t.Fatalf("cannot copy %s: %v: %s", src, cerr, out)
 		}
 		abs, _ := filepath.Abs(path)
-		if out, aerr := exec.Command("bash", "-c", ApplyScript(work, abs)).CombinedOutput(); aerr != nil {
+		if out, aerr := osexec.Command("bash", "-c", ApplyScript(work, abs)).CombinedOutput(); aerr != nil {
 			t.Errorf("%s no longer applies -- the case has probably been fixed upstream, "+
 				"so delete the patch:\n%s", rel, out)
 			return nil
@@ -210,7 +213,7 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 		// And the result has to be a shell script that parses, since the whole
 		// point is that it runs.
 		patched := filepath.Join(work, filepath.Base(caseScript))
-		if out, berr := exec.Command("bash", "-n", patched).CombinedOutput(); berr != nil {
+		if out, berr := osexec.Command("bash", "-n", patched).CombinedOutput(); berr != nil {
 			t.Errorf("%s produces a script bash will not parse: %v: %s", rel, berr, out)
 		}
 		return nil
@@ -302,5 +305,31 @@ func TestTheRunRecordsWhatItActuallyPatched(t *testing.T) {
 	// Sorted, so two runs of the same corpus produce a file that diffs cleanly.
 	if strings.Index(text, "_06_issues/y") > strings.Index(text, "_08_shard/x") {
 		t.Error("the record should be sorted")
+	}
+}
+
+// A command's own exit status and the runner's ability to run it are different
+// facts, and Run keeps them apart: a non-zero exit comes back in the Result with
+// a nil error. Checking only the error therefore gets both cases wrong -- it
+// calls a transport failure "the case changed upstream", and it calls a patch
+// that really did not apply a success, running the case unpatched while the run
+// claims it was patched.
+func TestAFailedPatchAndAFailedCommandAreDifferent(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "x.sh"), "this is not what the patch expects\n")
+	patch := filepath.Join(dir, "p.patch")
+	writeFile(t, patch, `--- x.sh
++++ x.sh
+@@ -1 +1 @@
+-echo hi
++echo hello
+`)
+	ch := &exec.Local{}
+	res, err := ch.Run(context.Background(), ApplyScript(dir, patch))
+	if err != nil {
+		t.Fatalf("the command ran, so err must be nil; the failure belongs in the Result: %v", err)
+	}
+	if res.ExitCode == 0 {
+		t.Fatal("a patch that does not apply must leave a non-zero exit code in the Result")
 	}
 }

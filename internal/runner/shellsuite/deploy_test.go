@@ -231,3 +231,52 @@ func TestTheSweepSelectsByNamespaceWhenContained(t *testing.T) {
 		}
 	}
 }
+
+// The reset is rooted at $CUBRID and every command in it is destructive. With
+// the variable empty the paths do not fail, they become absolute paths at the
+// root of the filesystem -- and `find ${CUBRID}/ -name "core"` becomes `find /`,
+// which deletes every directory named exactly "core" on the machine.
+//
+// It ran. 69 of them went across this machine's /data, including
+// node_modules/undici/lib/core out of a VS Code server. Files called core.js
+// survived, which is the signature of that command and of nothing else.
+func TestTheResetRefusesWithoutACubridInstall(t *testing.T) {
+	dir := t.TempDir()
+	// A directory named exactly "core", the shape the sweep destroys, somewhere
+	// the script would reach if it ran from the root.
+	victim := filepath.Join(dir, "node_modules", "undici", "lib", "core")
+	if err := os.MkdirAll(victim, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(victim, "util.js"), []byte("//\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, c := range []struct{ name, cubrid string }{
+		{"unset", ""},
+		{"empty", `""`},
+		{"a directory that is not an install", dir},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			script := "set -e\nunset CUBRID\n"
+			if c.cubrid != "" {
+				script = "set -e\nexport CUBRID=" + c.cubrid + "\n"
+			}
+			// Run from the temporary directory so that a find rooted at "/" would
+			// still have to walk to reach the victim -- what is being asserted is
+			// that the script exits before any of it runs.
+			cmd := exec.Command("bash", "-c", script+RestoreScript())
+			cmd.Dir = dir
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("the reset must refuse; it returned success:\n%s", out)
+			}
+			if !strings.Contains(string(out), "refuses to run") {
+				t.Errorf("the refusal should say why:\n%s", out)
+			}
+			if _, serr := os.Stat(victim); serr != nil {
+				t.Fatalf("a directory named core was deleted: %v", serr)
+			}
+		})
+	}
+}

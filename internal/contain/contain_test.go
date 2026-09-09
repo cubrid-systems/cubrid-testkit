@@ -2,12 +2,15 @@ package contain
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // Off is the default, and this is the test that says so: a run that did not ask
@@ -107,6 +110,12 @@ func main() {
 		return
 	}
 	fmt.Println("proc=ok")
+	// Held open when asked, so a test can kill the process that contains this
+	// one and see whether this one goes with it.
+	if hold := os.Getenv("PROBE_HOLD"); hold != "" {
+		_ = os.WriteFile(hold, []byte("ready"), 0o644)
+		select {}
+	}
 	if os.Getpid() == 1 {
 		fmt.Println("ispid1=yes")
 	} else {
@@ -318,4 +327,92 @@ func TestTheProcessThatRunsCommandsCollectsNoOrphans(t *testing.T) {
 			t.Fatalf("wrong output: %q", out)
 		}
 	}
+}
+
+// Killing the outer process must take the namespace with it. The child is PID 1
+// of a PID namespace, so nothing outside can see it by its own number: the
+// result tree's lock file named a "pid 7" that does not exist out here, and
+// three times in one session a killed run left the next one refused with
+// "another run already has ...".
+//
+// SIGKILL, because that is the case forwarding cannot cover and the one that
+// actually happened.
+func TestKillingTheRunnerTakesTheNamespaceWithIt(t *testing.T) {
+	if _, err := os.Stat("/proc/self/ns/pid"); err != nil {
+		t.Skip("no namespace support here")
+	}
+	probe := buildProbe(t)
+
+	marker := filepath.Join(t.TempDir(), "ready")
+	cmd := exec.Command(probe)
+	cmd.Env = append(os.Environ(), Env+"=1", "USER=probe-user", "PROBE_HOLD="+marker)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}()
+
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Skipf("the probe never contained itself here: %v", err)
+	}
+
+	// From inside, the contained process is pid 1 and says so; its host pid is
+	// only visible out here, as a child of the process that made it.
+	inner := childrenOf(t, cmd.Process.Pid)
+	if len(inner) == 0 {
+		t.Skip("the kernel did not list the child; /proc children needs CONFIG_PROC_CHILDREN")
+	}
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = cmd.Process.Wait()
+
+	for _, pid := range inner {
+		gone := false
+		for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+			if err := syscall.Kill(pid, 0); err != nil {
+				gone = true
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if !gone {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("pid %d outlived the process that contained it; a run killed this way "+
+				"keeps the result tree's lock, and the next run is refused by a pid "+
+				"that does not exist outside the namespace", pid)
+		}
+	}
+}
+
+// childrenOf reads the kernel's own list rather than scanning /proc for a parent,
+// which races with the exit this test is about.
+func childrenOf(t *testing.T, pid int) []int {
+	t.Helper()
+	tasks, err := filepath.Glob(fmt.Sprintf("/proc/%d/task/*/children", pid))
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, f := range tasks {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		for _, s := range strings.Fields(string(b)) {
+			if n, err := strconv.Atoi(s); err == nil {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
 }

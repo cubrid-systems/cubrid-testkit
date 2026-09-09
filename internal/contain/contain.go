@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 )
@@ -64,8 +65,40 @@ func Enter() int {
 		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getuid(), Size: 1}},
 		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: os.Getgid(), Size: 1}},
 		GidMappingsEnableSetgroups: false,
+		// Killing this process must not leave the run behind. The child is PID
+		// 1 of a PID namespace, so nothing outside can see it: `ps` shows the
+		// argv of a process that reports pid 1 in there, and the result tree's
+		// lock file names a "pid 7" that does not exist out here. Observed
+		// three times in one session -- the outer process killed, the inner one
+		// still holding the lock, and the next run refused with
+		// "another run already has ...".
+		//
+		// Pdeathsig is for SIGKILL, which cannot be forwarded. It is delivered
+		// when the *thread* that made the child goes away, not the process,
+		// which is why this goroutine holds its OS thread until Wait returns:
+		// a thread the runtime retired would kill a healthy run.
+		Pdeathsig: syscall.SIGKILL,
 	}
-	if err := cmd.Run(); err != nil {
+
+	// And the signals that can be forwarded are, so that a stop is a stop and
+	// not a kill: the child's own init passes them on to the work, which has a
+	// signal.NotifyContext of its own.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := cmd.Start(); err != nil {
+		fail("cannot contain the run: %v", err)
+	}
+	sig := make(chan os.Signal, 4)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sig)
+	go func() {
+		for s := range sig {
+			if n, ok := s.(syscall.Signal); ok && cmd.Process != nil {
+				_ = cmd.Process.Signal(n)
+			}
+		}
+	}()
+	if err := cmd.Wait(); err != nil {
 		var ee *exec.ExitError
 		if ok := asExit(err, &ee); ok {
 			// Exited() before ExitCode(). A process killed by a signal has no

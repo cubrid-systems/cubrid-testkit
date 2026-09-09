@@ -74,11 +74,30 @@ kv "log_volume_size" "${logvol_mb} MB"
 kv "db_volume_size" "${dbvol_mb} MB"
 
 # ---- what one slot costs --------------------------------------------------
-# server ~= 85 MB + 0.54 * (data_buffer + log_buffer), fitted to three points
-# measured on this suite: 768 MB of buffers gave 498 MB of RSS, 80 gave 141,
-# 36 gave 102. Reducing the buffers is worth less than it looks -- sixteen times
-# smaller buffers took the server from 498 MB to 102, not to 30.
-server_mb=$(( 85 + (54 * (data_mb + log_mb)) / 100 ))
+# server ~= 157 MB + 0.26 * (data_buffer + log_buffer).
+#
+# Re-fitted, because the earlier 85 + 0.54x was off by 43% at the settings this
+# suite actually runs with -- it said 122 MB where the server measures 175, and
+# a slot count built on that is a slot count the machine cannot hold. Measured
+# again on one server under the same insert-and-sort workload, taking Pss rather
+# than Rss so that shared pages are not counted once per slot:
+#
+#   buffers   Pss     old formula   this one
+#     516 M   292 MB    364 MB       291 MB
+#     132 M   192 MB    156 MB       191 MB
+#      68 M   175 MB    122 MB       175 MB
+#      20 M   163 MB     96 MB       162 MB
+#
+# The shape is what matters: a floor near 157 MB that no parameter reaches, and
+# a quarter of the buffers on top. Cutting data_buffer_size from 64M to 16M buys
+# 12 MB, and max_clients from 100 to 10 buys another 12 (124 threads to 44 --
+# the stacks are lazily allocated, so they cost almost nothing resident).
+# Neither is a way to fit more slots in.
+#
+# What a server reaches under a real case is a different number again: servers
+# in a 24-slot run measured 456 MB Pss each. That is the case's working set --
+# its data, its sorts, its temporary volumes -- and it is not a setting.
+server_mb=$(( 157 + (26 * (data_mb + log_mb)) / 100 ))
 
 # case database ~= 195 MB + log_volume_size, and that one is not a fit so much
 # as an identity: 512M gave 707 MB on disk, 64M gave 259, 20M gave 215.

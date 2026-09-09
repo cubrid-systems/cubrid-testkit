@@ -176,7 +176,10 @@ func (b *Board) reset() {
 	// The lanes and the slots are the run's shape rather than its progress, so
 	// they are rebuilt empty but keep their membership: a slot that existed at
 	// the end existed at the start.
-	for slot := range b.bySlot {
+	// From laneOf, which every slot registers itself in when it opens -- bySlot
+	// only exists once a case has finished, so using it would show no slots at
+	// all for the first minutes of a run.
+	for slot := range b.laneOf {
 		b.bySlot[slot] = &tally{}
 	}
 	for lane := range b.byLane {
@@ -529,6 +532,11 @@ type slotView struct {
 	Lane string `json:"lane"`
 	Case string `json:"case"`
 	Held int    `json:"held"`
+	// Plan is what the case took last time, so a case that is running far past
+	// it is visible as it happens. Observed: a six-second case held a slot for
+	// 325 seconds and looked, on a table that lists only busy slots, exactly
+	// like a slot that was never given anything.
+	Plan int `json:"plan,omitempty"`
 }
 
 // laneView is one lane added up. Share is the fraction of the run's case-seconds
@@ -601,13 +609,32 @@ func (b *Board) snapshot() view {
 		per := elapsed / time.Duration(b.done)
 		v.Remain = int((per * time.Duration(b.total-b.done)).Seconds())
 	}
-	for slot, in := range b.running {
-		v.Slots = append(v.Slots, slotView{
-			Slot: slot, Lane: b.laneOf[slot], Case: in.Case,
-			Held: int(time.Since(in.Since).Seconds()),
-		})
+	// Every slot the run has, not only the busy ones. A table of busy slots
+	// makes a slot between cases indistinguishable from a slot that is stuck,
+	// and the same slots stay listed while the others come and go -- which reads
+	// as "those slots never get anything" when it is the opposite.
+	// Every slot the run has: the ones that registered a lane when they opened,
+	// and any that are running without having done so. bySlot is not the source
+	// -- it only exists once a case has finished, so it would show nothing at all
+	// for the first minutes of a run.
+	seen := make(map[string]bool, len(b.laneOf)+len(b.running))
+	for slot := range b.laneOf {
+		seen[slot] = true
 	}
-	sort.Slice(v.Slots, func(i, j int) bool { return v.Slots[i].Slot < v.Slots[j].Slot })
+	for slot := range b.running {
+		seen[slot] = true
+	}
+	for slot := range seen {
+		in, busy := b.running[slot]
+		row := slotView{Slot: slot, Lane: b.laneOf[slot]}
+		if busy {
+			row.Case = in.Case
+			row.Held = int(time.Since(in.Since).Seconds())
+			row.Plan = int(b.planned[in.Case].Seconds())
+		}
+		v.Slots = append(v.Slots, row)
+	}
+	sort.Slice(v.Slots, func(i, j int) bool { return slotLess(v.Slots[i].Slot, v.Slots[j].Slot) })
 	// The series runs to now, not to the last completion, so a stall is visible
 	// as it happens rather than only once something finishes.
 	b.count(time.Now())

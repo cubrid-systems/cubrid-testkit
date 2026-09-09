@@ -1,0 +1,15 @@
+--- bug_xdbms278.sh
++++ bug_xdbms278.sh
+@@ -7,7 +7,11 @@
+ 
+ init test
+ WINDOWS_NOT_SUPPORTED
+-cubrid_createdb testdb
++# testkit compatibility: this case took the volume size from cubrid.conf,
++# so its verdict depended on a setting it never named. CUBRID ships 512M and
++# the answers were written under it; a run that lowers it globally fails the
++# case. Say the size the case actually needs.
++cubrid_createdb --db-volume-size=512M testdb
+ cubrid server start testdb
+ 
+ csql --no-auto-commit -c "select * from db_class,db_attribute" -o record.txt testdb

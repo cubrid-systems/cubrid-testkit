@@ -1,0 +1,17 @@
+--- utility_06.sh
++++ utility_06.sh
+@@ -2,6 +2,14 @@
+ . $init_path/init.sh
+ init test
+ 
++
++# testkit compatibility: this case names a volume size on its own createdb,
++# but the volumes it then extends into take their size from cubrid.conf -- so
++# the verdict still depends on a global the case never named. CUBRID ships
++# 512M and the answers were written under it. cubrid.conf is restored before
++# every case, so this is the case's own setting and nothing else's.
++change_db_parameter "db_volume_size=512M"
++
+ db_name=db23608_util06
+ mkdir $db_name
+ cd $db_name

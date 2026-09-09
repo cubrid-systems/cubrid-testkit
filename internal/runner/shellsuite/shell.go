@@ -415,6 +415,36 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// preference about order: it stops N slots starting N heavy cases at once,
 	// and it must not be allowed to shape the tail, where taking a heavy case is
 	// the only thing left to do.
+	// The machine has to be able to hold the whole ceiling, not the gate.
+	//
+	// The gate stops *new* cases at highWater percent of scenario_ram_mb; the
+	// cases already running are free to fill the rest, and they do -- a 24-slot
+	// run with the gate at 80% finished with 22,528 MB of its 22,528 MB ceiling
+	// in use. So the number to compare against the machine is the ceiling
+	// itself, plus what the run's own processes take, and the first version of
+	// this check compared the gate instead. It stayed silent for a run that
+	// systemd-oomd then killed at 2,951 of 3,204 cases, with nothing in the
+	// run's own log to say why.
+	//
+	// perSlotMB is the floor a server measures at this suite's settings -- 157
+	// MB that no parameter reaches, plus a quarter of the buffers. It is a
+	// reserve rather than a prediction: a case's own working set is larger and
+	// is not knowable here. tools/sizing.sh computes the figure properly.
+	const perSlotMB = 175
+	if _, limit := corpus.Usage(); limit > 0 {
+		reserve := slots * perSlotMB
+		if avail := memAvailableMB(); avail > 0 && limit+reserve > avail {
+			fmt.Printf("[WARN] scenario_ram_mb=%d plus about %d MB for %d slots' servers is more "+
+				"than the %d MB this machine has available.\n", limit, reserve, slots, avail)
+			fmt.Printf("[WARN]   The gate at %d%% holds back new cases only; the ones already "+
+				"running can fill the ceiling, and a run that reaches it meets the OOM killer "+
+				"rather than the gate.\n", highWater)
+			if room := avail - reserve; room > 0 {
+				fmt.Printf("[WARN]   A ceiling at or below %d MB fits. tools/sizing.sh sizes it "+
+					"from the machine.\n", room)
+			}
+		}
+	}
 	hard := dispatch.NewHeadroom("the corpus tmpfs", corpus.Usage, highWater)
 	soft := dispatch.NewHeavyCap(heavy, heavyMax)
 	if hard != nil || soft != nil {
@@ -884,6 +914,31 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 		return nil, nil, nil, err
 	}
 	return cases, macroSkipped, tempSkipped, nil
+}
+
+// memAvailableMB is what the kernel says can be handed out without swapping,
+// which is the number the tmpfs gate has to stay under. Zero when it cannot be
+// read, and every caller treats that as "do not judge".
+func memAvailableMB() int {
+	b, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if !strings.HasPrefix(line, "MemAvailable:") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			return 0
+		}
+		kb, err := strconv.Atoi(f[1])
+		if err != nil {
+			return 0
+		}
+		return kb / 1024
+	}
+	return 0
 }
 
 // under reports whether dir is one of parents or sits inside one of them.

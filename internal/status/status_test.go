@@ -501,7 +501,16 @@ func TestTheTemplateCachePanelReadsTheStore(t *testing.T) {
 	// The store's own bookkeeping must not be counted as a template.
 	os.WriteFile(filepath.Join(store, ".plan"), []byte("aaaa1111\n"), 0o644)
 	os.WriteFile(filepath.Join(store, ".lk.aaaa1111"), nil, 0o644)
-	os.WriteFile(filepath.Join(store, ".used.123"), []byte("aaaa1111\nbbbb2222\naaaa1111\n"), 0o644)
+	used := filepath.Join(store, ".used.123")
+	os.WriteFile(used, []byte("aaaa1111\nbbbb2222\naaaa1111\n"), 0o644)
+	// Only this run's tallies are counted, and "this run" starts at
+	// WatchTemplates below -- so a fixture written before it has to be dated
+	// after it. Ahead rather than at now, because the two are the same instant
+	// and After is strict.
+	ahead := time.Now().Add(time.Minute)
+	if err := os.Chtimes(used, ahead, ahead); err != nil {
+		t.Fatal(err)
+	}
 
 	b := New(1)
 	b.WatchTemplates(store, 1024)

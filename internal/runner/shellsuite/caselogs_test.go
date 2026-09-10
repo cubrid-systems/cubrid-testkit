@@ -91,8 +91,8 @@ func TestWhatEachModeKeeps(t *testing.T) {
 // The expensive tier is the broker's SQL log, which is 99.6% of the log tree. A
 // passing case must not pay for it.
 func TestTheExpensiveTierIsOnlyForFailures(t *testing.T) {
-	ok := CaptureScript("/d", false)
-	nok := CaptureScript("/d", true)
+	ok := CaptureScript("/d", "/c/cases", false)
+	nok := CaptureScript("/d", "/c/cases", true)
 	for _, want := range []string{"log/server", "log/*.err"} {
 		if !strings.Contains(ok, want) {
 			t.Errorf("a passing case does not keep %s", want)
@@ -157,7 +157,7 @@ func TestNothingKeptSaysNothing(t *testing.T) {
 func TestAPathWithASpaceIsQuoted(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "a b", "case")
-	script := CaptureScript(dest, true)
+	script := CaptureScript(dest, "/c/cases", true)
 	if !strings.Contains(script, `"`+dest+`/server"`) && !strings.Contains(script, `"`+dest+`"`) {
 		t.Errorf("the destination is not quoted:\n%s", script)
 	}

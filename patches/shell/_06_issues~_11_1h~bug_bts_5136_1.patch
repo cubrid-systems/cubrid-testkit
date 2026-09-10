@@ -1,0 +1,25 @@
+--- bug_bts_5136_1.sh
++++ bug_bts_5136_1.sh
+@@ -4,6 +4,22 @@
+ 
+ set -x
+ 
++# testkit compatibility: step 2 is "check createdb with default" -- it creates a
++# database with no size arguments and asserts the shipped defaults, by counting
++# the literals "512M" and "1.1G" in `ls -lh`. This run lowers db_volume_size and
++# log_volume_size so that many slots fit in memory, so step 2 measures the run
++# instead of the engine: the volumes come out at 20M and the two counts are 0
++# against the 3 and 1 the case wants.
++#
++# It never names a parameter, which is why no search of the corpus finds it: the
++# dependency is on the size the files come out, not on the setting. Its sibling
++# bug_bts_5136_4 greps cubrid.conf for the same values and has the same patch.
++#
++# Restoring the shipped values gives step 2 the baseline it asserts. Steps 3 and
++# 4 pass --db-volume-size and --log-volume-size of their own and are unaffected,
++# and cubrid.conf is restored before every case, so this reaches nothing else.
++sed -i 's/^[[:space:]]*db_volume_size[[:space:]]*=.*/db_volume_size=512M/;s/^[[:space:]]*log_volume_size[[:space:]]*=.*/log_volume_size=512M/' $CUBRID/conf/cubrid.conf
++
+ #step 1  check usage
+ cubrid_createdb > createdb.log 2>&1
+ 

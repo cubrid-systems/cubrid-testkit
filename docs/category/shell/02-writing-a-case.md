@@ -150,6 +150,7 @@ used.
 | processes | no CUBRID process is running |
 | `$init_path`, `$CTP_HOME`, `$PATH` | set, with CTP's scripts reachable |
 | `/bin/sh` | bash-compatible, even on a distribution where it is dash |
+| the commands | `java`, `javac`, `diff`, `wget`, `find`, `cat`, `kill`, `tar`, `expect` — the run checks them once and refuses a machine that is missing one |
 
 **Each case gets the machine back as it was.** The slot is reset before every case, so a case may
 change `cubrid.conf`, create databases and leave files behind — the next case does not see them.
@@ -182,6 +183,11 @@ wrapper.
 
 **A case that leaves a server running holds the slot.** `finish` stops it. If a case must exit
 early, call `finish` before it does.
+
+**A missing tool fails quietly.** 216 cases drive an interactive `csql` through an
+`expect` script and then grep its log. Without `expect` the case still runs, the `.exp` script does
+not, and the grep counts zero — a plain NOK, indistinguishable from a wrong answer. That is why the
+run checks for it at the start rather than letting each case discover it.
 
 **Do not commit `.result` files.** The run writes them into the overlay, not into the repository,
 but a stray one committed from a manual run will confuse the next reader.

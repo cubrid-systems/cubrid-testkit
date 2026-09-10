@@ -90,12 +90,19 @@ worth keeping for cases that *passed*:
 
 | tier | what | when | cost over 3,444 cases |
 |---|---|---|---|
-| **1. always** | `log/server/*`, `log/*.err`, `cubrid_utility.log` | every case, pass or fail | **~15 MB** |
-| **2. on failure** | the rest of the overlay upper layer — broker logs, `conf`, what the case left | NOK | MB per case, capped |
+| **1. always** | `log/server/*`, `log/*.err`, `cubrid_utility.log`, and what the case wrote in its own directory | every case, pass or fail | **~15 MB plus a few KB a case** |
+| **2. on failure** | the broker's SQL log and `cubrid.conf` as the case left it | NOK | MB per case, capped |
 | **3. on request** | core files, and the databases if asked | core, or explicitly | GB |
 
 Tier 1 needs no policy. Fifteen megabytes against a tmpfs measured in gigabytes is a rounding error,
 so the question of whether to keep it is not worth asking.
+
+**The case's own files are in tier 1, not tier 2**, and that boundary was moved after it got in the
+way. They are what actually says what happened -- `exp.log`, `load.log`, a diff -- and they are
+kilobytes. Putting them behind the verdict made the comparison this document argues for impossible:
+two expect cases that pass on one machine and fail on another could not be diagnosed, because the
+passing run kept nothing to compare against. The 1,979 bytes that were missing cost a run to
+recover. The broker log stays behind the verdict, because it is the megabytes.
 
 ## Where it goes
 

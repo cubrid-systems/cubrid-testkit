@@ -191,28 +191,36 @@ func CaptureScript(dest, caseDir string, failed bool) string {
 	fmt.Fprintf(&b, "cp -p ${CUBRID}/log/*.err %q/ 2>/dev/null\n", dest)
 	fmt.Fprintf(&b, "cp -p ${CUBRID}/log/cubrid_utility.log %q/ 2>/dev/null\n", dest)
 	fmt.Fprintf(&b, "cp -rp ${CUBRID}/log/pl %q/ 2>/dev/null\n", dest)
+	// What the case itself wrote, which is often the only thing that says what
+	// happened. tran_info runs `cubrid loaddb ... >load.log 2>&1` in the
+	// background and fails when it cannot observe it; load.log is where loaddb
+	// said why, and without this there is nothing to read.
+	//
+	// Kept for a case that passed as well as one that failed, because comparing
+	// the two is how an intermittent case is diagnosed and a passing run is half
+	// of that comparison. Measured while trying to redesign two expect scripts:
+	// they pass on one machine and fail on another, and the passing exp.log --
+	// 1,979 bytes -- was the missing half. It is cheap, unlike the broker log
+	// below, so it follows the mode rather than the verdict.
+	//
+	// The case's own directory, not the corpus around it: everything here goes
+	// to the corpus overlay and is dropped when the directory retires, so it is
+	// this or nothing. Databases are excluded by name -- they are the tier
+	// above, and one of them can be larger than every log put together.
+	if caseDir != "" {
+		fmt.Fprintf(&b, "mkdir -p %q/case || exit 0\n", dest)
+		fmt.Fprintf(&b, "find %q -maxdepth 1 -type f \\( -name '*.log' -o -name '*.err' -o "+
+			"-name '*.out' -o -name '*.result' -o -name '*.diff' -o -name 'core*' -prune \\) "+
+			"-size -8M -exec cp -p {} %q/case/ \\; 2>/dev/null\n", caseDir, dest)
+	}
 	if failed {
-		// Tier 2. The broker's SQL log is 99.6% of the log tree, so it is here
-		// and not above; cubrid.conf is what the case left, which is how a case
-		// that changed a parameter explains itself.
+		// The expensive tier, and the only thing in it. The broker's SQL log is
+		// 99.6% of the log tree and megabytes a case -- one case in a
+		// twenty-two-case run wrote 36 MB of the run's 55 -- so it is the one
+		// thing kept only for a failure. cubrid.conf comes with it: it is how a
+		// case that changed a parameter explains itself.
 		fmt.Fprintf(&b, "cp -rp ${CUBRID}/log/broker %q/ 2>/dev/null\n", dest)
 		fmt.Fprintf(&b, "cp -p ${CUBRID}/conf/cubrid.conf %q/ 2>/dev/null\n", dest)
-		// And what the case itself wrote, which is often the only thing that
-		// says what happened. tran_info runs `cubrid loaddb ... >load.log 2>&1`
-		// in the background and fails when it cannot observe it; load.log is
-		// where loaddb said why, and without this there is nothing to read.
-		//
-		// The case's own directory, not the corpus around it: everything here
-		// goes to the corpus overlay and is dropped when the directory retires,
-		// so it is this or nothing. Databases are excluded by name -- they are
-		// the tier above, and one of them can be larger than every log put
-		// together.
-		if caseDir != "" {
-			fmt.Fprintf(&b, "mkdir -p %q/case || exit 0\n", dest)
-			fmt.Fprintf(&b, "find %q -maxdepth 1 -type f \\( -name '*.log' -o -name '*.err' -o "+
-				"-name '*.out' -o -name '*.result' -o -name '*.diff' -o -name 'core*' -prune \\) "+
-				"-size -8M -exec cp -p {} %q/case/ \\; 2>/dev/null\n", caseDir, dest)
-		}
 	}
 	fmt.Fprintf(&b, "du -sk %q 2>/dev/null | cut -f1\n", dest)
 	return b.String()

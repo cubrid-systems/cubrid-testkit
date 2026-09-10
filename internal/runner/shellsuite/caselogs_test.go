@@ -104,6 +104,14 @@ func TestTheExpensiveTierIsOnlyForFailures(t *testing.T) {
 	if !strings.Contains(nok, "log/broker") {
 		t.Error("a failing case does not keep the broker log")
 	}
+	// But the case's own files are cheap and are kept either way: comparing a
+	// run that passed against one that failed is how an intermittent case is
+	// diagnosed, and the passing run is half of that comparison.
+	for _, script := range []string{ok, nok} {
+		if !strings.Contains(script, "/case/") {
+			t.Error("the case's own output is not kept")
+		}
+	}
 	// Never the install: it is the same 748 MB for every case in a run.
 	for _, script := range []string{ok, nok} {
 		for _, never := range []string{"${CUBRID}/bin", "${CUBRID}/lib", "cp -rp ${CUBRID} "} {

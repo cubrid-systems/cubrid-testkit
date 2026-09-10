@@ -20,7 +20,15 @@ var (
 	// and Windows is out of scope (ADR-003 revision). Of the 51 answer files in the
 	// shell corpus, none has CRLF, so on Linux the command is dead weight and
 	// requiring it fails a machine for a reason that cannot arise.
-	checkedCommands    = []string{"java", "javac", "diff", "wget", "find", "cat", "kill", "tar"}
+	//
+	// expect is not CTP's and is here, which is the same judgement in the other
+	// direction. 216 cases run it and the corpus ships 236 .exp scripts, so it is
+	// more load-bearing than three of the commands CTP does check -- wget is
+	// wanted by 2 cases, tar by 10, kill by 149. A machine without it does not
+	// fail loudly: the case runs, the .exp script does not, and the case greps an
+	// empty log and reports the wrong answer as a plain NOK. That is the failure
+	// this list exists to turn into one line at the start of the run.
+	checkedCommands    = []string{"java", "javac", "diff", "wget", "find", "cat", "kill", "tar", "expect"}
 	checkedDirectories = []string{"${CTP_HOME}/bin", "${CTP_HOME}/common/script"}
 )
 

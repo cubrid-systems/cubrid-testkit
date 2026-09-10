@@ -141,6 +141,11 @@ type Board struct {
 	// was given and the rate has to do.
 	workLeft time.Duration
 	slots    int
+	// tookSum is how long the finished cases took, summed. Its mean is what
+	// stands in for a case the plan does not know, and it is a mean of case
+	// durations rather than of wall clock per case, which is the distinction
+	// that keeps a stall from being read as evidence that everything is slow.
+	tookSum time.Duration
 	// planned is what each case took last time, so finishing one can take the
 	// right amount off workLeft. typical stands in for a case the plan does not
 	// mention.
@@ -392,6 +397,7 @@ func (b *Board) end(slot, name string, ok bool, took time.Duration) {
 	}
 	delete(b.running, slot)
 	b.done++
+	b.tookSum += took
 	if ok {
 		b.ok++
 	}
@@ -586,7 +592,8 @@ type doneView struct {
 func (b *Board) snapshot() view {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	elapsed := time.Since(b.started)
+	now := time.Now()
+	elapsed := now.Sub(b.started)
 	v := view{
 		Total: b.total, Done: b.done, OK: b.ok, NOK: b.done - b.ok,
 		Elapsed:   int(elapsed.Seconds()),
@@ -605,12 +612,46 @@ func (b *Board) snapshot() view {
 	// last time, so what is left is the planned seconds of the cases still to
 	// come, divided by the slots that will run them -- which is the same
 	// arithmetic the whole schedule already lands within 2% of.
+	//
+	// A run without one has to average, and the average has to be of case
+	// durations, not of wall clock per case. Dividing elapsed by done looks like
+	// the same thing and is not: while nothing finishes, its numerator keeps
+	// growing and its denominator does not, so the estimate climbs at
+	// (total-done)/done seconds per second. Measured on a live 22-case run
+	// stalled at 13 done, the page added 14 s of remaining work for every 20 s
+	// of clock -- elapsed and remaining rising together, which is the one thing
+	// a countdown must never do.
+	//
+	// Either way the cases in flight have already paid part of their bill, so
+	// take off what they have spent. That is what makes the number fall between
+	// case ends rather than sit still and then jump.
+	per, left := time.Duration(0), time.Duration(0)
 	switch {
 	case b.slots > 0 && b.workLeft > 0:
-		v.Remain = int((b.workLeft / time.Duration(b.slots)).Seconds())
+		per, left = b.typical, b.workLeft
 	case b.done > 0 && b.total > b.done:
-		per := elapsed / time.Duration(b.done)
-		v.Remain = int((per * time.Duration(b.total-b.done)).Seconds())
+		per = b.tookSum / time.Duration(b.done)
+		left = per * time.Duration(b.total-b.done)
+	}
+	if left > 0 {
+		for _, in := range b.running {
+			spent := now.Sub(in.Since)
+			if expect, known := b.planned[in.Case]; known && expect > 0 {
+				per = expect
+			}
+			if per > 0 && spent > per {
+				spent = per // a case past its estimate owes nothing more we can name
+			}
+			if left -= spent; left <= 0 {
+				left = 0
+				break
+			}
+		}
+		slots := b.slots
+		if slots < 1 {
+			slots = 1
+		}
+		v.Remain = int((left / time.Duration(slots)).Seconds())
 	}
 	// Every slot the run has, not only the busy ones. A table of busy slots
 	// makes a slot between cases indistinguishable from a slot that is stuck,

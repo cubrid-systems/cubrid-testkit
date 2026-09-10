@@ -1,6 +1,7 @@
 package status
 
 import (
+	"fmt"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -927,14 +928,20 @@ func TestAnUnplannedCaseCostsTheMedian(t *testing.T) {
 
 // Without a plan there is nothing better than the rate, and the page should
 // still say something rather than nothing.
+//
+// The rate is a mean of what the finished cases took, not of the wall clock
+// divided by how many finished. The two look alike and differ on exactly the
+// case that matters: here the harness had been up 100 s before the first case
+// started, and the wall-clock reading would call that case 100 s long when it
+// took ten.
 func TestRemainingFallsBackToTheRate(t *testing.T) {
 	b := New(10)
 	b.started = time.Now().Add(-100 * time.Second)
 	b.Begin("slot0", "a")
-	b.End("slot0", "a", true)
-	// One of ten done in 100 s: nine more at 100 s each.
-	if got := b.snapshot().Remain; got != 900 {
-		t.Fatalf("with no plan: remain %d, want 900 from the rate", got)
+	b.endWith("slot0", "a", true, 10*time.Second)
+	// One of ten done, and it took 10 s: nine more at 10 s each, on one slot.
+	if got := b.snapshot().Remain; got != 90 {
+		t.Fatalf("with no plan: remain %d, want 90 from the measured rate", got)
 	}
 }
 
@@ -1056,5 +1063,46 @@ func TestEachSortableTableOnlyTouchesItsOwnHeaders(t *testing.T) {
 	// in the markup, which is before the script and not inside it.
 	if !strings.Contains(page, "data-k=took") || !strings.Contains(page, "data-sk=held") {
 		t.Error("the markup lost one of the sortable headers")
+	}
+}
+
+// A stall must not add work. The estimator that shipped divided elapsed by done,
+// which grows while nothing finishes: on a live 22-case run stalled at 13 done,
+// remaining rose 14 s for every 20 s of clock -- the numbers this test uses.
+//
+// The rule is one-directional and does not depend on the estimate being good:
+// between two case ends, remaining may fall and may hold, and must never rise.
+func TestAStallDoesNotAddRemainingWork(t *testing.T) {
+	b := New(22)
+	b.slots = 4
+	b.started = time.Now().Add(-1160 * time.Second)
+
+	// Thirteen done, each a minute of case time, and nine still to come.
+	for i := 0; i < 13; i++ {
+		name := fmt.Sprintf("/x/scenario/f/c%d/cases/c%d.sh", i, i)
+		b.Begin("slot0", name)
+		b.endWith("slot0", name, true, 60*time.Second)
+	}
+	b.Begin("slot0", "/x/scenario/f/stalled/cases/stalled.sh")
+
+	first := b.snapshot().Remain
+	if first <= 0 {
+		t.Fatalf("nine cases are left and remaining is %d", first)
+	}
+	// Twenty seconds of stall, and nothing finishes.
+	b.running["slot0"] = inflight{Case: "/x/scenario/f/stalled/cases/stalled.sh",
+		Since: time.Now().Add(-20 * time.Second)}
+	b.started = b.started.Add(-20 * time.Second)
+
+	second := b.snapshot().Remain
+	if second > first {
+		t.Errorf("twenty seconds of stall added %d s of remaining work (%d -> %d)",
+			second-first, first, second)
+	}
+	// And it falls by the right amount: twenty seconds of one case is twenty
+	// case-seconds, which over four slots is five seconds of wall clock.
+	if second != first-5 {
+		t.Errorf("a stalled case should count its own elapsed time against the estimate: "+
+			"remaining went %d -> %d, wanted %d", first, second, first-5)
 	}
 }

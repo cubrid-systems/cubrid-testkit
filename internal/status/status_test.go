@@ -1,8 +1,8 @@
 package status
 
 import (
-	"fmt"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"

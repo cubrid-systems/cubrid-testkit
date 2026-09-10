@@ -182,7 +182,7 @@ func destOf(root, scenario, casePath string, attempt int) string {
 //
 // It ends with `du` so the caller can charge the budget for what was actually
 // written rather than for what it hoped to write.
-func CaptureScript(dest string, failed bool) string {
+func CaptureScript(dest, caseDir string, failed bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "mkdir -p %q/server || exit 0\n", dest)
 	// Tier 1, always. A pristine install's log directory is empty, so everything
@@ -197,6 +197,22 @@ func CaptureScript(dest string, failed bool) string {
 		// that changed a parameter explains itself.
 		fmt.Fprintf(&b, "cp -rp ${CUBRID}/log/broker %q/ 2>/dev/null\n", dest)
 		fmt.Fprintf(&b, "cp -p ${CUBRID}/conf/cubrid.conf %q/ 2>/dev/null\n", dest)
+		// And what the case itself wrote, which is often the only thing that
+		// says what happened. tran_info runs `cubrid loaddb ... >load.log 2>&1`
+		// in the background and fails when it cannot observe it; load.log is
+		// where loaddb said why, and without this there is nothing to read.
+		//
+		// The case's own directory, not the corpus around it: everything here
+		// goes to the corpus overlay and is dropped when the directory retires,
+		// so it is this or nothing. Databases are excluded by name -- they are
+		// the tier above, and one of them can be larger than every log put
+		// together.
+		if caseDir != "" {
+			fmt.Fprintf(&b, "mkdir -p %q/case || exit 0\n", dest)
+			fmt.Fprintf(&b, "find %q -maxdepth 1 -type f \\( -name '*.log' -o -name '*.err' -o "+
+				"-name '*.out' -o -name '*.result' -o -name '*.diff' -o -name 'core*' -prune \\) "+
+				"-size -8M -exec cp -p {} %q/case/ \\; 2>/dev/null\n", caseDir, dest)
+		}
 	}
 	fmt.Fprintf(&b, "du -sk %q 2>/dev/null | cut -f1\n", dest)
 	return b.String()
@@ -204,12 +220,12 @@ func CaptureScript(dest string, failed bool) string {
 
 // Capture keeps one case's logs. It reports what it could not do rather than
 // returning an error, because a capture that fails must not fail the case.
-func (l *CaseLogs) Capture(ctx context.Context, ch exec.Channel, casePath string, attempt int, ok bool) string {
+func (l *CaseLogs) Capture(ctx context.Context, ch exec.Channel, casePath, caseDir string, attempt int, ok bool) string {
 	if !l.wants(ok) || l.done() {
 		return ""
 	}
 	dest := destOf(l.dir, l.scenario, casePath, attempt)
-	res, err := runIn(ctx, ch, CaptureScript(dest, !ok))
+	res, err := runIn(ctx, ch, CaptureScript(dest, caseDir, !ok))
 	if err != nil {
 		return "[WARN] case logs: " + casePath + ": " + err.Error()
 	}

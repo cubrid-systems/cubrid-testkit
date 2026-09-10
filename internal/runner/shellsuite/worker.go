@@ -154,7 +154,7 @@ func (w *Worker) Run(ctx context.Context) error {
 		// this slot -- and the corpus overlay drops the case's own directory when
 		// its directory retires. Before the verdict there is nothing to keep;
 		// after either of those there is nothing left to copy.
-		if note := w.Logs.Capture(ctx, w.Channel, ticket.Case, ticket.Retry+1, v.Success); note != "" {
+		if note := w.Logs.Capture(ctx, w.Channel, ticket.Case, c.Dir, ticket.Retry+1, v.Success); note != "" {
 			w.log(note)
 		}
 		w.finish(ticket, v, console, elapsed)

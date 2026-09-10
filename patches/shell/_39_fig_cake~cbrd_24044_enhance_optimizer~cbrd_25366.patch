@@ -1,0 +1,24 @@
+--- cbrd_25366.sh
++++ cbrd_25366.sh
+@@ -40,10 +40,19 @@
+ }' test1.log`
+ 
+ # Extract the hash value to be deleted to verify the -s option
++# testkit compatibility: match() with a third argument is a GNU awk extension.
++# Where /usr/bin/awk is mawk -- Debian and Ubuntu ship it as the default -- the
++# whole program is a syntax error ("awk: line 3: syntax error at or near ,"),
++# val_sha1 comes out empty, and `cubrid plandump -s ""` makes the case fail on
++# something it never meant to test. Two-argument match() with RSTART/RLENGTH is
++# POSIX and gives the same string: the engine prints
++# "sha1 = { %08x %08x %08x %08x %08x }, ", so the braces and their spaces are
++# the two characters at each end of the match. This is the only case in the
++# corpus that needs GNU awk.
+ val_sha1=`awk '
+ /sha1 = \{/ {
+-    match($0, /sha1 = \{ ([0-9a-f ]+) \}/, arr)
+-    sha1 = arr[1]
++    if (match($0, /\{ [0-9a-f ]+ \}/))
++        sha1 = substr($0, RSTART + 2, RLENGTH - 4)
+ }
+ /leading\(/ {
+     print sha1

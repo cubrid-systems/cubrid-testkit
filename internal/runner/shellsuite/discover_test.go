@@ -346,3 +346,72 @@ func envOr(key, fallback string) string {
 	}
 	return fallback
 }
+
+// Include exists for the loop a fix goes round: a run leaves failures, the
+// engine is rebuilt, and the question is whether those cases pass now -- not
+// whether the other 3,400 still do, which takes two hours and answers something
+// else.
+func TestIncludeKeepsOnlyWhatIsNamed(t *testing.T) {
+	cases := []string{
+		"/run/shell/_06_issues/_11_1h/bug_bts_4823/cases/bug_bts_4823.sh",
+		"/run/shell/_06_issues/_11_1h/bug_bts_4824/cases/bug_bts_4824.sh",
+		"/run/shell/_01_utility/_38_csql/csql2/cases/csql2.sh",
+	}
+	kept, dropped := Include(cases, ParseExcluded(
+		"_06_issues/_11_1h/bug_bts_4823/cases/bug_bts_4823.sh\n_01_utility/_38_csql/csql2\n"))
+	if len(kept) != 2 || len(dropped) != 1 {
+		t.Fatalf("kept %d dropped %d: %v", len(kept), len(dropped), kept)
+	}
+	// The trailing slash ParseExcluded adds is what stops 4823 selecting 4824.
+	for _, c := range kept {
+		if strings.Contains(c, "4824") {
+			t.Errorf("a longer name that merely starts the same was selected: %s", c)
+		}
+	}
+
+	// The point of matching on a fragment: a list written against one scenario
+	// root still selects under another, which is what makes it work when the
+	// corpus has moved and the engine is a different build.
+	elsewhere := []string{"/somewhere/else/_01_utility/_38_csql/csql2/cases/csql2.sh"}
+	if kept, _ := Include(elsewhere, ParseExcluded("_01_utility/_38_csql/csql2\n")); len(kept) != 1 {
+		t.Error("a list from one root did not select the same case under another")
+	}
+
+	// No patterns is not "select nothing": it is "this filter is off".
+	if kept, _ := Include(cases, nil); len(kept) != 3 {
+		t.Errorf("an empty pattern list dropped cases: %d kept", len(kept))
+	}
+}
+
+// One path is what CTP took and it has to keep working; more than one exists so
+// that upstream's judgement about a case and this machine's inability to run it
+// stay in separate files, each deletable on its own.
+func TestExcludeFilesKeepsTheListsApart(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		spec string
+		want []string
+	}{
+		{"CTP's single path", "/ctp/daily_regression", []string{"/ctp/daily_regression"}},
+		{"nothing configured", "", nil},
+		{"whitespace only", "   ", nil},
+		{"two lists", "/a/upstream.txt,/b/no-manager.txt",
+			[]string{"/a/upstream.txt", "/b/no-manager.txt"}},
+		{"spaces around the comma", " /a.txt , /b.txt ", []string{"/a.txt", "/b.txt"}},
+		// An empty entry must not become `cat ""`, which succeeds and excludes
+		// nothing -- a silent way to run a list that was meant to apply.
+		{"a stray comma", "/a.txt,,", []string{"/a.txt"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := ExcludeFiles(c.spec)
+			if len(got) != len(c.want) {
+				t.Fatalf("got %q, want %q", got, c.want)
+			}
+			for i := range got {
+				if got[i] != c.want[i] {
+					t.Fatalf("got %q, want %q", got, c.want)
+				}
+			}
+		})
+	}
+}

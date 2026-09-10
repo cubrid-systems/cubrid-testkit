@@ -1,0 +1,11 @@
+--- _03_cubrid_broker02.sh
++++ _03_cubrid_broker02.sh
+@@ -76,7 +76,7 @@
+                 	ln=`grep -wn ${param} $CUBRID/conf/cubrid_broker.conf | cut -d':' -f1`
+ 
+                 	sed -i "s/Line $ln/Line ??/" result.log
+-                	sed -i "s@$HOME@/path@" result.log
++                	sed -i "s@$CUBRID@/path/CUBRID@" result.log
+ 		        echo "Out of range test(param:$param,min:$min,max:$max,value:$value)" >> $result_file	
+                 	compare_result_between_files result.log result.answer
+ 		else

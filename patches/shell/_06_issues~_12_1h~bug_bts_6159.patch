@@ -1,0 +1,57 @@
+--- exec_sql.exp
++++ exec_sql.exp
+@@ -1,9 +1,50 @@
+ #!/usr/bin/expect -f
+ 
+-spawn csql -u dba db_6159 
+-expect "csql>"
+-send "select 'RESULT_'||id _o from s1 order by id asc;\rselect count(*) from db_class;\r"
++# testkit compatibility: this script's own timing decided the verdict.
++#
++# The case requires "...skipping" in this log on Linux. That string is printed by
++# `more` when the characters of a queued command reach the pager instead of csql,
++# which is the behaviour BTS-6159 is about -- so the case is asserting that the
++# pager ate the input.
++#
++# The script sent both queries in one send and then waited for "csql>", a prompt
++# that cannot arrive while the pager is holding the screen. Whether the second
++# query's keystrokes met the pager was therefore left to how fast the machine
++# drew the first query's 200 rows. Measured: the same case passes in the CI image
++# and fails on an Ubuntu host, same engine, same corpus, same testkit.
++#
++# The second query is now sent only after the pager has said it is showing, so
++# the interaction the case measures happens on purpose rather than by luck.
++# Nothing about what is asserted has changed.
++
++set timeout 30
++
++spawn csql -u dba db_6159
+ expect "csql>"
++
++send "select 'RESULT_'||id _o from s1 order by id asc;\r"
++
++# Wait for the pager, not for a prompt the pager is suppressing.
++expect {
++    "More" {}
++    timeout { send_user "\n\[testkit] the result did not paginate; no pager appeared\n" }
++}
++
++# These keystrokes are meant for the pager. That is the point of the case.
++send "select count(*) from db_class;\r"
++
++expect {
++    "csql>" {}
++    timeout {}
++}
++
++# Leave the pager, but only while there is one. Sending "q" unconditionally types
++# a stray character into csql when the pager has already gone, and the ";ex" that
++# follows arrives as "q;ex".
++expect {
++    "More" { send "q"; exp_continue }
++    "csql>" {}
++    timeout {}
++}
+ send ";ex\r"
+-sleep 2
+ expect eof

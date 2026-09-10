@@ -1,0 +1,16 @@
+--- itrack_10001.sh
++++ itrack_10001.sh
+@@ -42,7 +42,12 @@
+ db_create() {
+         cubrid server stop qadb 
+ 	cubrid_createdb -r qadb -l 1000 
+-	csql -S qadb -c "create class x(name char(10000), age char(10000), w char(1000))"
++	# testkit compatibility: char(10000) is over the engine's 2048-byte limit, so
++	# the class is never created and all fifteen restore checks fail behind
++	# "Unknown class \"dba.x\"". The widths are arbitrary here -- InsertJ.java binds
++	# the integers 1, 2 and 3 -- and no answer file mentions them, so the case
++	# tests what it means to test at a width the engine accepts. CBRD-21637.
++	csql -S qadb -c "create class x(name char(2000), age char(2000), w char(1000))"
+ }
+ 
+ rm_file() {

@@ -1,0 +1,661 @@
+package shellsuite
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	osexec "os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
+)
+
+// Corpus is the scenario tree as a run sees it: the repository's copy read-only
+// underneath, this run's writes in memory on top, and each case's writes dropped
+// again as soon as the last case in its directory is done.
+//
+// The first two are B-T12. A case creates its database in its own directory and
+// not all of them delete it, and nothing puts the tree back -- 105 MB in the
+// repository was 20 GB on this machine, and a case that finds a database it did
+// not create behaves differently from one that does not. An overlay makes clean
+// structural rather than a step, and an upper layer in memory takes the run's
+// writes off a disk that was measured as the bottleneck.
+//
+// The third is what running it taught, and it took two measurements to get
+// right. The ceiling has two parts and only one of them can be given back.
+//
+// Sampled on a running arm at case 112 of 217, the upper layer held 4,730 MB.
+// At case 216 it held 817 -- so it is not accumulation, and the first reading of
+// it as accumulation was wrong. Of that 817, two directories held 813:
+// _17_loaddb/_enhance_1002 at 531 MB and _19_loaddb_parameter/bigdata_alltype_test
+// at 282. The other 215 directories held under a megabyte each. Subtracting
+// gives 3,917 MB in flight across eight slots at case 112, which is the sum of
+// the eight largest case databases to within 2%: six of the eight slots were
+// holding a 512 MB database at the same time.
+//
+// So the working set is roughly the slots times the biggest databases, it is
+// live data, and nothing can reclaim it -- keeping the big cases off each other
+// is B-T13's ranked lanes, not this. What this reclaims is the residual: the
+// cases that never clean up. Two in 217 here, and that is the ratio that put
+// 20 GB in a corpus that is 105 MB in git. At the same rate the full 3,475 cases
+// leave around 13 GB behind, which no ceiling this machine can spare would
+// survive -- and unlike the working set, it is pure waste held to the end of the
+// run.
+type Corpus struct {
+	// root is the scenario directory, and where the overlay is mounted.
+	root string
+	// ram is the tmpfs holding up/ and work/, and the thing whose fullness is
+	// the ceiling.
+	ram string
+	// pristine is where the tree as the repository has it can be read.
+	//
+	// Without it there is no way to tell a file this run created from a file it
+	// modified, and the difference decides whether removing it is a reclaim or a
+	// whiteout. In shared mode it is a read-only bind taken before the overlay
+	// went on top of root; with lanes nothing is mounted over root in this
+	// process's namespace, so root itself is the pristine tree and no bind is
+	// needed.
+	pristine string
+	// shared is the one-overlay-for-every-slot arrangement: mounted here, before
+	// the slots exist, so they inherit it. It is what a run without lanes gets,
+	// unchanged.
+	shared bool
+	// disk is where slow-lane slots put their upper layers. Empty without lanes.
+	disk string
+	// slots is each slot's upper root and the way to run a command in its
+	// namespace -- needed because a reclaim has to delete through the slot's own
+	// overlay: overlayfs does not allow its layers to change underneath it.
+	slots map[string]*slotStore
+
+	mu sync.Mutex
+	// pending counts, per case directory, the cases that have yet to retire.
+	// Reclaiming per case rather than per directory would be wrong: a directory
+	// can hold more than one case, and a case that set up a database for its
+	// sibling would find it gone. (An earlier comment here said "15 of this
+	// family's 217 directories"; counted on the corpus this runs, it is 0 of
+	// 3,494 -- the shape of the rule is right and that figure was not.)
+	pending map[string]int
+	freed   int
+	// held is the most each directory was seen holding, which is the measurement
+	// lanes need: the ceiling is made of space, so the lane that gives space
+	// away has to be chosen by space.
+	//
+	// The most, and not what it had left at the end. Two earlier versions of
+	// this were wrong in different ways. Taking the drop in the whole tmpfs
+	// across a reclaim measures mostly what other slots were writing at that
+	// instant -- it recorded 342 directories summing to 13,854 MB for a run that
+	// held 22,528 MB at once. Taking what the directory still had at retire is
+	// honest but answers a different question: a case that writes four gigabytes
+	// and deletes them before it finishes leaves nothing, and 70 directories
+	// summed to 7,334 MB for a run that filled 12,288. What fills a ceiling is
+	// what is held while the case runs, so that is what is sampled.
+	held map[string]int
+
+	peak int
+	stop chan struct{}
+	mb   int
+}
+
+// slotStore is one slot's place to write and the way to reach it.
+type slotStore struct {
+	upperRoot string
+	onRAM     bool
+	run       func(script string) error
+}
+
+// OpenCorpus puts root behind an overlay whose upper layer is a tmpfs of mb
+// megabytes.
+//
+// Without lanes it mounts one overlay here, before the slots are opened, so that
+// they inherit it -- which is what B-T12 described and what a run gets unless it
+// asks for lanes. With lanes it mounts only the tmpfs, and each slot mounts an
+// overlay of its own over the corpus with an upper from Slot.
+//
+// Either way the case list does not exist yet at this point, so what to reclaim
+// arrives later, through Plan.
+func OpenCorpus(root string, mb int, lanes bool) (*Corpus, error) {
+	if root == "" {
+		return nil, fmt.Errorf("scenario_ram_mb needs scenario to be set")
+	}
+	if !contain.Active() {
+		return nil, fmt.Errorf("scenario_ram_mb needs the runner contained; set %s=1", contain.Env)
+	}
+	ram, err := os.MkdirTemp("", "testkit-corpus-*")
+	if err != nil {
+		return nil, err
+	}
+	c := &Corpus{
+		root:    root,
+		ram:     ram,
+		pending: map[string]int{},
+		held:    map[string]int{},
+		slots:   map[string]*slotStore{},
+		stop:    make(chan struct{}),
+		mb:      mb,
+		shared:  !lanes,
+		pristine: func() string {
+			if lanes {
+				// Nothing is mounted over root here, so this process reads the
+				// tree as the repository has it.
+				return root
+			}
+			return filepath.Join(ram, "lower")
+		}(),
+	}
+	if lanes {
+		c.disk = filepath.Join(filepath.Dir(strings.TrimRight(root, "/")), ".testkit-slow-lane")
+		if err := os.MkdirAll(c.disk, 0o755); err != nil {
+			_ = os.Remove(ram)
+			return nil, err
+		}
+	}
+	if err := c.run(fmt.Sprintf("mount -t tmpfs -o size=%dm corpus %s", mb, ram)); err != nil {
+		_ = os.Remove(ram)
+		return nil, err
+	}
+	if c.shared {
+		// The bind before the overlay, because afterwards the path leads to the
+		// overlay and the tree underneath is no longer reachable by name.
+		if err := c.run(fmt.Sprintf(
+			"mkdir -p %s/up %s/work %s && mount --bind %s %s && mount -o remount,bind,ro %s",
+			ram, ram, c.pristine, root, c.pristine, c.pristine)); err != nil {
+			_ = c.run("umount " + ram)
+			_ = os.Remove(ram)
+			return nil, err
+		}
+		if err := c.run(fmt.Sprintf(
+			"mount -t overlay overlay -o lowerdir=%s,upperdir=%s/up,workdir=%s/work %s",
+			c.pristine, ram, ram, root)); err != nil {
+			_ = c.run("umount " + c.pristine + "; umount " + ram)
+			_ = os.Remove(ram)
+			return nil, err
+		}
+	}
+	go c.watch()
+	return c, nil
+}
+
+// Slot says where one slot's corpus writes go, and returns the upper root the
+// caller hands to Namespace.Overlay.
+//
+// The fast lane's upper is a directory on the run's tmpfs -- one tmpfs, one
+// ceiling, an upper each. Two overlays cannot share an upperdir, but they can
+// take subdirectories of the same filesystem, which keeps the ceiling a single
+// flexible pool rather than N fixed reservations. Sized per slot it would need
+// the largest directory a slot might draw, 1,078 MB, so eight private ceilings
+// want 8.6 GB where one pool needed 6.
+//
+// The slow lane's upper is on disk beside the corpus, uncapped: a lane on disk
+// is a lane whose whole point is not to spend the ceiling.
+//
+// run is how a reclaim reaches this slot. It has to go through the slot's own
+// overlay, because overlayfs does not allow its layers to change underneath it.
+func (c *Corpus) Slot(slot string, onRAM bool, run func(script string) error) (string, error) {
+	if c == nil {
+		return "", nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.shared {
+		return "", fmt.Errorf("this corpus is mounted once for every slot; it has no per-slot upper")
+	}
+	base := c.ram
+	if !onRAM {
+		base = c.disk
+	}
+	root := filepath.Join(base, slot)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", err
+	}
+	c.slots[slot] = &slotStore{upperRoot: root, onRAM: onRAM, run: run}
+	return root, nil
+}
+
+// Plan tells the corpus how many cases each directory holds, which is what makes
+// Retire able to tell the last one. Until it is called nothing is reclaimed, so a
+// run that never gets a case list behaves as it did before.
+func (c *Corpus) Plan(cases []string) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range cases {
+		if split, err := Split(p); err == nil {
+			c.pending[split.Dir]++
+		}
+	}
+}
+
+// Ram is the tmpfs, for the panel that reports how full it is.
+// Usage is what the corpus holds and what it is allowed, in megabytes, for a
+// policy that decides whether the machine can take another case. Zero and zero
+// when there is no ceiling.
+func (c *Corpus) Usage() (used, limit int) {
+	if c == nil || c.mb <= 0 {
+		return 0, 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.used(), c.mb
+}
+
+// Held is what each case directory was holding when it retired, in megabytes.
+// A copy, because the run writes it to a file after the slots have stopped and
+// the corpus may still be sampling.
+func (c *Corpus) Held() map[string]int {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make(map[string]int, len(c.held))
+	for d, mb := range c.held {
+		out[d] = mb
+	}
+	return out
+}
+
+func (c *Corpus) Ram() string {
+	if c == nil {
+		return ""
+	}
+	return c.ram
+}
+
+// Retire records that a case in dir is finished for good, and drops the
+// directory's writes when it was the last one. It reports whether it reclaimed,
+// because a caller has cleaning of its own to do once the files are gone -- see
+// PruneRegistryScript.
+//
+// For good: a case going back for a retry has not finished, and reclaiming under
+// it would delete the state its next attempt is about to look for.
+func (c *Corpus) Retire(slot, dir string) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n, ok := c.pending[dir]
+	if !ok {
+		return false
+	}
+	if n > 1 {
+		c.pending[dir] = n - 1
+		return false
+	}
+	delete(c.pending, dir)
+	reclaimed := false
+	if !c.shared {
+		st := c.slots[slot]
+		if st == nil {
+			return false
+		}
+		before := c.used()
+		if before > c.peak {
+			c.peak = before
+		}
+		// The footprint is measured on the directory's own upper layer, before
+		// it goes. It used to be the drop in the whole tmpfs across the delete
+		// -- which is what the tmpfs is for, but not what one directory holds:
+		// with 24 slots writing at the same time the difference is mostly other
+		// slots' work, and it comes out negative as often as not. That is why
+		// case_sizes held 342 directories summing to 13,854 MB after a run whose
+		// ceiling measured 22,528 MB in use at once. A sum of parts smaller than
+		// the peak they were part of cannot be right, and lane_slow_mb
+		// thresholds those parts.
+		own := c.ownMB(st, dir)
+		c.dropInSlot(st, dir)
+		reclaimed = true
+		if st.onRAM {
+			if freed := before - c.used(); freed > 0 {
+				c.freed += freed
+			}
+			if own > c.held[dir] {
+				c.held[dir] = own
+			}
+		}
+		// A slow-lane directory writes to disk, so there is nothing on the tmpfs
+		// to measure and none is recorded. It keeps the figure that sent it to
+		// disk, which is what ContinueSizes is for.
+		return reclaimed
+	}
+	// The high-water mark is read here as well as on the ticker: reclaiming is
+	// exactly when the tmpfs is at its fullest, and a two-second sample can miss
+	// a peak that a case reached and gave back between ticks.
+	before := c.used()
+	if before > c.peak {
+		c.peak = before
+	}
+	// Measured on the directory before it goes, for the reason given above: the
+	// tmpfs delta is what the ceiling gave back, and with every slot writing
+	// into the same tmpfs that is not what this directory was holding. This is
+	// the path a run without lanes takes, so it is the one that produced the
+	// figures case_sizes has.
+	own := c.addedMB(dir, c.pristineOf(dir))
+	c.dropAdditions(dir, c.pristineOf(dir))
+	if freed := before - c.used(); freed > 0 {
+		c.freed += freed
+	}
+	if own > c.held[dir] {
+		c.held[dir] = own
+	}
+	return true
+}
+
+func (c *Corpus) pristineOf(dir string) string {
+	rel, ok := c.relOf(dir)
+	if !ok {
+		return ""
+	}
+	return filepath.Join(c.pristine, rel)
+}
+
+func (c *Corpus) relOf(dir string) (string, bool) {
+	rel, err := filepath.Rel(c.root, dir)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return rel, true
+}
+
+// dropInSlot is the reclaim when each slot has an overlay of its own.
+//
+// Two views are needed and neither alone is enough. This process can read the
+// slot's *upper layer* directly -- it is a directory on the tmpfs or on disk --
+// which says what the slot wrote; and it can read the corpus at root, because
+// with lanes nothing is mounted over it here, which says what the repository
+// has. What it cannot do is delete: the file has to go through the slot's own
+// overlay, because overlayfs does not allow its layers to change underneath it.
+//
+// So: enumerate here, decide here, delete there. A name the pristine tree also
+// has is left alone -- removing it would write a whiteout and hide a corpus file
+// from every case that ran afterwards.
+func (c *Corpus) dropInSlot(st *slotStore, dir string) {
+	rel, ok := c.relOf(dir)
+	if !ok {
+		return
+	}
+	var gone []string
+	c.collectAdditions(filepath.Join(st.upperRoot, "upper", rel), filepath.Join(c.root, rel), dir, &gone)
+	if len(gone) == 0 {
+		return
+	}
+	args := make([]string, 0, len(gone))
+	for _, g := range gone {
+		args = append(args, shQuote(g))
+	}
+	_ = st.run("rm -rf -- " + strings.Join(args, " "))
+}
+
+// ownMB is how much of the tmpfs one directory is holding, in MB, measured on
+// the slot's own upper layer rather than on the tmpfs as a whole.
+//
+// Blocks and not sizes: a tmpfs charges what it allocates, and that is the
+// number the ceiling counts. A sparse file would otherwise be recorded as its
+// apparent length and a directory of small files as less than it takes.
+func (c *Corpus) ownMB(st *slotStore, dir string) int {
+	rel, ok := c.relOf(dir)
+	if !ok || st == nil {
+		return 0
+	}
+	return int(treeBytes(filepath.Join(st.upperRoot, "upper", rel)) / (1 << 20))
+}
+
+// collectAdditions walks the upper layer and names, in the overlay's own
+// coordinates, everything the pristine tree does not have.
+func (c *Corpus) collectAdditions(upper, pristine, live string, out *[]string) {
+	entries, err := os.ReadDir(upper)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		p := filepath.Join(pristine, e.Name())
+		ps, err := os.Lstat(p)
+		if err != nil {
+			*out = append(*out, filepath.Join(live, e.Name()))
+			continue
+		}
+		if e.IsDir() && ps.IsDir() {
+			c.collectAdditions(filepath.Join(upper, e.Name()), p, filepath.Join(live, e.Name()), out)
+		}
+	}
+}
+
+// dropAdditions deletes everything under live that the pristine tree does not
+// have, and leaves everything it does.
+//
+// Through the overlay and not out of its upper layer, because overlayfs does not
+// allow its layers to be changed underneath it. What that costs is one rule:
+// removing a name the lower layer has creates a whiteout, which would hide a
+// corpus file from every case that ran afterwards, so a name present in both is
+// left alone. A case that edited a corpus file keeps the edit in memory for the
+// rest of the run, and those are kilobytes; what the run has to get rid of is
+// the database volumes, and those exist only above.
+//
+// A case that *deleted* a corpus file is the same rule seen from the other side:
+// its whiteout is invisible from here, so the deletion stands. It costs no
+// memory, which is what this is for, and it is the one hole in "clean".
+func (c *Corpus) dropAdditions(live, pristine string) {
+	if pristine == "" {
+		return
+	}
+	entries, err := os.ReadDir(live)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		l := filepath.Join(live, e.Name())
+		p := filepath.Join(pristine, e.Name())
+		ps, err := os.Lstat(p)
+		if err != nil {
+			_ = os.RemoveAll(l)
+			continue
+		}
+		if e.IsDir() && ps.IsDir() {
+			c.dropAdditions(l, p)
+		}
+	}
+}
+
+// addedMB is what a directory has added to the pristine tree, in megabytes.
+//
+// It walks the same way dropAdditions does and counts what that would delete,
+// so the number recorded is exactly the files this directory put there. Blocks
+// rather than sizes, because a tmpfs charges what it allocates and that is what
+// the ceiling counts.
+func (c *Corpus) addedMB(live, pristine string) int {
+	if pristine == "" {
+		return 0
+	}
+	return int(c.addedBytes(live, pristine) / (1 << 20))
+}
+
+func (c *Corpus) addedBytes(live, pristine string) int64 {
+	entries, err := os.ReadDir(live)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		l := filepath.Join(live, e.Name())
+		p := filepath.Join(pristine, e.Name())
+		ps, err := os.Lstat(p)
+		if err != nil {
+			total += treeBytes(l)
+			continue
+		}
+		if e.IsDir() && ps.IsDir() {
+			total += c.addedBytes(l, p)
+		}
+	}
+	return total
+}
+
+// treeBytes is what a path occupies, counting allocation rather than length.
+func treeBytes(path string) int64 {
+	var total int64
+	_ = filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if info, err := d.Info(); err == nil {
+			if sys, ok := info.Sys().(*syscall.Stat_t); ok {
+				total += sys.Blocks * 512
+			}
+		}
+		return nil
+	})
+	return total
+}
+
+// sampleForTest drives one round of what the watcher does on its ticker.
+func (c *Corpus) sampleForTest() {
+	c.mu.Lock()
+	live := make([]string, 0, len(c.pending))
+	for dir := range c.pending {
+		live = append(live, dir)
+	}
+	c.mu.Unlock()
+	for _, dir := range live {
+		if mb := c.liveMB(dir); mb > 0 {
+			c.mu.Lock()
+			if mb > c.held[dir] {
+				c.held[dir] = mb
+			}
+			c.mu.Unlock()
+		}
+	}
+}
+
+// liveMB is what a directory is holding right now.
+//
+// Sampled rather than taken at retire, because what fills the ceiling is what a
+// case holds while it runs and not what it leaves behind. Measured: a run that
+// used 12,288 MB of its 12,288 MB ceiling recorded 70 directories summing to
+// 7,334 MB at retire, because a case that writes four gigabytes and deletes
+// them before it finishes leaves nothing to find.
+func (c *Corpus) liveMB(dir string) int {
+	if c.shared {
+		return c.addedMB(dir, c.pristineOf(dir))
+	}
+	// With lanes a directory lives in exactly one slot's upper layer, and only
+	// a fast-lane slot's writes are on the tmpfs the ceiling counts.
+	best := 0
+	c.mu.Lock()
+	slots := make([]*slotStore, 0, len(c.slots))
+	for _, st := range c.slots {
+		if st != nil && st.onRAM {
+			slots = append(slots, st)
+		}
+	}
+	c.mu.Unlock()
+	for _, st := range slots {
+		if mb := c.ownMB(st, dir); mb > best {
+			best = mb
+		}
+	}
+	return best
+}
+
+// used is how many megabytes the tmpfs is holding.
+//
+// statfs on the tmpfs itself, not on the corpus directory: statfs through an
+// overlay answers for its upper layer, so asking the corpus reports the same
+// megabytes a second time and a panel adding the two arrives at the ceiling.
+func (c *Corpus) used() int {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(c.ram, &st); err != nil {
+		return 0
+	}
+	return int(uint64(st.Bsize) * (st.Blocks - st.Bfree) / (1 << 20))
+}
+
+// watch samples the ceiling, because a run that fills it does not say so.
+//
+// A ceiling below what a run needs does not stop the run and does not put ENOSPC
+// anywhere a reader will find it: the cases simply fail. One arm of this suite's
+// own measurements gave 47 OK against 170 NOK for exactly that reason and
+// nothing in the output said why, and a later one filled 6,144 MB of 6,144.
+func (c *Corpus) watch() {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-c.stop:
+			return
+		case <-t.C:
+			c.mu.Lock()
+			if v := c.used(); v > c.peak {
+				c.peak = v
+			}
+			live := make([]string, 0, len(c.pending))
+			for dir := range c.pending {
+				live = append(live, dir)
+			}
+			c.mu.Unlock()
+
+			// Walked without the lock: a reclaim must not wait on a directory
+			// listing, and the listing does not have to be of one instant.
+			seen := make(map[string]int, len(live))
+			for _, dir := range live {
+				if mb := c.liveMB(dir); mb > 0 {
+					seen[dir] = mb
+				}
+			}
+			c.mu.Lock()
+			for dir, mb := range seen {
+				if mb > c.held[dir] {
+					c.held[dir] = mb
+				}
+			}
+			c.mu.Unlock()
+		}
+	}
+}
+
+// Close takes the overlay down and says what the run did with its ceiling.
+func (c *Corpus) Close() {
+	if c == nil {
+		return
+	}
+	close(c.stop)
+	c.mu.Lock()
+	if v := c.used(); v > c.peak {
+		c.peak = v
+	}
+	peak, freed := c.peak, c.freed
+	c.mu.Unlock()
+	if peak*100 >= c.mb*90 {
+		fmt.Printf("[ERROR] the corpus used %d MB of its %d MB ceiling. "+
+			"Cases that ran out of space fail without saying so; raise scenario_ram_mb "+
+			"or lower log_volume_size, and treat this run's verdicts as unusable.\n", peak, c.mb)
+	} else {
+		fmt.Printf("[INFO] the corpus held at most %d MB of the %d MB it was allowed, "+
+			"and %d MB were reclaimed as directories finished\n", peak, c.mb, freed)
+	}
+	if c.shared {
+		_ = c.run("umount " + c.root)
+		_ = c.run("umount " + c.pristine)
+	}
+	_ = c.run("umount " + c.ram)
+	_ = os.Remove(c.ram)
+	// The slow lane's uppers are on disk and outlive the tmpfs, so they are the
+	// one thing here that has to be removed rather than unmounted. Leaving them
+	// would put back exactly the 20 GB of leftovers this exists to prevent.
+	if c.disk != "" {
+		_ = os.RemoveAll(c.disk)
+	}
+}
+
+func (c *Corpus) run(script string) error {
+	out, err := osexec.Command(contain.Shell, "-c", script).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", script, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}

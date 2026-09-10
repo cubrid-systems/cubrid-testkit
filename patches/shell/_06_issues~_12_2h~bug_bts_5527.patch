@@ -1,0 +1,17 @@
+--- bug_bts_5527.sh
++++ bug_bts_5527.sh
+@@ -3,6 +3,14 @@
+ 
+ . $init_path/init.sh
+ init test
++
++# testkit compatibility: this case's verdict depends on db_volume_size, which it
++# never names -- the size reaches it through cubrid.conf, on createdb or on the
++# volumes it later extends into. CUBRID ships 512M and the answers were written
++# under it. cubrid.conf is restored before every case, so this is the case's own
++# setting and nothing else's.
++change_db_parameter "db_volume_size=512M"
++
+ db=bug5527
+ cubrid server stop $db
+ cubrid deletedb $db

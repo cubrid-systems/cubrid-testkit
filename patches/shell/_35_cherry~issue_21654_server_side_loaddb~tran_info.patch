@@ -1,0 +1,92 @@
+--- tran_info.sh
++++ tran_info.sh
+@@ -2,23 +2,48 @@
+ . $init_path/init.sh
+ init test
+ 
++# testkit compatibility: this case watches a running loaddb, and the watch was
++# built so that it can miss it entirely.
++#
++# The wait slept two seconds *before* looking, ten times. A loaddb that finishes
++# inside that first sleep is never seen -- not by this loop, and not by the `ps`
++# after it, so $pid comes out empty, `kill -9` runs with no argument, and every
++# check reports NOK. Measured on this machine: load.log says "1000000 object(s)
++# inserted, 0 object(s) failed" while tranlist.log says "There are no
++# transactions". The load succeeded; the case simply arrived after it.
++#
++# Two changes, and both are about the same second. Look before sleeping, and
++# poll at 0.2 s instead of 2, so a loaddb that lives a second is still caught.
++# And take the pid here, at the moment the process is known to be alive, rather
++# than in a separate `ps` afterwards where it may already be gone.
++#
++# What is not changed is what the case tests: it still requires loaddb to appear
++# in tranlist and in `show transaction tables` under DBA, this host and this pid.
++# A run that misses the window even so fails the case, and says which.
++pid=""
+ function wait_loaddb_start
+ {
+-  for ((i=0;i<10;i++))
++  for ((i=0;i<200;i++))
+   do
+-    sleep 2
+     if [ $OS == "Windows_NT" ]
+     then
+-        cnt=`ps -W |grep 'cub_admin'|grep -v 'grep'|wc -l`
++        pid=`ps -W |grep 'cub_admin'|grep -v 'grep'|awk '{print $1}'`
++        pid_win=`ps -W |grep 'cub_admin'|grep -v 'grep'|awk '{print $4}'`
+     else
+-        cnt=`ps ux |grep 'cubrid loaddb --no-user-specified-name -udba -C -s tdb_schema -d tdb_objects'|grep -v 'grep'|wc -l`
++        pid=`ps ux |grep 'cubrid loaddb --no-user-specified-name -udba -C -s tdb_schema -d tdb_objects'|grep -v 'grep'|awk '{print $2}'`
+     fi
+-	
+-    if [ $cnt -gt 0 ]
++
++    if [ -n "$pid" ]
+     then
+         break
+     fi
++    sleep 0.2
+   done
++
++  if [ -z "$pid" ]
++  then
++    echo "[testkit] loaddb was never observed running: it finished before this case could look."
++  fi
+ }
+ 
+ set +x
+@@ -42,14 +67,6 @@
+ $CUBRID/bin/cubrid loaddb --no-user-specified-name -udba -C -s tdb_schema -d tdb_objects -i tdb_indexes $db >load.log 2>&1 &
+ wait_loaddb_start
+ 
+-if [ $OS == "Windows_NT" ]
+-then
+-    pid=`ps -W |grep 'cub_admin'|grep -v 'grep'|awk '{print $1}'`
+-    pid_win=`ps -W |grep 'cub_admin'|grep -v 'grep'|awk '{print $4}'`
+-else
+-    pid=`ps ux|grep 'cubrid loaddb --no-user-specified-name -udba -C'|grep -v grep|awk '{print $2}'`
+-fi
+-
+ 
+ host_name=`hostname`
+ found0=false
+@@ -119,11 +136,14 @@
+     fi
+ done
+ 
+-if [ $OS == "Windows_NT" ]
+-then    
+-    /bin/kill -9 -f $pid
+-else
+-    kill -9 $pid
++if [ -n "$pid" ]
++then
++    if [ $OS == "Windows_NT" ]
++    then
++        /bin/kill -9 -f $pid
++    else
++        kill -9 $pid
++    fi
+ fi
+ 
+ if [ $found0 == "true" ]

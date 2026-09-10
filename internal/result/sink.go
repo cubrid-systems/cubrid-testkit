@@ -50,6 +50,10 @@ type Sink struct {
 	checks  map[string]*os.File // check_<envId>.log
 	fin     map[string]*os.File // dispatch_tc_FIN_<envId>.txt
 	append  bool                // continue mode reopens rather than truncates
+	// lock is this run's claim on the result tree. Nil when the tree could not
+	// be locked at all -- a read-only CTP_HOME, say -- which is not a reason to
+	// refuse to run.
+	lock *runLock
 }
 
 // Open prepares the run directory: <CTP_HOME>/result/<category>/current_runtime_logs
@@ -60,7 +64,14 @@ func Open(home *conf.Home, category string, continueMode bool) (*Sink, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("result directory %s: %w", dir, err)
 	}
+	// One run at a time per result tree -- see lock.go for why this is a refusal
+	// rather than a queue.
+	lock, err := lockRun(home.Path, category, filepath.Dir(dir))
+	if err != nil {
+		return nil, err
+	}
 	return &Sink{
+		lock:    lock,
 		dir:     dir,
 		root:    filepath.Dir(dir),
 		stdout:  os.Stdout,
@@ -108,11 +119,30 @@ func (s *Sink) Core(path string) { fmt.Fprintf(s.stdout, "CORE_FILE:%s\n", path)
 
 // Worker appends to test_<envId>.log, the per-environment detail log.
 func (s *Sink) Worker(envID, line string) error {
+	return s.WorkerLines(envID, []string{line})
+}
+
+// WorkerLines appends lines to test_<envId>.log as one piece.
+//
+// A case's output is a block, and with slots there is more than one worker
+// writing it. Line at a time they interleave, and the first parallel run showed
+// exactly that: a [TESTCASE] header for one case followed by another case's
+// trace. The lock has to span the block rather than each line -- and the block
+// has to be the unit the caller hands over, which is why this exists rather
+// than a Lock/Unlock pair for a caller to get wrong.
+func (s *Sink) WorkerLines(envID string, lines []string) error {
 	f, err := s.file(s.workers, "test_"+envID+".log", true)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(f, line)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	_, err = io.WriteString(f, b.String())
 	return err
 }
 
@@ -283,6 +313,7 @@ func (s *Sink) file(cache map[string]*os.File, name string, appendMode bool) (*o
 func (s *Sink) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer s.lock.release()
 	var firstErr error
 	for _, cache := range []map[string]*os.File{s.workers, s.monitor, s.checks, s.fin} {
 		for _, f := range cache {

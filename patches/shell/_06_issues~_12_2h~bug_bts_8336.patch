@@ -1,0 +1,18 @@
+--- bug_bts_8336.sh
++++ bug_bts_8336.sh
+@@ -43,7 +43,14 @@
+ 
+ csql -S -udba $db -c "select 'result'||chr(-1)"|grep -a result > result.tmp 2>&1
+ 
+-if [ `grep "result" result.tmp|wc -l` -eq 2 ]
++# testkit compatibility: chr(-1) puts a byte in result.tmp that makes GNU grep
++# call the file binary, and a binary match prints one "binary file matches"
++# line instead of the two matching lines the check counts. Whether it does that
++# depends on the locale: with LC_ALL=C grep prints both lines, under a UTF-8
++# locale it prints neither. Measured on this machine, where LANG is
++# en_US.UTF-8. The line above already passes -a for exactly this reason; this
++# one was missed.
++if [ `grep -a "result" result.tmp|wc -l` -eq 2 ]
+ then
+     write_ok
+ else

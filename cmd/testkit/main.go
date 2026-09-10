@@ -15,15 +15,19 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
@@ -48,6 +52,24 @@ const (
 )
 
 func main() {
+	// Containment happens before anything else or it happens to a process that
+	// has already opened files and started goroutines. Enter re-executes this
+	// program in namespaces of its own and returns the child's exit code; -1
+	// means there was nothing to do, which is the default.
+	if code := contain.Enter(); code >= 0 {
+		os.Exit(code)
+	}
+	// PID 1 of that namespace becomes an init and forks the work: collecting
+	// orphans is Wait4(-1), which would otherwise take os/exec's own children
+	// out from under it. -1 again means this process is the one doing the work.
+	if code := contain.Init(); code >= 0 {
+		os.Exit(code)
+	}
+	if err := contain.Setup(); err != nil {
+		fmt.Fprintf(os.Stderr, "testkit: %v\n", err)
+		os.Exit(exitEnvironment)
+	}
+
 	os.Exit(run(os.Args[1:]))
 }
 
@@ -59,6 +81,20 @@ func run(args []string) int {
 	// (docs/concept/external-surface-freeze.md §1-4).
 	if len(args) > 0 && args[0] == "run-shell" {
 		return runShell(args[1:])
+	}
+
+	// replay is the third CLI tree, and it is new rather than inherited: CTP had
+	// nothing like it. It plays a finished run back through the status page, at a
+	// speed, from the feedback.log the run already wrote -- so it works on runs
+	// that finished before any of this existed.
+	if len(args) > 0 && args[0] == "replay" {
+		return replay(args[1:])
+	}
+
+	// failures turns a finished run into the list of cases to try again. It is
+	// the other half of testcase_from_file, and it is new rather than inherited.
+	if len(args) > 0 && args[0] == "failures" {
+		return failures(args[1:])
 	}
 
 	inv, err := cli.Parse(args)
@@ -293,4 +329,182 @@ func runShell(args []string) int {
 		return exitPreflight
 	}
 	return exitOK
+}
+
+const replayUsage = `usage: replay [OPTION] <feedback.log | result directory>
+
+Play a finished run back through the status page. The wall clock is compressed;
+the durations reported are the ones the run really had, so the histogram, the
+per-family totals and the finished table all say what actually happened.
+
+The input is a run's feedback.log, or a directory holding one -- a result tree,
+or its current_runtime_logs. Nothing was recorded for this: feedback.log already
+carries the slot, the case, the verdict, the elapsed time and the wall clock each
+case finished at, which is everything the page needs.
+
+options:
+  --speed N     times real time; default 60, so an hour plays in a minute
+  --http ADDR   where to serve; "on" or a bare port are accepted, as in shell.conf
+`
+
+func replay(args []string) int {
+	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	speed := fs.Float64("speed", 60, "")
+	addr := fs.String("http", "on", "")
+	help := fs.Bool("h", false, "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		fmt.Fprint(os.Stderr, replayUsage)
+		return exitPreflight
+	}
+	if *help || fs.NArg() == 0 {
+		fmt.Fprint(os.Stdout, replayUsage)
+		return exitOK
+	}
+
+	path, err := findFeedback(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		return exitPreflight
+	}
+	events, err := status.ParseFeedbackFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %s: %v\n", path, err)
+		return exitPreflight
+	}
+	where := status.Addr(*addr)
+	if where == "" {
+		where = status.DefaultAddr
+	}
+	stopPage, err := status.ReplayFrom(path, events, *speed, where, os.Stdout)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		return exitEnvironment
+	}
+	defer stopPage()
+	// The run is over but the page is the point, so it stays up until the user
+	// stops looking at it.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+	return exitOK
+}
+
+// findFeedback accepts the log itself, a result tree, or anything above one.
+func findFeedback(arg string) (string, error) {
+	info, err := os.Stat(arg)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return arg, nil
+	}
+	for _, try := range []string{
+		"feedback.log",
+		"current_runtime_logs/feedback.log",
+		"shell/current_runtime_logs/feedback.log",
+		"result/shell/current_runtime_logs/feedback.log",
+	} {
+		p := filepath.Join(arg, try)
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no feedback.log under %s", arg)
+}
+
+const failuresUsage = `usage: failures [OPTION] <feedback.log | result directory>
+
+Print the cases a run failed, one a line, in the form testcase_from_file wants.
+This is the loop a fix goes round: run the corpus, fix something, rebuild the
+engine, and try the failures again -- which is minutes rather than the two hours
+the whole corpus takes, and answers the question that was actually asked.
+
+    testkit failures ~/CTP/result/shell > failed.txt
+    # then, in the conf for the next run:
+    #   testcase_from_file=/path/to/failed.txt
+
+Paths are printed from the family segment down rather than in full, so the list
+still selects the same cases when the corpus sits somewhere else. The engine may
+be a different build; a case is the same case.
+
+options:
+  --full        print the whole path as the run recorded it
+  --count       print only how many failed
+`
+
+func failures(args []string) int {
+	fs := flag.NewFlagSet("failures", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	full := fs.Bool("full", false, "")
+	count := fs.Bool("count", false, "")
+	help := fs.Bool("h", false, "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "failures: %v\n", err)
+		fmt.Fprint(os.Stderr, failuresUsage)
+		return exitPreflight
+	}
+	if *help || fs.NArg() == 0 {
+		fmt.Fprint(os.Stdout, failuresUsage)
+		return exitOK
+	}
+	path, err := findFeedback(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failures: %v\n", err)
+		return exitPreflight
+	}
+	events, err := status.ParseFeedbackFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failures: %s: %v\n", path, err)
+		return exitPreflight
+	}
+
+	// The last attempt wins. A retried case appears twice and the second
+	// verdict is the run's; listing a case that ended up passing would send the
+	// next run after something that is already fixed.
+	last := map[string]status.Event{}
+	for _, e := range events {
+		if prev, seen := last[e.Case]; !seen || e.Start.After(prev.Start) {
+			last[e.Case] = e
+		}
+	}
+	var out []string
+	for name, e := range last {
+		if e.OK {
+			continue
+		}
+		if *full {
+			out = append(out, name)
+		} else {
+			out = append(out, caseFragment(name))
+		}
+	}
+	sort.Strings(out)
+
+	if *count {
+		fmt.Println(len(out))
+		return exitOK
+	}
+	if len(out) == 0 {
+		fmt.Fprintln(os.Stderr, "failures: none -- every case in that run passed")
+		return exitOK
+	}
+	fmt.Printf("# %d cases failed in %s\n", len(out), path)
+	for _, c := range out {
+		fmt.Println(c)
+	}
+	return exitOK
+}
+
+// caseFragment names a case from its family down, which is the part that does
+// not change when the corpus moves. Same rule the status page names cases by.
+func caseFragment(p string) string {
+	parts := strings.Split(p, "/")
+	for i, seg := range parts {
+		if len(seg) > 3 && seg[0] == '_' && seg[1] >= '0' && seg[1] <= '9' {
+			return strings.Join(parts[i:], "/")
+		}
+	}
+	return p
 }

@@ -1,0 +1,20 @@
+--- bug_bts_4222.sh
++++ bug_bts_4222.sh
+@@ -8,6 +8,17 @@
+ 
+ db=bug_4222
+ 
++# testkit compatibility: the case creates the database with no size of its own
++# and asserts the layout CUBRID ships -- "PERMANENT ... 512.0 M" twice and a
++# 512M log volume -- and later data_buffer_size=512.0M, which it never names
++# either: it sets log_buffer_size itself and leaves the rest alone. This run
++# lowers all three so that 24 slots fit in memory, and spacedb and paramdump
++# then report the run's sizes, so four of the seven checks fail on numbers the
++# case never names. Restoring what CUBRID ships gives it the layout its checks
++# were written under. cubrid.conf is restored before every case, so this
++# reaches nothing else.
++sed -i 's/^[[:space:]]*db_volume_size[[:space:]]*=.*/db_volume_size=512M/;s/^[[:space:]]*log_volume_size[[:space:]]*=.*/log_volume_size=512M/;s/^[[:space:]]*data_buffer_size[[:space:]]*=.*/data_buffer_size=512M/' $CUBRID/conf/cubrid.conf
++
+ cubrid_createdb $db
+ cubrid server start $db
+ 

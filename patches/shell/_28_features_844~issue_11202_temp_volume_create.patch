@@ -1,0 +1,20 @@
+--- issue_11202_temp_volume_create.sh
++++ issue_11202_temp_volume_create.sh
+@@ -20,6 +20,17 @@
+ rm $CUBRID/log/server/11202*.event
+ mkdir $db
+ cd $db
++# testkit compatibility: the case pins both sizes on createdb, which sizes the
++# permanent volumes. The temporary volumes it counts events for take their size
++# from cubrid.conf, which it never names, and it then compares an event log with
++# an exact number of DISK_EXTEND / TEMPORARY_VOLUME entries. This run lowers
++# db_volume_size so 24 slots fit in memory, the temp volumes come out smaller
++# and extend more often, and the diff shows one extra started/completed pair.
++# The same shape as _28_features_844/issue_10986_eventlog/_03_eventlog_tempvolume,
++# which was measured NOK -> OK with this line. cubrid.conf is restored before
++# every case.
++sed -i 's/^[[:space:]]*db_volume_size[[:space:]]*=.*/db_volume_size=512M/' $CUBRID/conf/cubrid.conf
++
+ cubrid_createdb -r $db --db-volume-size=20m --log-volume-size=20m
+ change_db_parameter "parallel_scan_page_threshold=32" # Added for CBRD-26311
+ change_db_parameter "enable_string_compression=n" # Added because char became variable-length + compressed

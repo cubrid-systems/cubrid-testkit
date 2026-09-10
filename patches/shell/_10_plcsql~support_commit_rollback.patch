@@ -1,0 +1,20 @@
+--- support_commit_rollback.sh
++++ support_commit_rollback.sh
+@@ -46,8 +46,15 @@
+ " > /dev/null
+ 
+ function query_test() {
+-    local sql_files=($(find test_sql -name "*.sql"))
+-    local answer_files=($(find test_answer -name "*.answer"))
++    # testkit compatibility: find returns readdir order, which is the order of
++    # the directory on the filesystem it happens to sit on. The .answer files
++    # pin an absolute serial that only comes out right if the 18 sub-tests run
++    # in name order -- test_01 expects 1, test_02 expects 7, test_03 expects 13.
++    # Measured: this run's serials were 12(2), 17(7), 09(13), 16(19), 10(26)...,
++    # exactly the checkout's readdir order, and every one of the 18 comparisons
++    # failed. Sorting makes the order the answers assume.
++    local sql_files=($(find test_sql -name "*.sql" | sort))
++    local answer_files=($(find test_answer -name "*.answer" | sort))
+ 
+ :<<comment
+     Test process

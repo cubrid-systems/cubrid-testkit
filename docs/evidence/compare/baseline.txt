@@ -1,0 +1,63 @@
+# Differences seen before, named, with the reason they are not findings.
+#
+# Format:  <id> TAB <side> TAB <extended regex>
+# Side is "<" for a line only CTP produced, ">" for one only testkit produced,
+# "*" for either. The first matching rule wins, so narrow rules come first.
+#
+# THIS FILE IS NOT A VERDICT. Each entry says only "this has been seen and
+# explained", never that it is acceptable. Two rules follow from that:
+#
+#  1. The files that carry verdicts are never classified. compare.sh holds them
+#     to zero differences with the baseline off, because a rule that hid a wrong
+#     verdict would be worse than no rule at all.
+#  2. A rule earns its place by naming a cause. "noise" is not a cause.
+
+# ---------------------------------------------------------------------------
+# Structural: steps CTP has and this runner deliberately does not.
+# ---------------------------------------------------------------------------
+
+# CTP updates itself before the first case -- deploy_ctp runs upgrade.sh, which
+# echoes the whole environment -- and reports on installing a build. Both steps
+# are axis-O exclusions, so this runner has neither.
+ctp-self-update	<	^export [A-Za-z_][A-Za-z0-9_]*=
+ctp-self-update	<	^(BEGIN TO UPGRADE CTP|SKIP CTP UPDATE FOR LOCAL TEST!|\[INFO\] SKIP TO UPDATE|DONE)$
+ctp-self-update	<	^Skip build installation since cubrid_download_url is not configured
+ctp-self-update	<	^grep: conf/common\.conf: No such file or directory$
+
+# ---------------------------------------------------------------------------
+# Machine state: a snapshot of the box, which two consecutive CTP runs cannot
+# reproduce against each other either.
+# ---------------------------------------------------------------------------
+
+# The four dumps taken at every process reset. The normaliser drops the socket
+# and IPC tables; what survives is each run's own pids and the reset's chatter.
+reset-noise	*	^(root|[a-z_][a-z0-9_-]*) +[0-9<N>]
+reset-noise	*	grep cub$
+reset-noise	*	^(@ cubrid (broker|master|manager server) stop|\+\+ cubrid (broker|master) is not running\.)$
+reset-noise	*	^\[INFO\] (CLEAN PROCESSES|Reset CUBRID):
+
+# A blank line on one side and not the other, left over from the blocks above.
+blank	*	^[[:space:]]*$
+
+# ---------------------------------------------------------------------------
+# Named and open: real differences with a recorded cause, still open.
+# ---------------------------------------------------------------------------
+
+# The JDK 8 launcher puts three JVM directories at the head of LD_LIBRARY_PATH
+# when one is on the path but not first, and CTP's entry point is java. A hit
+# here means the environment put a JVM directory second -- worth knowing, not
+# worth stopping for.
+ld-library-path	*	LD_LIBRARY_PATH=
+
+# `rm -rf $CUBRID/log/*` traced with the glob expanded on one side and not the
+# other, because the directory was empty on one of them.
+empty-glob	*	^\+ rm -rf .*/CUBRID/log
+
+# CTP writes a passing case as <testcase ...></testcase> and this writes
+# <testcase .../>. Same document, different serialisation; the file is F2 and
+# matching IndentingXMLStreamWriter's whitespace would reproduce an accident.
+xml-serialisation	*	^[[:space:]]*</?testcase
+
+# CTP's snapshot is the configuration merged with System.getProperties(), so it
+# carries java.version, awt.toolkit and fifty more. A Go program has none.
+jvm-properties	<	^(java|sun|awt|user|os|file|path|line|jdk)\.

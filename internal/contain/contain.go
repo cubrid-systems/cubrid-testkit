@@ -213,6 +213,18 @@ func Setup() error {
 			return fmt.Errorf("bind %s over /bin/sh: %w", sh, err)
 		}
 	}
+
+	// And a machine name that resolves to loopback, because a slot's network
+	// namespace has nothing else. See hosts.go: this is invisible on a host
+	// whose hostname maps to 127.0.1.1 and fatal in a container whose hostname
+	// maps to eth0.
+	dir, err := os.MkdirTemp("", "testkit-ns-")
+	if err != nil {
+		return fmt.Errorf("make a place for this namespace's files: %w", err)
+	}
+	if err := bindHosts(dir); err != nil {
+		return err
+	}
 	return nil
 }
 

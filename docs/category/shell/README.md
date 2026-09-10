@@ -10,6 +10,7 @@ as-built guide.
 | **[3. Running it](03-running-it.md)** | on a host and in Docker, from an empty directory to a verdict |
 | **[4. Configuration](04-configuration.md)** | every key, what it costs, and what to set |
 | **[5. The memory ceiling](05-the-ceiling.md)** | the one setting that fails a run rather than slowing it |
+| **[6. Keeping what failed](06-keeping-what-failed.md)** | what a failing case leaves behind, and what it should |
 
 The pre-implementation design — the old Java class mapping and the ADRs behind the rewrite — is
 [`../../design/module-shell.md`](../../design/module-shell.md).

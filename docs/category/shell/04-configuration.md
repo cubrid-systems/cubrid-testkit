@@ -49,6 +49,17 @@ These behave as they always did.
 | `TESTKIT_CONTAIN_SH` | which shell to bind over `/bin/sh`. `bash` if it can be found |
 | `TESTKIT_SLOT_ROOT` | where per-slot overlays go |
 
+And CTP's failure snapshot, which is off the frozen surface and configurable:
+
+| | default | |
+|---|---|---|
+| `CTP_ERROR_BACKUP` | on | `off` takes no snapshot at all |
+| `CTP_ERROR_BACKUP_DIR` | `~/ERROR_BACKUP` | where snapshots go. It used to be hard-coded |
+
+A snapshot is the whole install plus the case directory — 748 MB per failing case — so a run with
+many failures writes tens of gigabytes into the home directory, inside the measurement. See
+[keeping what failed](06-keeping-what-failed.md).
+
 CTP's own environment still applies — `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` — and so
 do `SKIP_CHECK_RECOVERY_ERROR`, `SKIP_CHECK_FATAL_ERROR` and `CTP_ERROR_BACKUP`.
 

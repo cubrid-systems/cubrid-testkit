@@ -142,6 +142,27 @@ func ParseSkipped(grepOutput, key string) []string {
 	return out
 }
 
+// ExcludeFiles splits testcase_exclude_from_file into the files it names.
+//
+// CTP took one path and one path still works. More than one is allowed because
+// the reasons are not one reason: the corpus's own daily_regression list is
+// upstream's judgement about a case, while a list of cases this machine cannot
+// run at all is a fact about the machine. Kept in one file they cannot be told
+// apart, and the machine's list can never be deleted when the machine changes.
+// See exclusions/README.md.
+//
+// Commas separate, whitespace around a name is not part of it, and an empty
+// entry is skipped rather than becoming `cat ""`.
+func ExcludeFiles(spec string) []string {
+	var out []string
+	for _, f := range strings.Split(spec, ",") {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // ParseExcluded reads an exclusion file. Blank lines and lines starting with #
 // or -- are comments. Every entry gets a trailing slash so that a directory name
 // cannot match a longer name that merely starts with it.
@@ -202,4 +223,37 @@ func Remove(cases, unwanted []string) (kept, removed []string) {
 		kept = append(kept, c)
 	}
 	return kept, removed
+}
+
+// Include is Exclude's inverse: keep only the cases a pattern names.
+//
+// It exists for the loop a fix goes round. A run leaves a list of failures; the
+// engine is rebuilt with a change; and the question is whether those cases pass
+// now -- not whether the other 3,400 still do, which takes two hours and answers
+// something else. Running the failures alone is minutes.
+//
+// Matching is Exclude's, a substring of the path with a trailing slash, so that
+// a list written against one scenario root still selects under another. That is
+// what makes it work across builds: the corpus may sit somewhere else, and a
+// case is still the same case.
+func Include(cases, patterns []string) (kept, dropped []string) {
+	if len(patterns) == 0 {
+		return cases, nil
+	}
+	keep := map[int]bool{}
+	for _, pat := range patterns {
+		for j := range cases {
+			if !keep[j] && strings.Contains(cases[j]+"/", pat) {
+				keep[j] = true
+			}
+		}
+	}
+	for i, c := range cases {
+		if keep[i] {
+			kept = append(kept, c)
+		} else {
+			dropped = append(dropped, c)
+		}
+	}
+	return kept, dropped
 }

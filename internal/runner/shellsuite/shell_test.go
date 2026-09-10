@@ -243,3 +243,98 @@ func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
 		t.Errorf("nothing was configured, so nothing can be left out: %v", extra)
 	}
 }
+
+// Slots are only for the real opener, and the guard for that must not depend on
+// a field the constructor fills in. It did once: NewShell set Channels, so the
+// guard was false for every real run and parallel_slots stopped opening any slot
+// at all -- a four-slot run reported one.
+func TestTheRealShellCanOpenSlots(t *testing.T) {
+	if s := NewShell(); s.Channels != nil {
+		t.Error("NewShell set Channels, which makes the run look like a caller supplied its own")
+	}
+}
+
+// The registry gets an overlay of its own only when it is outside the install.
+// CUBRID's own default puts it at $CUBRID/databases -- and CTP's reset cleans
+// and restores it there -- in which case the install's overlay already covers
+// it and a second one would nest overlayfs on overlayfs for nothing.
+func TestTheRegistryIsCoveredByTheInstallWhenItIsInsideIt(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		parents []string
+		dir     string
+		want    bool
+	}{
+		{"CUBRID's default layout", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases", true},
+		{"the same directory", []string{"/opt/CUBRID"}, "/opt/CUBRID", true},
+		{"a registry kept outside", []string{"/opt/CUBRID"}, "/var/db/registry", false},
+		{"a sibling, not a child", []string{"/opt/CUBRID"}, "/opt/CUBRID-old", false},
+		// The reason this is not a string prefix test: "/a/bc" starts with
+		// "/a/b" and is not inside it. A prefix check would skip a real overlay
+		// and the slot would share the machine's registry with every other one.
+		{"a name that merely starts the same", []string{"/a/b"}, "/a/bc", false},
+		{"a path that climbs back out", []string{"/opt/CUBRID"}, "/opt/CUBRID/../other", false},
+		{"nothing covered yet", nil, "/opt/CUBRID", false},
+		{"deeper inside", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases/x/y", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := under(c.parents, c.dir); got != c.want {
+				t.Errorf("under(%q, %q) = %v, want %v", c.parents, c.dir, got, c.want)
+			}
+		})
+	}
+}
+
+// The machine has to be able to hold the whole ceiling, not the gate.
+//
+// The gate holds back new cases only; the ones already running fill the rest,
+// and they do -- a 24-slot run with the gate at 80% finished with 22,528 MB of
+// its 22,528 MB ceiling in use. Comparing the gate instead is what the first
+// version of this check did, and it stayed silent for the run systemd-oomd then
+// killed at 2,951 of 3,204 cases.
+func TestTheWholeCeilingIsComparedAgainstTheMachine(t *testing.T) {
+	const perSlotMB = 175
+	for _, c := range []struct {
+		name                    string
+		limit, slots, avl, high int
+		wantWarn                bool
+	}{
+		// The run that was killed: 22528 + 24*175 = 26728 against 25108 free.
+		// The old check compared 22528*80% = 18022 and said nothing.
+		{"the ceiling that was killed", 22528, 24, 25108, 80, true},
+		{"the same run, gate only", 22528, 24, 25108, 80, true},
+		{"lowered until it fits", 12288, 24, 25108, 80, false},
+		{"what sizing.sh recommends", 8672, 8, 11688, 80, false},
+		{"a ceiling that fits but the slots do not", 8672, 24, 11688, 80, true},
+		{"no ceiling configured", 0, 24, 25108, 80, false},
+		// MemAvailable unreadable: judging on a zero would warn about every run.
+		{"the machine will not say", 22528, 24, 0, 80, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			reserve := c.slots * perSlotMB
+			got := c.limit > 0 && c.avl > 0 && c.limit+reserve > c.avl
+			if got != c.wantWarn {
+				t.Errorf("ceiling=%d slots=%d available=%d MB: need %d, warned=%v want %v",
+					c.limit, c.slots, c.avl, c.limit+reserve, got, c.wantWarn)
+			}
+		})
+	}
+}
+
+// And the number it reads is the kernel's own, not a total that includes what
+// is already spoken for.
+func TestMemAvailableIsWhatTheKernelWillGive(t *testing.T) {
+	got := memAvailableMB()
+	if got < 0 {
+		t.Fatalf("negative: %d", got)
+	}
+	if _, err := os.ReadFile("/proc/meminfo"); err != nil {
+		if got != 0 {
+			t.Errorf("no /proc/meminfo here, so it must answer 0, got %d", got)
+		}
+		return
+	}
+	if got == 0 {
+		t.Error("this machine has /proc/meminfo and MemAvailable was not read")
+	}
+}

@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 342" width="880" height="342" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Animated: CTP and testkit run on the same four cases on the same machine in the same minute. Both report three passed and one failed, the same case failing on both, and exit 0. Of the ten files a run leaves behind, six are byte-identical after normalisation, one is identical once the JVM's own properties are removed, and three differ by a named number of lines.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 342" width="880" height="342" font-family="Helvetica, Arial, sans-serif" role="img" aria-label="Animated: CTP and testkit run on the same four cases on the same machine in the same minute. Both report three passed and one failed, the same case failing on both, and exit 0. Of the ten files a run leaves behind, six are byte-identical after normalisation, one is identical once the JVM's own properties are removed, and three differ by a named number of lines. Ten of those lines are still unexplained, and the largest difference turned out to be a defect in the new runner rather than a difference between the two.">
 <style>
   .ttl{font-size:15px;font-weight:700;fill:#1f2937}
   .sub{font-size:11px;fill:#6b7280}
@@ -44,7 +44,7 @@
 
 <rect class="box" x="10" y="216" width="860" height="106" rx="5"/>
 <text class="band" x="24" y="234">TEN FILES, AFTER normalize.sh</text>
-<text class="mg" x="856" y="234" text-anchor="end" opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.90;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>6 identical · 1 identical without the JVM&#39;s own properties · 3 with a named reason</text>
+<text class="mg" x="856" y="234" text-anchor="end" opacity="0"><animate attributeName="opacity" values="0;1;1" keyTimes="0;0.90;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/>6 identical · 1 without the JVM&#39;s own properties · 3 named — and ten lines still open</text>
 
 <text class="mg" x="24" y="256">dispatch_tc_ALL.txt</text>
 <text class="mg" x="300" y="256" fill="#1a7f37" opacity="0">identical<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.38;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
@@ -62,7 +62,7 @@
 <text class="mg" x="452" y="292">main_snapshot.properties</text>
 <text class="mg" x="700" y="292" fill="#9a6700" opacity="0">identical, minus JVM properties<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.70;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
 <text class="mg" x="452" y="310">feedback.log · test-shell.xml · test_local.log</text>
-<text class="mg" x="700" y="310" fill="#9a6700" opacity="0">8 / 13 / 652 lines, each named<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.80;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
+<text class="mg" x="700" y="310" fill="#9a6700" opacity="0">6 / 11 / 154 lines — ten still open<animate attributeName="opacity" values="0;1;1" keyTimes="0;0.80;1" dur="12s" calcMode="discrete" repeatCount="indefinite"/></text>
 
 <text class="note" x="10" y="336">Four cases, not 3,452 — this does not clear the gate. What it establishes is that the two runners agree where it matters.  ADR-013 · docs/evidence/regression-shell.md</text>
 </svg>

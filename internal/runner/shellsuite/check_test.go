@@ -58,3 +58,22 @@ func TestDos2unixIsNotRequired(t *testing.T) {
 		}
 	}
 }
+
+// expect is required, and it is not CTP's. 216 cases run it and the corpus ships
+// 236 .exp scripts, so it carries more of the corpus than three of the commands
+// CTP does check: wget is wanted by 2 cases, tar by 10, kill by 149.
+//
+// It earns its place by how it fails rather than by how often it is used. A
+// machine without expect does not stop: the case runs, the .exp script does not,
+// and the case greps a log that was never written. bug_bts_6159 and bug_bts_8456
+// both end at `cnt=0` that way, and a plain NOK is what the operator sees --
+// indistinguishable from a wrong answer. One line at the start of the run is the
+// whole point of this list.
+func TestExpectIsRequired(t *testing.T) {
+	for _, cmd := range checkedCommands {
+		if cmd == "expect" {
+			return
+		}
+	}
+	t.Error("expect is not in the required list; 216 cases run it and fail silently without it")
+}

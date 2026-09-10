@@ -92,9 +92,13 @@ Two kinds: running the new runner, and running it *beside* CTP on the same cases
 | **`check_<envId>.log`** — a twenty-one line requirements check (variables, commands, directories) written to the file *and* to standard output before any case runs. The specification had neither the file nor the console lines | `CheckRequirement` |
 | **`monitor_<envId>.log` is created whether or not anything is written to it**, so every result directory has one, usually empty | `TestMonitor`, `Log` |
 
+| **The process reset selects nothing inside the comparison's own namespace** *(2026-09-07)*. Both runners sweep with `ps -u $USER`. Under `unshare --map-root-user` the processes are uid 0 while `$USER` is still the outer name, so the selector matches nothing: every `killPatterns` entry, the JVM sweep, the `sleep`/`expect`/`dos2unix` kills and `ipcs \| grep $USER` have been no-ops in every namespaced run. Only `cubrid service stop`, the one line that does not go through `ps`, ever did anything. The spec described the reset as a thing that runs | `smoke-217.md` §3, measured directly inside the wrapper |
+| **A case under CTP inherits the JDK's rewrite of `LD_LIBRARY_PATH`** *(2026-09-06)*. When a JVM library directory is on the variable but not at its head, the JDK 8 launcher rebuilds it as `<its own three directories>:<the original>` and re-execs; `Runtime.exec` then hands that to every case. CTP does not do this and cannot stop it — its entry point is `java`. The spec described the environment a case is entitled to assume and had no row for this | `regression-shell.md` §3-5, reproduced with `jrunscript` |
+
 **What this method catches:** whole surfaces nobody thought to write down. Reading more carefully
 would not have found these, because the question "what else does it print?" has no place to be
-asked until something prints.
+asked until something prints. The last row is a variant worth naming: not a surface CTP prints, but
+one it *passes on* — visible only because the replacement, not being a Java program, does not.
 
 ## 5. Found by running it on a machine CTP does not support
 
@@ -183,7 +187,7 @@ nothing, are both invisible until someone has to decide whether to carry them ov
 
 A frozen surface is only as good as the reading behind it, and the reading was done six different
 ways here with six different yields. The spec was not careless — it was written from a careful
-analysis — and it was still wrong in thirty-two places, every one of them F1.
+analysis — and it was still wrong in thirty-four places, every one of them F1.
 
 Three practical consequences:
 
@@ -198,7 +202,7 @@ Three practical consequences:
 
 ## Where CTP does not agree with itself
 
-Some of the thirty-two are not errors the spec could have avoided by reading harder. They are
+Some of the thirty-four are not errors the spec could have avoided by reading harder. They are
 places where CTP cannot reproduce its own behaviour, or where two parts of it contradict each other.
 Each one needs a decision, and the decisions are not all the same:
 
@@ -212,6 +216,7 @@ Each one needs a decision, and the decisions are not all the same:
 | the JVM sweep is a shell syntax error and kills nothing | **kept** — repairing it widens what the runner kills |
 | a build id with no commit suffix runs on to the next `)` | **kept** — ugly, but deterministic, and it is what identifies the build in `main_snapshot.properties` and in every case's environment |
 | `TEST_BUIILD_ID` is exported to every case and read by none | **kept** — removing it changes what cases can see, for nothing |
+| the JDK 8 launcher reorders `LD_LIBRARY_PATH`, so a case under CTP sees three JVM directories a case under testkit will not *(2026-09-06)* | **kept** — the entries are the same set, the order differs, and there are no basename collisions between `$CUBRID/lib` and the injected directories. Simulating a launcher this runner does not have would be reproducing an accident, and it is one that disappears with the last JVM in the chain |
 
 The rule that decides between the two columns is the config-key policy, applied to behaviour rather
 than to keys: **change it when leaving it alone would make someone trust a wrong result; keep it

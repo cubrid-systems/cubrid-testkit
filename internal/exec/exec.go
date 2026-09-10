@@ -11,12 +11,20 @@ package exec
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"syscall"
+	"time"
 )
+
+// cancelGrace is how long Wait will keep reading a cancelled command's output
+// before giving up on it. Something outside the process group holding the pipe
+// is a bug worth a few seconds, not a reason to block a whole run.
+const cancelGrace = 5 * time.Second
 
 // Result is what a command left behind.
 type Result struct {
@@ -65,6 +73,12 @@ type Local struct {
 	Dir string
 	// Env replaces the environment when non-nil, and extends it otherwise.
 	Env []string
+	// ScriptDir is where the script file is written. Empty means the process's
+	// own temporary directory, which is what a local run has always used. A
+	// channel into a namespace has to name somewhere else: a slot gets a /tmp of
+	// its own, and a script written into this process's /tmp is not in the one
+	// the command will read.
+	ScriptDir string
 	// SourceProfile prepends Profile, as CTP's remote path always did and its
 	// local paths did not agree about: the shell task reached even a local machine
 	// through SSHConnect and got the profile, while unittest called LocalInvoker
@@ -114,7 +128,14 @@ const Profile = `pri_ctp_home=$CTP_HOME; if  [ -f ~/.bash_profile ]; then . ~/.b
 const Shell = "bash"
 
 func (l *Local) Run(ctx context.Context, script string) (Result, error) {
-	f, err := os.CreateTemp("", ".testkit-exec-*.sh")
+	return l.RunWith(ctx, script, nil)
+}
+
+// RunWith is Run with the command line handed to wrap first, so a caller can
+// put the script somewhere other than this process's own namespaces without
+// this package learning what a namespace is. nil means run it here.
+func (l *Local) RunWith(ctx context.Context, script string, wrap func(argv ...string) []string) (Result, error) {
+	f, err := os.CreateTemp(l.ScriptDir, ".testkit-exec-*.sh")
 	if err != nil {
 		return Result{}, fmt.Errorf("script file: %w", err)
 	}
@@ -132,9 +153,26 @@ func (l *Local) Run(ctx context.Context, script string) (Result, error) {
 		return Result{}, fmt.Errorf("script file: %w", err)
 	}
 
-	cmd := osexec.CommandContext(ctx, Shell, name)
+	argv := []string{Shell, name}
+	if wrap != nil {
+		argv = wrap(argv...)
+	}
+	cmd := osexec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = l.Dir
 	cmd.Env = l.Env
+
+	// A case is a tree, not a process, so cancellation has to reach the tree.
+	// Without Setpgid it signals the shell alone, the descendants survive holding
+	// the pipe, and Wait never returns. WaitDelay bounds the case where one of
+	// them escapes the group anyway.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = cancelGrace
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -148,6 +186,26 @@ func (l *Local) Run(ctx context.Context, script string) (Result, error) {
 	var exitErr *osexec.ExitError
 	if ok := asExit(err, &exitErr); ok {
 		res.ExitCode = exitErr.ExitCode()
+		return res, nil
+	}
+	// A command that starts a daemon leaves the daemon holding the pipe.
+	//
+	// cub_master, cub_broker and cub_server all outlive the shell that started
+	// them and inherit its stdout, so the shell exits, its output is complete,
+	// and Wait still blocks -- which is what WaitDelay is here to bound. But the
+	// error it then returns is not a failed case: the process exited on its own
+	// and ProcessState has its status. Reporting it as a runtime error threw the
+	// verdict away and failed the case whatever it had done.
+	//
+	// Measured: _36_cub_master/bug_xdbms40 and _40_broker/itrack03 both failed
+	// with "WaitDelay expired before I/O complete" and no verdict at all.
+	//
+	// A cancelled context is the other half of WaitDelay's job and still an
+	// error -- that is a case that would not stop, and Exited() is false for a
+	// process the cancel killed.
+	if errors.Is(err, osexec.ErrWaitDelay) && ctx.Err() == nil &&
+		cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		res.ExitCode = cmd.ProcessState.ExitCode()
 		return res, nil
 	}
 	return res, fmt.Errorf("local run: %w", err)

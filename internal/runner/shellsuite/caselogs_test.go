@@ -173,3 +173,27 @@ func TestAPathWithASpaceIsQuoted(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A capture that cannot start must say so. It exited quietly instead, and a run
+// reported "1 kept" over an empty directory -- the same shape as the failure this
+// whole feature exists to stop.
+func TestACaptureThatCannotStartSaysSo(t *testing.T) {
+	script := CaptureScript("/d", "/c/cases", true)
+	if !strings.Contains(script, "testkit-capture-failed") {
+		t.Error("a failed mkdir is swallowed")
+	}
+	if strings.Contains(script, "|| exit 0\n") {
+		t.Error("a bare `|| exit 0` is back: it hides the reason")
+	}
+}
+
+// The script's only intended output is the du figure on its last line. A message
+// before it must not be read as a size.
+func TestTheSizeIsTakenFromTheLastLine(t *testing.T) {
+	if got := lastLine("a message\n1234"); got != "1234" {
+		t.Errorf("lastLine gave %q", got)
+	}
+	if got := lastLine("1234"); got != "1234" {
+		t.Errorf("lastLine of a single line gave %q", got)
+	}
+}

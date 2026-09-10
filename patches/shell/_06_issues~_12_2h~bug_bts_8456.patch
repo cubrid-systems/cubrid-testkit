@@ -1,0 +1,61 @@
+--- PrintInfo.exp
++++ PrintInfo.exp
+@@ -1,14 +1,53 @@
+ #!/usr/bin/expect -f
++
++# testkit compatibility: two waits that could fall through without saying so.
++#
++# `expect "HASH AT 4"` waited for a string inside the XASL cache dump -- a fact
++# about the data, which changes whenever the cache's layout does -- and on a
++# timeout expect simply carries on. And after the interrupt the script sent
++# ";sc t_069" without waiting for a prompt, so the characters went to whatever
++# happened to be listening. Measured on an Ubuntu host, the captured log ends:
++#
++#     sql plan text =
++#     --More--[K csql> 9
++#     csql> ;exit
++#
++# ";sc t_06" was eaten by the pager and only "9" reached csql, so the schema line
++# the case greps for was never printed and the case reported a plain NOK.
++#
++# What the case tests is unchanged: that csql survives an interrupt during a
++# paged dump and can still answer ";sc". Only the waits are now on facts about
++# the session rather than about the data, and nothing is typed until csql has
++# said it is listening.
++
++set timeout 30
+ set DATABASE [lindex $argv 0]
+ 
+-spawn  csql -u dba $DATABASE --no-auto-commit
++spawn csql -u dba $DATABASE --no-auto-commit
+ expect "csql>"
++
+ send ";info plan\r"
+-expect "HASH AT 4"
++
++# The pager showing is a fact about the session; "HASH AT 4" was a fact about the
++# cache. Wait for the one that is still true next release.
++expect {
++    "More" {}
++    timeout { send_user "\n\[testkit] the plan dump did not paginate\n" }
++}
++
+ send "\003"
+-expect "csql>"
++
++# Nothing is typed until csql has said it is listening again. This is the whole
++# point of the case: after the interrupt, is there a prompt at all?
++expect {
++    "csql>" {}
++    timeout { send_user "\n\[testkit] csql did not return to its prompt after the interrupt\n" }
++}
++
+ send ";sc t_069\r"
+-sleep 2
++expect {
++    "csql>" {}
++    timeout {}
++}
+ send ";exit\r"
+ expect eof
+-

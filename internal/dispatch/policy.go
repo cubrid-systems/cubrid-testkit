@@ -71,9 +71,14 @@ func (a all) Admit(c string, running []string) bool {
 }
 
 func (a all) Describe() string {
+	// A policy that describes itself as nothing has nothing to announce -- see
+	// Headroom on a resource with no limit -- and joining its empty string in
+	// leaves a dangling separator in the run's own log.
 	parts := make([]string, 0, len(a))
 	for _, p := range a {
-		parts = append(parts, p.Describe())
+		if d := p.Describe(); d != "" {
+			parts = append(parts, d)
+		}
 	}
 	return strings.Join(parts, "; ")
 }
@@ -173,6 +178,13 @@ func (h *Headroom) Describe() string {
 	if h == nil {
 		return ""
 	}
+	// A resource with no limit has no fraction to be over, and Admit says so by
+	// always admitting. Announcing the rule anyway is the worse kind of wrong
+	// line: it names a tmpfs that does not exist and a gate that cannot fire,
+	// and an operator reading it believes the run is protected.
+	if _, limit := h.usage(); limit <= 0 {
+		return ""
+	}
 	return fmt.Sprintf("start nothing new while %s is over %d%% full", h.what, h.percent)
 }
 
@@ -201,10 +213,10 @@ func Heaviest(took map[string]float64, n int) []string {
 // is named as one so a reader can tell which of the two will bend at the tail.
 func Describe(hard, soft Policy) string {
 	var parts []string
-	if hard != nil {
+	if hard != nil && hard.Describe() != "" {
 		parts = append(parts, "always: "+hard.Describe())
 	}
-	if soft != nil {
+	if soft != nil && soft.Describe() != "" {
 		parts = append(parts, "while other work is left: "+soft.Describe())
 	}
 	if len(parts) == 0 {

@@ -175,3 +175,39 @@ func TestTheConstraintDoesNotYieldAtTheTail(t *testing.T) {
 		t.Fatalf("a full ceiling must hold, tail or not: ok=%v again=%v", ok, again)
 	}
 }
+
+// A gate with nothing to gate says nothing. This shipped the other way: a run
+// with no scenario_ram_mb still printed "admission: always: start nothing new
+// while the corpus tmpfs is over 80% full", naming a tmpfs that did not exist
+// and a rule that could never fire, which reads as a protection the run has not
+// got.
+func TestAGateWithNoLimitDoesNotAnnounceItself(t *testing.T) {
+	none := NewHeadroom("the corpus tmpfs", func() (int, int) { return 0, 0 }, 80)
+	if d := none.Describe(); d != "" {
+		t.Errorf("a headroom over no limit describes itself as %q", d)
+	}
+	if !none.Admit("a", []string{"b"}) {
+		t.Error("a headroom over no limit refused a case")
+	}
+
+	// With nothing else configured the run is back to the order alone, and must
+	// say that rather than an empty rule.
+	if d := Describe(none, nil); d != "the plan's order alone" {
+		t.Errorf("with only a limitless gate the run announces %q", d)
+	}
+
+	// Composed with a real rule it must not leave a dangling separator.
+	cap := NewHeavyCap([]string{"h"}, 2)
+	if d := Describe(none, cap); strings.Contains(d, "always: ,") || strings.HasPrefix(d, ", ") {
+		t.Errorf("an empty rule left a separator behind: %q", d)
+	}
+	if got := All(none, cap).Describe(); got != cap.Describe() {
+		t.Errorf("All kept the empty description: %q", got)
+	}
+
+	// And a real limit still announces itself.
+	real := NewHeadroom("the corpus tmpfs", func() (int, int) { return 10, 100 }, 80)
+	if d := real.Describe(); d == "" {
+		t.Error("a headroom over a real limit says nothing")
+	}
+}

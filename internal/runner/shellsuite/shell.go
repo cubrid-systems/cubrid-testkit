@@ -559,6 +559,20 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	if line := logs.Summary(); line != "" {
 		fmt.Println(line)
 	}
+	// A patch that matched and never ran leaves the verdicts describing the
+	// unpatched corpus while the run's opening line says otherwise. Say which.
+	if missed := patches.Unapplied(); len(missed) > 0 {
+		fmt.Printf("[ERROR] %d of %d case(s) matched a compatibility patch and did not run against one. "+
+			"Their verdicts are about the corpus as it is, not as the patch leaves it.\n",
+			len(missed), patches.Count())
+		for i, c := range missed {
+			if i == 10 {
+				fmt.Printf("[ERROR]   ... and %d more\n", len(missed)-i)
+				break
+			}
+			fmt.Println("[ERROR]   " + c)
+		}
+	}
 	if werr := patches.Report(sink.Dir()); werr != nil {
 		fmt.Printf("[ERROR] cannot record which cases were patched: %v\n", werr)
 	}

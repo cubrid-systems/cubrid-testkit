@@ -101,12 +101,20 @@ so the question of whether to keep it is not worth asking.
 
 ```
 $CTP_HOME/result/<category>/
-  current_runtime_logs/     ← frozen. Untouched
-  case-logs/                ← this runner's own, like patched.txt
-    <case path>/
-      server/               ← tier 1
-      upper/                ← tier 2, on failure
+  current_runtime_logs/       ← frozen. Untouched
+  case-logs/                  ← this runner's own, like patched.txt
+    _06_issues/_14_1h/bug_a/cases/
+      server/                 ← tier 1: log/server/*
+      pl/                     ← tier 1
+      *.err                   ← tier 1: log/*.err, cubrid_utility.log
+      broker/                 ← tier 2, on failure
+      cubrid.conf             ← tier 2: as the case left it
 ```
+
+The path is the case **as the corpus names it** — the scenario off the front and
+`<name>.sh` off the end, since `<name>/cases/<name>.sh` repeats itself. Keeping the absolute path
+instead buries every capture under a copy of wherever the corpus happened to be checked out, which
+is what the first implementation did and what a test now prevents.
 
 **Named by the case path, not by a timestamp.** CTP's `AUTO_<build>_<datetime>` is unambiguous when
 one case runs at a time and stops being so at eight — several tarballs land in the same second and
@@ -119,9 +127,16 @@ directory named ERROR_BACKUP would make the name lie and break anything reading 
 
 ## Capture point, and what it must not do
 
-The capture has to happen **after the verdict and before the slot reset**: the reset restores the
-install from the snapshot, and `dropInSlot` discards the overlay when the directory's last case
-finishes. After either, there is nothing left to copy.
+The capture has to happen **after the verdict and before the slot reset**. The reset (`RestoreScript`)
+runs at the *start* of a case, not at the end, so what a case wrote survives until the next case
+claims that slot — and `dropInSlot` discards the corpus overlay when a directory's last case
+finishes. Before the verdict there is nothing to keep; after either of those there is nothing left
+to copy.
+
+It copies **by path, through the case's own channel**, rather than reading the slot's overlay upper
+layer from outside. It is the same files either way, and this works identically whether the run has
+overlays, one slot, or neither. The destination is under `CTP_HOME`, which no slot overlays, so a
+copy made inside a slot lands on the real filesystem and survives the slot.
 
 Two rules:
 
@@ -136,18 +151,38 @@ reclaim path. Tier 1's fifteen megabytes are not worth measuring; tier 2's are.
 
 | | default | |
 |---|---|---|
-| `case_logs` | `fail` | `off`, `fail`, or `all` — `all` keeps tier 1 for passing cases too |
-| `case_logs_max_mb` | — | a budget for the whole run; capture stops when it is reached and says so |
+| `case_logs` | `off` | `off`, `fail`, or `all` — `all` keeps tier 1 for passing cases too. A mode that is none of the three is refused rather than read as `off` |
+| `case_logs_max_mb` | — | a budget for the whole run; capture stops when it is reached and says so, once |
 | `CTP_ERROR_BACKUP` | on | `off` turns the heavyweight snapshot off entirely |
 | `CTP_ERROR_BACKUP_DIR` | `~/ERROR_BACKUP` | where the heavyweight snapshot goes |
 
-`case_logs=fail` is the conservative default. Tier 1 has been measured at 15 MB for the whole
-corpus, so `all` is defensible as the default and should be decided by measuring the reclaim-path
+`off` is the default because the feature is new and a run that has never asked for it should not
+start writing megabytes it did not ask for. Tier 1 has been measured at 15 MB for the whole corpus,
+so `all` is defensible as a default later; that should be decided by measuring the reclaim-path
 cost, not by argument.
+
+```
+case_logs=all
+case_logs_max_mb=512
+```
+
+```
+[INFO] case logs under /path/CTP/result/shell/case-logs
+[INFO] case logs: 1 kept, 0 MB, under /path/CTP/result/shell/case-logs
+```
+
+## Two rules the implementation keeps
+
+**A capture that fails does not fail the case.** Every copy is `2>/dev/null` and the script exits 0
+whatever happened; a capture that could not run at all is reported as a `[WARN]` line and the case
+keeps its own verdict. A diagnostic that changes what it is diagnosing is worse than no diagnostic.
+
+**A capture over budget is kept, and is the last one.** Refusing it after it has been written would
+leave the run having paid for it and thrown it away, so the budget stops the *next* capture rather
+than discarding this one — and the run says so once, not once per case.
 
 ---
 
-**Status: designed, not built.** `CTP_ERROR_BACKUP` and `CTP_ERROR_BACKUP_DIR` exist; `case_logs`
-does not yet. The motivating case is recorded honestly: a run in which nineteen of twenty-two cases
-reported `cubrid server start: fail` could not be diagnosed, because the server's own `.err` file
-explaining why was in an overlay that had already been dropped.
+The motivating case, recorded honestly: a run in which nineteen of twenty-two cases reported
+`cubrid server start: fail` could not be diagnosed, because the server's own `.err` file explaining
+why was in an overlay that had already been dropped. That is what this exists to stop.

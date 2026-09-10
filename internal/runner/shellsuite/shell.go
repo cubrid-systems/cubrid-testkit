@@ -537,13 +537,27 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		fmt.Println(line)
 	}
 
+	// What a case leaves behind, kept where a later reader can find it. Off by
+	// default: it is new, and a run that has never asked for it should not start
+	// writing megabytes it did not ask for.
+	logs, lerr := NewCaseLogs(sink.Dir(), cfg.GetOr("scenario", ""), cfg.GetOr("case_logs", ""), cfg.Int("case_logs_max_mb", 0))
+	if lerr != nil {
+		return quit("%v", lerr)
+	}
+	if logs != nil {
+		fmt.Printf("[INFO] case logs under %s\n", logs.Dir())
+	}
+
 	fmt.Println("STARTED")
-	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split, patches)
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split, patches, logs)
 
 	if planPath != "" {
 		if werr := record.Write(planPath); werr != nil {
 			fmt.Printf("[ERROR] cannot write case_plan %s: %v\n", planPath, werr)
 		}
+	}
+	if line := logs.Summary(); line != "" {
+		fmt.Println(line)
 	}
 	if werr := patches.Report(sink.Dir()); werr != nil {
 		fmt.Printf("[ERROR] cannot record which cases were patched: %v\n", werr)
@@ -1021,7 +1035,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, split laneSplit, patches *Patches) error {
+	record *plan.Record, split laneSplit, patches *Patches, logs *CaseLogs) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -1031,7 +1045,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 			defer wg.Done()
 			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg,
 				buildID, bits, local, board, corpus, record, split.laneOf(i),
-				fmt.Sprintf("slot%d", i), patches)
+				fmt.Sprintf("slot%d", i), patches, logs)
 		}(i, pair)
 	}
 	wg.Wait()
@@ -1055,7 +1069,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, lane dispatch.Lane, slotID string, patches *Patches) error {
+	record *plan.Record, lane dispatch.Lane, slotID string, patches *Patches, logs *CaseLogs) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
 	// Which lane this slot is in: where its corpus writes land. With lanes off
@@ -1075,6 +1089,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 		SlotID:    slotID,
 		Board:     board,
 		Patches:   patches,
+		Logs:      logs,
 		Corpus:    corpus,
 		Plan:      record,
 		LaneID:    lane,

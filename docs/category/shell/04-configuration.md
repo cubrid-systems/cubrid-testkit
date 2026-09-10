@@ -38,6 +38,8 @@ These behave as they always did.
 | `lane_slow_secs` | off | **negative** | split the slots into a memory lane and a disk lane, by duration |
 | `lane_slow_mb` | off | situational | the same split, by footprint |
 | `lane_slow_mbps` | off | situational | the same split, by write rate |
+| `case_logs` | off | small | keep what a case wrote: `fail`, or `all` to keep the cheap tier for passing cases too. See [keeping what failed](06-keeping-what-failed.md) |
+| `case_logs_max_mb` | off | none | a budget for the whole run's captures |
 | `status_http` | off | none | the progress page. `on` is `127.0.0.1:51523`; a bare port takes every interface |
 
 ## Environment

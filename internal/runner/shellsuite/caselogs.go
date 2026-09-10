@@ -184,7 +184,10 @@ func destOf(root, scenario, casePath string, attempt int) string {
 // written rather than for what it hoped to write.
 func CaptureScript(dest, caseDir string, failed bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "mkdir -p %q/server || exit 0\n", dest)
+	// A capture that cannot start says so rather than exiting quietly. Swallowing
+	// it is how this went unnoticed for a run: the summary said one case was
+	// kept and the directory was empty, and there was nothing to read either way.
+	fmt.Fprintf(&b, "mkdir -p %q/server || { echo \"testkit-capture-failed: mkdir %s\"; exit 0; }\n", dest, dest)
 	// Tier 1, always. A pristine install's log directory is empty, so everything
 	// here is this case's.
 	fmt.Fprintf(&b, "cp -p ${CUBRID}/log/server/* %q/server/ 2>/dev/null\n", dest)
@@ -208,7 +211,7 @@ func CaptureScript(dest, caseDir string, failed bool) string {
 	// this or nothing. Databases are excluded by name -- they are the tier
 	// above, and one of them can be larger than every log put together.
 	if caseDir != "" {
-		fmt.Fprintf(&b, "mkdir -p %q/case || exit 0\n", dest)
+		fmt.Fprintf(&b, "mkdir -p %q/case || { echo \"testkit-capture-failed: mkdir %s/case\"; exit 0; }\n", dest, dest)
 		fmt.Fprintf(&b, "find %q -maxdepth 1 -type f \\( -name '*.log' -o -name '*.err' -o "+
 			"-name '*.out' -o -name '*.result' -o -name '*.diff' -o -name 'core*' -prune \\) "+
 			"-size -8M -exec cp -p {} %q/case/ \\; 2>/dev/null\n", caseDir, dest)
@@ -237,10 +240,28 @@ func (l *CaseLogs) Capture(ctx context.Context, ch exec.Channel, casePath, caseD
 	if err != nil {
 		return "[WARN] case logs: " + casePath + ": " + err.Error()
 	}
+	out := strings.TrimSpace(res.Output())
+	if i := strings.Index(out, "testkit-capture-failed:"); i >= 0 {
+		line := out[i:]
+		if j := strings.IndexByte(line, '\n'); j >= 0 {
+			line = line[:j]
+		}
+		return "[WARN] case logs: " + casePath + ": " + line
+	}
 	var kb int64
-	fmt.Sscanf(strings.TrimSpace(res.Output()), "%d", &kb)
+	fmt.Sscanf(lastLine(out), "%d", &kb)
 	if l.spend(kb << 10) {
 		return fmt.Sprintf("[WARN] case logs: the %d MB budget is gone; nothing more will be kept.", l.budget)
 	}
 	return ""
+}
+
+// lastLine is the du figure at the end of the capture, which is the only line
+// the script is meant to produce. Anything before it is a message, and a message
+// means something did not go to plan.
+func lastLine(s string) string {
+	if i := strings.LastIndexByte(strings.TrimRight(s, "\n"), '\n'); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }

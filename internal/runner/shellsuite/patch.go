@@ -219,6 +219,32 @@ func (p *Patches) Applied(script, patchFile string) {
 	p.applied[script] = patchFile
 }
 
+// Unapplied names the cases that matched a patch and did not run against one.
+//
+// A run that announces "6 cases will run against a compatibility patch" and then
+// applies none is worse than a run with no patches at all: the verdicts are
+// about the unpatched corpus and the log says otherwise. Measured -- it happened
+// in a container while the same patches applied on the host, and nothing in the
+// output said so. patched.txt was simply absent, which reads as "no patches
+// were configured".
+//
+// Sorted, so the line is stable between runs.
+func (p *Patches) Unapplied() []string {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []string
+	for c := range p.byCase {
+		if _, ok := p.applied[c]; !ok {
+			out = append(out, c)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Report writes the record into the result directory. Nothing is written when
 // nothing was patched, so the file's presence is itself the answer to "did this
 // run patch anything".

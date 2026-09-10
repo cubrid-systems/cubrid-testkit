@@ -333,3 +333,30 @@ func TestAFailedPatchAndAFailedCommandAreDifferent(t *testing.T) {
 		t.Fatal("a patch that does not apply must leave a non-zero exit code in the Result")
 	}
 }
+
+// A patch that matched and never ran must be named. A run announced "6 cases
+// will run against a compatibility patch", applied none, and said nothing: the
+// verdicts were about the unpatched corpus and patched.txt was simply absent,
+// which reads as "no patches were configured".
+func TestAPatchThatMatchedAndDidNotRunIsNamed(t *testing.T) {
+	p := &Patches{dir: "/p", byCase: map[string]string{
+		"/c/a/cases/a.sh": "/p/a.patch",
+		"/c/b/cases/b.sh": "/p/b.patch",
+	}}
+	if got := p.Unapplied(); len(got) != 2 {
+		t.Fatalf("nothing applied and %d reported unapplied", len(got))
+	}
+	p.Applied("/c/a/cases/a.sh", "/p/a.patch")
+	got := p.Unapplied()
+	if len(got) != 1 || got[0] != "/c/b/cases/b.sh" {
+		t.Errorf("after applying one, unapplied is %v", got)
+	}
+	p.Applied("/c/b/cases/b.sh", "/p/b.patch")
+	if got := p.Unapplied(); len(got) != 0 {
+		t.Errorf("everything applied and %v is still reported", got)
+	}
+	var nilp *Patches
+	if got := nilp.Unapplied(); got != nil {
+		t.Errorf("a nil Patches reported %v", got)
+	}
+}

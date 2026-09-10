@@ -51,14 +51,24 @@ func TestAContainedRunIsAloneAndReaps(t *testing.T) {
 	cmd.Env = append(os.Environ(), Env+"=1", "USER=probe-user")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if strings.Contains(string(out), "operation not permitted") ||
-			strings.Contains(err.Error(), "operation not permitted") {
+		if permissionRefused(string(out)) || permissionRefused(err.Error()) {
 			t.Skipf("unprivileged user namespaces are not available: %v", err)
 		}
 		t.Fatalf("probe failed: %v\n%s", err, out)
 	}
 
 	got := string(out)
+	// The probe reports a Setup failure on its standard output and exits 0, so
+	// the check above cannot see it. A machine that refuses to make its mounts
+	// private, or to mount /proc, is the same kind of machine as one that
+	// refuses the namespace itself -- a property of the machine, which this test
+	// skips on rather than fails on. Seen in CI as
+	// "proc=failed make mounts private: permission denied", where the check
+	// above missed it twice over: the wording is EACCES rather than EPERM, and
+	// the probe had not failed.
+	if strings.Contains(got, "proc=failed") && permissionRefused(got) {
+		t.Skipf("this machine does not allow the namespace setup: %s", strings.TrimSpace(got))
+	}
 	// ispid1=no is the fix, stated as an assertion: PID 1 is the init that
 	// collects orphans, and the process that runs commands is its child. Were
 	// they one process, its Wait4(-1) would take os/exec's own children and the
@@ -415,4 +425,12 @@ func childrenOf(t *testing.T, pid int) []int {
 		}
 	}
 	return out
+}
+
+// permissionRefused reports whether a message is the kernel saying no, in either
+// of the two wordings it uses: EPERM is "operation not permitted" and EACCES is
+// "permission denied", and a machine that forbids unprivileged namespaces can
+// answer with either.
+func permissionRefused(s string) bool {
+	return strings.Contains(s, "operation not permitted") || strings.Contains(s, "permission denied")
 }

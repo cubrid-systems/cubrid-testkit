@@ -117,8 +117,16 @@ func (t *templates) sample() {
 		// process's tally, .lk.<key> a lock, .tmp.<pid> a save in progress, and
 		// .plan the eviction order. Only the rest are templates.
 		if strings.HasPrefix(name, ".") {
+			// Only this run's tallies. The store outlives a run and so do the
+			// tallies in it, so counting them all reports another run's hits as
+			// this one's -- and then loses them again, because the cache folds a
+			// finished run's tally into the per-template .refs and deletes it.
+			// The number went up and down and belonged to nobody. Built is
+			// already filtered this way; Restored was not.
 			if strings.HasPrefix(name, ".used.") {
-				v.Restored += countLines(filepath.Join(t.dir, name))
+				if info, err := e.Info(); err == nil && info.ModTime().After(t.since) {
+					v.Restored += countLines(filepath.Join(t.dir, name))
+				}
 			}
 			continue
 		}

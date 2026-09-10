@@ -192,6 +192,17 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 			w.Board.Refused(c.Path, pf)
 			add("NOK", "the compatibility patch "+pf+" could not be run: "+perr.Error())
 			return items, console
+		case res.ExitCode == 127:
+			// A third failure that was being reported as the second. Without
+			// patch(1) the shell answers 127, which the branch below reads as
+			// "the case changed upstream" -- so a machine missing a tool was
+			// blamed on the corpus. Measured: the CI image ships no patch(1),
+			// and six cases matched a patch, ran unpatched, and said the corpus
+			// had moved.
+			w.Board.Refused(c.Path, pf)
+			add("NOK", "the compatibility patch "+pf+" could not be applied: "+
+				"patch(1) is not on this machine's PATH")
+			return items, console
 		case res.ExitCode != 0:
 			w.Board.Refused(c.Path, pf)
 			add("NOK", "the compatibility patch "+pf+" does not apply to this case any more, "+

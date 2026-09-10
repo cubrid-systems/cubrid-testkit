@@ -52,6 +52,9 @@ type Worker struct {
 	Options CaseOptions
 	// Patches are the corpus changes this run carries. Nil is the ordinary case.
 	Patches *Patches
+	// Logs keeps what a case wrote, so a failure can be diagnosed without running
+	// the corpus again. Nil when case_logs is off, which is the default.
+	Logs *CaseLogs
 
 	// MaxRetry is only used to decide whether the retry count is printed at all:
 	// CTP appended it whenever retries were configured, even to a case that failed
@@ -145,6 +148,14 @@ func (w *Worker) Run(ctx context.Context) error {
 		if w.tookTooLong() {
 			v.Success = false
 			v.Items = append(v.Items, resultItem("NOK", "timeout"))
+		}
+		// Here and nowhere else. RestoreScript runs at the *start* of a case, so
+		// what this one wrote is still on the machine until the next case claims
+		// this slot -- and the corpus overlay drops the case's own directory when
+		// its directory retires. Before the verdict there is nothing to keep;
+		// after either of those there is nothing left to copy.
+		if note := w.Logs.Capture(ctx, w.Channel, ticket.Case, ticket.Retry+1, v.Success); note != "" {
+			w.log(note)
 		}
 		w.finish(ticket, v, console, elapsed)
 	}

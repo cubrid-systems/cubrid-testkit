@@ -1,15 +1,44 @@
 --- bug_xdbms913.sh
 +++ bug_xdbms913.sh
-@@ -54,7 +54,11 @@
+@@ -529,6 +529,20 @@
+ #check_inserting 
  
- function make_initdb
- {
--   cubrid_createdb -r pdb
-+# testkit compatibility: this case took the volume size from cubrid.conf,
-+# so its verdict depended on a setting it never named. CUBRID ships 512M and
-+# the answers were written under it; a run that lowers it globally fails the
-+# case. Say the size the case actually needs.
-+   cubrid_createdb --db-volume-size=512M -r pdb
-    cubrid server start pdb
-    cubrid broker restart 
-    csql -u dba -c "create class xoo ( a int, b char(100))" pdb
+ backuptime_lv3=`date +%d-%m-%Y:%T`
++# testkit compatibility: backuptime_lv3 is a recovery boundary taken with
++# `date +%T`, which has one-second resolution, and the insert that must fall
++# *after* it takes less than a second on a fast machine. restoredb
++# --up-to-date is then inclusive of that same second and restores the rows the
++# boundary was meant to exclude.
++#
++# Measured: check_data_count wanted 10000 and got 20000 -- exactly the one
++# batch of 10000 that insert_data had just written.
++#
++# The case already knows this. Every other timestamp it takes -- lv0, lv1, lv2,
++# three times each -- is followed by `sleep 3` for this reason. Only lv3 is not,
++# and only where lv3 is followed by a write does it matter. This adds the same
++# sleep the case uses everywhere else, and changes nothing about what it tests.
++sleep 3
+ 
+ insert_data 50001 60000 pdb
+ 
+@@ -571,6 +585,20 @@
+ #check_inserting
+ 
+ backuptime_lv3=`date +%d-%m-%Y:%T`
++# testkit compatibility: backuptime_lv3 is a recovery boundary taken with
++# `date +%T`, which has one-second resolution, and the insert that must fall
++# *after* it takes less than a second on a fast machine. restoredb
++# --up-to-date is then inclusive of that same second and restores the rows the
++# boundary was meant to exclude.
++#
++# Measured: check_data_count wanted 10000 and got 20000 -- exactly the one
++# batch of 10000 that insert_data had just written.
++#
++# The case already knows this. Every other timestamp it takes -- lv0, lv1, lv2,
++# three times each -- is followed by `sleep 3` for this reason. Only lv3 is not,
++# and only where lv3 is followed by a write does it matter. This adds the same
++# sleep the case uses everywhere else, and changes nothing about what it tests.
++sleep 3
+ 
+ java CUBRID913i 50001 60000 pdb
+ 

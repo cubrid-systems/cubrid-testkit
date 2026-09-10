@@ -2,6 +2,7 @@ package contain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	osexec "os/exec"
@@ -93,7 +94,7 @@ func Open(label string) (*Namespace, error) {
 	ns.scratch = filepath.Join(scratchRoot(), label)
 	if err := os.MkdirAll(ns.scratch, 0o755); err != nil {
 		ns.Close()
-		return nil, fmt.Errorf("%s: %w", label, err)
+		return nil, fmt.Errorf("%s: %w%s", label, err, whyMkdirFailed(ns.scratch, err))
 	}
 
 	// The keeper is PID 1 but nothing has mounted /proc for it, so `ps` in there
@@ -300,7 +301,7 @@ func (n *Namespace) Overlay(target, upperRoot string) error {
 	work := filepath.Join(upperRoot, "work")
 	for _, d := range []string{upper, work} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
-			return fmt.Errorf("%s: %w", n.label, err)
+			return fmt.Errorf("%s: %w%s", n.label, err, whyMkdirFailed(d, err))
 		}
 	}
 	// A comma in any of these would be read as an option separator, and the
@@ -313,9 +314,94 @@ func (n *Namespace) Overlay(target, upperRoot string) error {
 	script := fmt.Sprintf("mount -t overlay overlay -o lowerdir=%s,upperdir=%s,workdir=%s %s",
 		target, upper, work, target)
 	if out, err := n.run(context.Background(), 20*time.Second, script); err != nil {
-		return fmt.Errorf("%s: overlay %s: %w: %s", n.label, target, err, strings.TrimSpace(out))
+		return fmt.Errorf("%s: overlay %s: %w: %s%s", n.label, target, err,
+			strings.TrimSpace(out), whyOverlayFailed(target))
 	}
 	return nil
+}
+
+// whyMkdirFailed names the reason a slot cannot make its own directory, when the
+// reason is the one that is invisible from the error.
+//
+// A user namespace maps one uid. A directory owned by anyone else -- the uid a
+// bind mount carries in from the host, say -- is nobody in there, and root
+// inside the namespace has no privilege over an unmapped owner. So a path this
+// process could write to a moment ago answers "permission denied", and says
+// nothing about why.
+func whyMkdirFailed(path string, err error) string {
+	if !errors.Is(err, os.ErrPermission) {
+		return ""
+	}
+	me := os.Getuid()
+	for d := path; d != "/" && d != "."; d = filepath.Dir(d) {
+		var st syscall.Stat_t
+		if syscall.Lstat(d, &st) != nil {
+			continue
+		}
+		if int(st.Uid) != me {
+			return fmt.Sprintf("\n  %s is owned by uid %d and this run is uid %d. Slots run in a "+
+				"user namespace\n  that maps only this uid, so anything owned by another one "+
+				"cannot be written\n  there. Give the slot root to uid %d, or point "+
+				"TESTKIT_SLOT_ROOT somewhere it owns.", d, st.Uid, me, me)
+		}
+		break
+	}
+	return ""
+}
+
+// whyOverlayFailed turns overlayfs's one message into the reason, when the
+// reason is one of the two that are checkable from here.
+//
+// "wrong fs type, bad option, bad superblock on overlay, missing codepage or
+// helper program, or other error" is what the kernel says for every refusal,
+// and it says nothing. Both of these were met while getting a run to work in a
+// container, and each cost an hour of reading a message that named none of it.
+func whyOverlayFailed(target string) string {
+	// A lower layer that is itself a mount point is refused. Measured: the same
+	// overlay succeeds on a plain directory of the same filesystem, and fails
+	// when the directory is a bind mount -- which is what `docker run -v` makes
+	// of any path it is given.
+	if isMountPoint(target) {
+		return fmt.Sprintf("\n  %s is a mount point, and a lower layer cannot be one. "+
+			"Mount its parent and leave %s a directory inside it.",
+			target, filepath.Base(target))
+	}
+	// A tmpfs, an overlay: neither can carry another overlay's upper layer.
+	if fs := fsTypeOf(target); fs == "overlay" {
+		return fmt.Sprintf("\n  %s is on an overlayfs, and an overlay cannot be stacked on one. "+
+			"Put it on a real filesystem.", target)
+	}
+	return ""
+}
+
+// isMountPoint reports whether path is where a filesystem is mounted, by asking
+// whether it and its parent are on the same device.
+func isMountPoint(path string) bool {
+	var here, up syscall.Stat_t
+	if err := syscall.Lstat(path, &here); err != nil {
+		return false
+	}
+	if err := syscall.Lstat(filepath.Dir(path), &up); err != nil {
+		return false
+	}
+	return here.Dev != up.Dev
+}
+
+// fsTypeOf is the filesystem a path is on, or "" when it cannot be read.
+func fsTypeOf(path string) string {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return ""
+	}
+	// The few this code cares about; anything else is reported as unknown
+	// rather than guessed at from a number.
+	switch st.Type {
+	case 0x794c7630: // OVERLAYFS_SUPER_MAGIC
+		return "overlay"
+	case 0x01021994: // TMPFS_MAGIC
+		return "tmpfs"
+	}
+	return ""
 }
 
 type nsChannel struct {

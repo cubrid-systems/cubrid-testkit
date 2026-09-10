@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -229,5 +230,53 @@ func TestASlotHasAnAddressItWillAdmitTo(t *testing.T) {
 			"timeout 3 bash -c 'echo hi > /dev/tcp/"+SlotAddress+"/15999' && echo reachable")
 	if err != nil || !strings.Contains(out, "reachable") {
 		t.Errorf("nothing can be reached on the slot's own address: %v: %s", err, out)
+	}
+}
+
+// overlayfs answers every refusal with "wrong fs type, bad option, bad
+// superblock on overlay, missing codepage or helper program, or other error",
+// which names none of them. Two of the reasons are checkable, and both were met
+// getting a run to work in a container.
+func TestAnOverlayRefusalSaysWhatItCanWorkOut(t *testing.T) {
+	dir := t.TempDir()
+
+	// A plain directory: nothing to add, and nothing invented.
+	plain := filepath.Join(dir, "plain")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := whyOverlayFailed(plain); got != "" {
+		t.Errorf("a plain directory needs no explanation, got %q", got)
+	}
+
+	// A mount point: a lower layer cannot be one. Measured -- the same overlay
+	// succeeds on a plain directory of the same filesystem.
+	if isMountPoint("/proc") {
+		if got := whyOverlayFailed("/proc"); !strings.Contains(got, "mount point") {
+			t.Errorf("a mount point should be named as one, got %q", got)
+		}
+	}
+
+	// And a path that does not exist is not a mount point, rather than a panic.
+	if isMountPoint(filepath.Join(dir, "nothing-here")) {
+		t.Error("a missing path is not a mount point")
+	}
+}
+
+// A user namespace maps one uid, so a directory owned by another one is nobody
+// in there and cannot be written -- which arrives as a bare "permission denied"
+// on a path this process could write to a moment earlier.
+func TestAPermissionDeniedOnAnUnmappedOwnerSaysSo(t *testing.T) {
+	// Not a permission error: nothing to add.
+	if got := whyMkdirFailed("/tmp", os.ErrExist); got != "" {
+		t.Errorf("only a permission error gets the explanation, got %q", got)
+	}
+	// Owned by root, and this test is not root (skipped when it is).
+	if os.Getuid() == 0 {
+		t.Skip("running as root, so there is no unmapped owner to find")
+	}
+	got := whyMkdirFailed("/var/lib/nothing-here", os.ErrPermission)
+	if !strings.Contains(got, "user namespace") || !strings.Contains(got, "TESTKIT_SLOT_ROOT") {
+		t.Errorf("the explanation should name the namespace and the knob, got %q", got)
 	}
 }

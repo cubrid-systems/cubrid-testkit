@@ -117,6 +117,21 @@ func Enter() int {
 	return 0
 }
 
+// inContainer reports whether this process looks containerised, which changes
+// what a refused mount most likely means. A guess, and only ever used to add a
+// sentence to an error.
+func inContainer() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	if b, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+		if strings.Contains(string(b), "docker") || strings.Contains(string(b), "containerd") {
+			return true
+		}
+	}
+	return false
+}
+
 // inside is the environment as it is true in the namespace rather than outside
 // it.
 //
@@ -165,7 +180,17 @@ func Setup() error {
 		return fmt.Errorf("make mounts private: %w", err)
 	}
 	if err := syscall.Mount("proc", "/proc", "proc", 0, ""); err != nil {
-		return fmt.Errorf("mount /proc: %w", err)
+		// A container is the case worth naming: Docker masks paths under /proc,
+		// and a mount over a masked one is refused. Neither seccomp=unconfined
+		// nor --cap-add SYS_ADMIN lifts it; systempaths=unconfined does, and
+		// --privileged is not needed. Measured while getting a run to work in
+		// the CI image, where the bare error named none of it.
+		hint := ""
+		if inContainer() {
+			hint = "\n  This looks like a container. Docker masks paths under /proc and refuses" +
+				"\n  a mount over one: run it with --security-opt systempaths=unconfined."
+		}
+		return fmt.Errorf("mount /proc: %w%s", err, hint)
 	}
 
 	// A bash-compatible /bin/sh, inside this namespace only.

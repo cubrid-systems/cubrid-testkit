@@ -1,0 +1,24 @@
+--- bug_xdbms278.sh
++++ bug_xdbms278.sh
+@@ -12,9 +12,19 @@
+ 
+ csql --no-auto-commit -c "select * from db_class,db_attribute" -o record.txt testdb
+ 
+-temp_num=`ls -al | grep testdb_t* | wc -l`
++# testkit compatibility: this is the precondition -- did the query spill to a
++# temporary volume -- before the line below runs the utility the case is about.
++# As written it passes only when there is exactly one, and by accident: the
++# shell expands testdb_t* before grep sees it, so one volume makes the filename
++# grep's pattern and the count 1, two makes it `grep <name> <binary volume>` and
++# the count 0, and none leaves the glob literal and matches five lines of ls.
++# Measured on this machine: db_volume_size=20M gives two and the check reads 0,
++# the shipped 512M gives none and it reads 5. Counting the volumes properly and
++# asking for at least one says what the precondition means, and does not depend
++# on a size the case never names.
++temp_num=`ls -1 | grep -c '^testdb_t[0-9]'`
+ 
+-if [ $temp_num -eq 1 ]
++if [ $temp_num -ge 1 ]
+ then
+ write_ok
+ else

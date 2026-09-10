@@ -35,17 +35,6 @@ The run prints how many each file contributed, then the total in CTP's frozen
 
 ## What is deliberately not here
 
-`_01_utility/_27_emergency_patch_logdb/bug_xdbms278` counts temporary volumes
-with `ls -al | grep testdb_t*`, where the glob is expanded by the shell before
-grep sees it. With exactly one temp volume the name becomes grep's pattern and
-the count is 1, which is what the check wants. With two it becomes
-`grep <name> <binary file>` and the count is 0; with none the glob stays literal
-and matches five lines of `ls`. Measured both ways: this run's lowered
-`db_volume_size` gives two, and restoring the shipped 512M gives none. The case
-needs exactly one, which is a number no setting here produces, so there is
-nothing to patch to -- it is the case that is fragile, and worth reporting as
-such rather than hiding.
-
 `_38_fig/cbrd_24911` drives the manager (`conf/cm.conf`, an HTTPS call to the CMS
 port) and would qualify, but its failing checks are `answer file has a problem!`
 against `./result/cbrd_24911_schema*` and `./result/cbrd_24911_unloaddb.log`,

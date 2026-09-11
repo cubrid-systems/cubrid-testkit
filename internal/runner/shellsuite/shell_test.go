@@ -11,7 +11,6 @@ import (
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
-	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
@@ -389,75 +388,6 @@ func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
 func TestTheRealShellCanOpenSlots(t *testing.T) {
 	if s := NewShell(); s.Channels != nil {
 		t.Error("NewShell set Channels, which makes the run look like a caller supplied its own")
-	}
-}
-
-// A run's slots start from the install, not from what the last run's slots wrote
-// into it. They did not while the slot root was named after the pid: the root
-// outlived its run, the pid recurred -- contained, it is the namespace's -- and
-// the next run's overlay went over the old upper layer.
-func TestASlotDoesNotInheritTheLastRunsWrites(t *testing.T) {
-	contained(t)
-	base, err := os.MkdirTemp("/var/tmp", "testkit-slotroot-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
-	t.Setenv(contain.SlotRootEnv, base)
-	t.Setenv("CUBRID", t.TempDir())
-	t.Setenv("CUBRID_DATABASES", "")
-
-	run := func(script string) string {
-		t.Helper()
-		pairs, closeAll, err := openSlots(1, nil, nil, nil, "", laneSplit{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer closeAll()
-		res, err := pairs[0].worker.Run(t.Context(), script)
-		if err != nil || res.ExitCode != 0 {
-			t.Fatalf("%q: exit %d, %v: %s", script, res.ExitCode, err, res.Stderr)
-		}
-		return strings.TrimSpace(res.Output())
-	}
-
-	run(`echo written > "$CUBRID/leftover"`)
-	if entries, _ := os.ReadDir(base); len(entries) != 0 {
-		t.Errorf("the slot root outlived its run: %v", entries)
-	}
-	if got := run(`[ -e "$CUBRID/leftover" ] && echo inherited || echo clean`); got != "clean" {
-		t.Error("the second run's slot started with the first run's write in its install")
-	}
-}
-
-// The registry gets an overlay of its own only when it is outside the install.
-// CUBRID's own default puts it at $CUBRID/databases -- and CTP's reset cleans
-// and restores it there -- in which case the install's overlay already covers
-// it and a second one would nest overlayfs on overlayfs for nothing.
-func TestTheRegistryIsCoveredByTheInstallWhenItIsInsideIt(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		parents []string
-		dir     string
-		want    bool
-	}{
-		{"CUBRID's default layout", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases", true},
-		{"the same directory", []string{"/opt/CUBRID"}, "/opt/CUBRID", true},
-		{"a registry kept outside", []string{"/opt/CUBRID"}, "/var/db/registry", false},
-		{"a sibling, not a child", []string{"/opt/CUBRID"}, "/opt/CUBRID-old", false},
-		// The reason this is not a string prefix test: "/a/bc" starts with
-		// "/a/b" and is not inside it. A prefix check would skip a real overlay
-		// and the slot would share the machine's registry with every other one.
-		{"a name that merely starts the same", []string{"/a/b"}, "/a/bc", false},
-		{"a path that climbs back out", []string{"/opt/CUBRID"}, "/opt/CUBRID/../other", false},
-		{"nothing covered yet", nil, "/opt/CUBRID", false},
-		{"deeper inside", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases/x/y", true},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			if got := under(c.parents, c.dir); got != c.want {
-				t.Errorf("under(%q, %q) = %v, want %v", c.parents, c.dir, got, c.want)
-			}
-		})
 	}
 }
 

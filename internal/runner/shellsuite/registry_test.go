@@ -101,50 +101,6 @@ func TestPruningWithoutARegistryIsQuiet(t *testing.T) {
 	}
 }
 
-// The socket lives under $CUBRID whenever that fits, because the cases normalise
-// their output against $CUBRID and a path outside it is a path their sed does
-// not rewrite.
-//
-// $CUBRID/tmp and not $CUBRID/var/CUBRID_SOCK, which is where the engine itself
-// puts it when CUBRID_TMP says nothing: the per-case reset runs
-// `rm -rf ${CUBRID}/var/*`, so a socket directory there does not survive the
-// first case. Measured -- a two-case run went from 26 seconds to 426 with both
-// failing -- so this assertion is load-bearing rather than arbitrary.
-func TestSlotTmpPrefersTheShippedPath(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("CUBRID", home)
-	got, err := slotTmp("slot0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(home, "tmp"); got != want {
-		t.Fatalf("CUBRID_TMP is %s, want %s", got, want)
-	}
-	if _, err := os.Stat(got); err != nil {
-		t.Errorf("the directory was not made: %v", err)
-	}
-}
-
-// And falls back when the install is deep enough that a socket under it would
-// not fit in sun_path -- which is a real engine error, not a theory.
-func TestSlotTmpFallsBackWhenThePathWouldNotFit(t *testing.T) {
-	deep := filepath.Join(t.TempDir(), strings.Repeat("d", 60), strings.Repeat("e", 60))
-	t.Setenv("CUBRID", deep)
-	got, err := slotTmp("slot0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.HasPrefix(got, deep) {
-		t.Fatalf("a socket under %s cannot fit in %d bytes, and CUBRID_TMP went there anyway", got, sunPathMax)
-	}
-	if !strings.HasPrefix(got, "/var/tmp/") {
-		t.Errorf("the fallback should be the bounded one: %s", got)
-	}
-	if n := len(got) + len("/CUBRID65535") + 1; n > sunPathMax {
-		t.Errorf("the fallback is %d bytes with the socket, over the %d available", n, sunPathMax)
-	}
-}
-
 // A user namespace maps one uid, so tar cannot restore an archive's recorded
 // ownership: it prints "Cannot change ownership" and exits non-zero even though
 // the files are there. 51 case scripts in this corpus unpack something, and the

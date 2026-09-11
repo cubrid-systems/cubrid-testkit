@@ -125,8 +125,10 @@ Shrinking the buffers is what made 16+ slots possible at all: 24 × 768 MB of en
   run's own tail wrote it. 35 patches match the corpus and all 36 apply, but that they were applied
   in a full run is unconfirmed.
 - **Slot roots are keyed on the namespace-local pid** (`/var/tmp/testkit-slots/3`), which is small
-  and reused, so a later run can inherit an earlier run's `$CUBRID` upper layer. Confirmed on disk;
-  not fixed.
+  and reused, so a later run can inherit an earlier run's `$CUBRID` upper layer. Confirmed on disk.
+  **Fixed 2026-09-11:** each run makes its root with `MkdirTemp` and removes it when the slots
+  close. The fallback `CUBRID_TMP` (`/var/tmp/tk<pid>`, used only when `$CUBRID` is too deep for a
+  socket path) is still keyed on the pid.
 - **`cbrd_26328` hangs** on `csql ... call [CHANGE].test_proc()` — an unsubstituted placeholder —
   for 25 minutes until the timeout. Plan says 43 s.
 - **20 `cases/` directories hold a `.sh` whose name does not match the directory**, so those cases

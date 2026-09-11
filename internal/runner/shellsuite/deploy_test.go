@@ -305,7 +305,12 @@ func TestTheSweepCannotReachOutsideTheSlot(t *testing.T) {
 		_ = outside.Wait()
 	}()
 
-	ns, err := contain.Open("sweeptest")
+	root, err := contain.NewSlotRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	ns, err := contain.Open("sweeptest", root)
 	if err != nil {
 		t.Fatalf("open slot: %v", err)
 	}

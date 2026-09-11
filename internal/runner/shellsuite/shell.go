@@ -637,7 +637,10 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 	if !contain.Active() {
 		return nil, nil, fmt.Errorf("parallel_slots needs the runner contained; set %s=1", contain.Env)
 	}
-	root := contain.SlotRoot()
+	root, err := contain.NewSlotRoot()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var pairs []channelPair
 	var opened []*contain.Namespace
@@ -645,10 +648,18 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 		for _, ns := range opened {
 			ns.Close()
 		}
+		// The upper layers go with the slots, and with them whatever the last
+		// case in each slot left in $CUBRID/log. Nothing reads them after this:
+		// what a case wrote is kept, when case_logs asks for it, by copying it to
+		// the result tree as the case finishes. Left here they are only disk --
+		// the next run gets a root of its own.
+		if err := os.RemoveAll(root); err != nil {
+			fmt.Printf("[WARN] cannot remove the slot root %s: %v\n", root, err)
+		}
 	}
 	for i := 0; i < n; i++ {
 		label := fmt.Sprintf("slot%d", i)
-		ns, err := contain.Open(label)
+		ns, err := contain.Open(label, root)
 		if err != nil {
 			closeAll()
 			return nil, nil, err

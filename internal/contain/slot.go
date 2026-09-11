@@ -51,7 +51,8 @@ type Namespace struct {
 // case before it was found.
 const keeperScript = `while :; do sleep 3600 & wait $!; done`
 
-// Open creates a namespace and returns it. label names it in errors.
+// Open creates a namespace and returns it. label names it in errors; root is the
+// run's slot root, from NewSlotRoot, where the namespace keeps its scripts.
 //
 // Mount, PID, IPC and network namespaces are asked for. A user namespace is
 // not, and that is a consequence of where this runs: the runner has already
@@ -74,7 +75,7 @@ const keeperScript = `while :; do sleep 3600 & wait $!; done`
 // external; the rest are aimed at localhost or a broker. 201 cases say
 // localhost and 34 say 127.0.0.1, all of which work here, and the 126 that read
 // the hostname are unaffected because the UTS namespace is not among these.
-func Open(label string) (*Namespace, error) {
+func Open(label, root string) (*Namespace, error) {
 	if !Active() {
 		return nil, fmt.Errorf("%s: slots need the runner to be contained first (%s=1)", label, Env)
 	}
@@ -88,10 +89,10 @@ func Open(label string) (*Namespace, error) {
 		return nil, fmt.Errorf("%s: hold a namespace open: %w", label, err)
 	}
 	ns := &Namespace{keeper: cmd, pid: cmd.Process.Pid, label: label}
-	// Outside /tmp on purpose: this is where the scripts a command runs are
-	// written, and the slot is about to get a /tmp that this process cannot see
-	// into.
-	ns.scratch = filepath.Join(scratchRoot(), label)
+	// Under the slot root and not /tmp on purpose: this is where the scripts a
+	// command runs are written, and Private can give the slot a /tmp that this
+	// process cannot see into.
+	ns.scratch = filepath.Join(root, "scratch", label)
 	if err := os.MkdirAll(ns.scratch, 0o755); err != nil {
 		ns.Close()
 		return nil, fmt.Errorf("%s: %w%s", label, err, whyMkdirFailed(ns.scratch, err))
@@ -430,31 +431,41 @@ func (c *nsChannel) Close() error     { return c.ns.Close() }
 
 var _ exec.Channel = (*nsChannel)(nil)
 
-// scratchRoot is where slots keep the scripts their commands run from.
+// NewSlotRoot makes the directory this run keeps everything it makes per slot
+// in: the overlay upper layers and the scripts commands are written into. The
+// caller removes it once the slots are closed.
 //
-// Not under /tmp, and not under os.TempDir() which usually is /tmp: a slot gets
-// a /tmp of its own, and a script written into this process's would not be there
-// when the command went looking. /var/tmp is the same filesystem and not the
-// directory being replaced.
-func scratchRoot() string { return filepath.Join(SlotRoot(), "scratch") }
-
-// SlotRoot is where this run keeps everything it makes per slot: the overlay
-// upper layers and the scripts commands are written into.
+// Made fresh every time, because a slot root is only safe to mount on if no
+// earlier run has written to it. It used to be named after the process id, and
+// that was the wrong key twice over. The runner is contained, so the id is the
+// namespace's -- a small number, and one that comes round again -- and nothing
+// removed the directory afterwards. A run therefore mounted its $CUBRID overlay
+// over the upper layer an earlier run had left, and started with that run's
+// writes already in the install. A directory from MkdirTemp cannot have been
+// anyone else's, and two runs at once get one each.
 //
-// The default carries the process id, because two runs on one machine would
-// otherwise both call a slot "slot0" and mount an overlay over the same upper
-// directory -- which is not a collision that announces itself, it is one run
-// quietly writing into another's $CUBRID. Everything else a run makes is already
-// unique: the corpus tmpfs comes from MkdirTemp and CUBRID_TMP carries the pid.
+// Under /var/tmp, and not os.TempDir() which usually is /tmp: Private can give a
+// slot a /tmp of its own, and a script written into this process's would then
+// not be there when the command went looking. /var/tmp is not the directory
+// being replaced.
 //
-// TESTKIT_SLOT_ROOT still overrides, and a caller that sets it takes
-// responsibility for keeping two runs apart.
-func SlotRoot() string {
-	if r := os.Getenv(SlotRootEnv); r != "" {
-		return r
+// TESTKIT_SLOT_ROOT moves it -- somewhere this uid owns, or off an overlayfs that
+// cannot carry another overlay's upper layer -- and the run's own directory is
+// made inside it all the same.
+func NewSlotRoot() (string, error) {
+	base := os.Getenv(SlotRootEnv)
+	if base == "" {
+		base = filepath.Join("/var/tmp", "testkit-slots")
 	}
-	return filepath.Join("/var/tmp", "testkit-slots", strconv.Itoa(os.Getpid()))
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", fmt.Errorf("slot root: %w%s", err, whyMkdirFailed(base, err))
+	}
+	dir, err := os.MkdirTemp(base, "run-")
+	if err != nil {
+		return "", fmt.Errorf("slot root: %w%s", err, whyMkdirFailed(base, err))
+	}
+	return dir, nil
 }
 
-// SlotRootEnv names the override.
+// SlotRootEnv names where slot roots are made.
 const SlotRootEnv = "TESTKIT_SLOT_ROOT"

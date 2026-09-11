@@ -231,9 +231,14 @@ func TestEachLanesWritesGoWhereItsLaneSays(t *testing.T) {
 		name string
 	}
 	var slots []slot
+	slotRoot, err := contain.NewSlotRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(slotRoot)
 	for i, onRAM := range []bool{true, false} {
 		name := fmt.Sprintf("slot%d", i)
-		ns, err := contain.Open(name)
+		ns, err := contain.Open(name, slotRoot)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -29,6 +29,11 @@ const Env = "TESTKIT_CONTAIN"
 // insideEnv marks the re-executed process so it does not try again.
 const insideEnv = "TESTKIT_CONTAINED"
 
+// OuterUserEnv is $USER as it was before containment made it root (see inside).
+// The cases need root, which is what the namespace is; a record of who ran the
+// test -- main.info's user line -- needs the account.
+const OuterUserEnv = "TESTKIT_OUTER_USER"
+
 // ShellEnv names an interpreter to bind over /bin/sh inside the namespace. Empty
 // leaves /bin/sh alone, which is what a QA machine wants.
 const ShellEnv = "TESTKIT_CONTAIN_SH"
@@ -57,7 +62,7 @@ func Enter() int {
 		fail("cannot find own path: %v", err)
 	}
 	cmd := exec.Command(self, os.Args[1:]...)
-	cmd.Env = append(inside(os.Environ()), insideEnv+"=1")
+	cmd.Env = append(inside(os.Environ()), insideEnv+"=1", OuterUserEnv+"="+os.Getenv("USER"))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNS |

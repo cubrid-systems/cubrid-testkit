@@ -91,7 +91,12 @@ type SQL struct {
 	testID string
 	dir    string
 
+	// mu guards the records; outMu the output, on its own so that an
+	// executor's words (Say) never wait on End, which holds mu while it asks
+	// an executor for failure texts -- an executor whose stderr pipe filled
+	// behind a waiting Say would never answer.
 	mu    sync.Mutex
+	outMu sync.Mutex
 	cases map[string]*sqlCase
 	cat   *catNode
 	xml   *os.File
@@ -163,6 +168,19 @@ func OpenSQL(run SQLRun) (*SQL, error) {
 
 // Root is the result directory.
 func (s *SQL) Root() string { return s.dir }
+
+// Discard removes a result directory whose run never started: a run whose
+// servers or executors could not be brought up has nothing to record, and a
+// half-made tree would read as a run that happened.
+func (s *SQL) Discard() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.xml != nil {
+		s.xml.Close()
+		s.xml = nil
+	}
+	os.RemoveAll(s.dir)
+}
 
 // build is ConsoleBO.build: a case record for every case, and the category map
 // with a bottom summary for every directory that holds cases.
@@ -252,12 +270,12 @@ func (s *SQL) Begin(startup []string) {
 
 // Say prints a line CQT printed while it ran: an executor's own output.
 func (s *SQL) Say(line string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.print(line + "\n")
 }
 
 func (s *SQL) print(text string) {
+	s.outMu.Lock()
+	defer s.outMu.Unlock()
 	io.WriteString(s.run.Out, text)
 	if s.run.Log != nil {
 		io.WriteString(s.run.Log, text)
@@ -318,8 +336,15 @@ func (s *SQL) Case(c SQLCase) error {
 	rc.ran, rc.ok, rc.ms, rc.hasCore = true, c.OK && c.Err == nil, c.Ms, c.HasCore
 
 	if c.Rendered != nil {
-		if err := writeCQTFile(filepath.Join(rc.caseDir, rc.name+".result"), c.Rendered); err != nil {
-			return err
+		// Best effort, as FileUtil.writeToFile is: it makes the file writable
+		// first and swallows what goes wrong. A read-only corpus loses its
+		// .result files and not its run.
+		path := filepath.Join(rc.caseDir, rc.name+".result")
+		if st, err := os.Stat(path); err == nil {
+			os.Chmod(path, st.Mode().Perm()|0o200)
+		}
+		if err := writeCQTFile(path, c.Rendered); err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] cannot write %s: %v\n", path, err)
 		}
 	}
 	if !rc.ok && c.Rendered != nil {
@@ -437,8 +462,8 @@ func (s *SQL) TestError() error {
 // Summary prints run.sh's block after CQT: from main.info's numbers, which
 // are the same ones End returns.
 func (s *SQL) Summary(c SQLCounts, logFile string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.outMu.Lock()
+	defer s.outMu.Unlock()
 	fmt.Fprintf(s.run.Out, "\n-----------------------\nFail:%d\nSuccess:%d\nTotal:%d\nElapse Time:%d\nTest Log:%s\nTest Result Directory:%s\n-----------------------\n\n",
 		c.Fail, c.Success, c.Total, c.TotalTime, logFile, s.dir)
 }

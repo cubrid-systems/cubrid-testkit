@@ -263,6 +263,23 @@ func (l *Local) RunWith(ctx context.Context, script string, wrap func(argv ...st
 	return res, fmt.Errorf("local run: %w", err)
 }
 
+// Command returns a command, not yet started, for a process a caller keeps
+// talking to rather than waits for: its pipes are the caller's to set. env
+// extends this process's environment.
+//
+// It gets what Run gives a script, for the same reason: a process group of its
+// own, and a cancelled ctx kills the group rather than the one process, so that
+// what it started goes too.
+func Command(ctx context.Context, dir string, env []string, argv ...string) *osexec.Cmd {
+	cmd := osexec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = cancelGrace
+	return cmd
+}
+
 func (l *Local) Put(ctx context.Context, local, remote string) error { return copyFile(local, remote) }
 func (l *Local) Get(ctx context.Context, remote, local string) error { return copyFile(remote, local) }
 func (l *Local) Close() error                                        { return nil }

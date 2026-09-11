@@ -183,6 +183,27 @@ whether they matter.
 porting line by line: code that runs but does not work, and code that works but does
 nothing, are both invisible until someone has to decide whether to carry them over.
 
+## 7. Found by measuring sql and medium before rewriting them *(2026-09-11)*
+
+CTP was run over the whole sql and medium corpora in a sandbox, and the source was read wherever a
+run disagreed with the documents. `evidence/sql-baseline.md` has the runs. Line numbers are at
+`cubrid-testtools` develop `a1bec87`.
+
+| Spec said | Actually | Source |
+|---|---|---|
+| one `summary_info`, `key=value` (§5-3) | **two files by that name.** The `=` one is `run.sh`'s and is written in CCI mode only. A JDBC-mode run has CQT's instead — `key:value`, at the root and in every directory (`total`, `success`, `fail`, `totalTime`, `SiteRunTimes`) | `run.sh:804-850`, a result tree |
+| `main.info` holds `total`…`SiteRunTimes`, `cubrid_rel`, `user`, `machine` (§5-2) | CQT's twelve keys (`build` … `result_path`) and then the three `do_summary_and_clean` appends. `SiteRunTimes` is in CQT's `summary_info`, not here | `run.sh:853-855`, a result tree |
+| the source of `run_mode` is unknown (freeze §11-7) | the `<run_mode>` element of the `jdbc_config_file` XML. `test_default.xml` comments it out, so a default run reads only base answers; `test_D_*.xml` name the `_D_<charset>_C_<collation>` answers | `ConsoleBO.java:368-396`, `sql/configuration/test_config/` |
+| medium's `.api` files are cases of unknown meaning (`module-medium.md` §3) | not cases. Discovery takes `.sql` alone | `TestUtil.java:112`, `:342` |
+| — | **a missing exclusion file is no error**: CQT prints the stack trace and filters nothing. Every conf names `${CTP_HOME}/conf/exclusions.txt`, and it does not exist | `TestUtil.java:350-363` |
+| — | **`medium.conf` fails on 11.x.** Tables are REUSE_OID by default, the medium schema uses an OID reference, and `loaddb` stops at the schema. Nothing says so — the load's output goes to a log file — and 579 of 975 cases then fail against tables that were never loaded, each looking like a failure of its own. `medium_dev.conf` adds `create_table_reuseoid=no` | `sql-baseline.md` §3 |
+| — | **a sql run writes into the cases tree**: a `.result` beside every `.sql`, 17,459 of them after one run | `sql-baseline.md` §1 |
+| the `ErrorInterrupt` cascade-abort is observable behaviour to freeze (§11-17) | **unreachable.** `isCaseRunError` stops the run only when `ErrorInterrupt.ERROR_INTER` is true, and it is declared `false` and never assigned anywhere in CQT | `ErrorInterrupt.java:29`, `ErrorInterruptUtil.java:46-64` |
+
+**What this method catches:** what a document can only guess. Four of these closed questions the
+analysis had left open, and one of them (`medium.conf`) turns a single failed setup step into 579
+case failures that do not mention it.
+
 ## What this says about the freeze
 
 A frozen surface is only as good as the reading behind it, and the reading was done six different

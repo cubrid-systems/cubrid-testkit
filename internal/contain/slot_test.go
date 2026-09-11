@@ -205,6 +205,37 @@ func TestSlotsWriteIntoTheInstallWithoutSeeingEachOther(t *testing.T) {
 	}
 }
 
+// A volatile overlay is asked for, and only when it is asked for: the switch
+// changes the conditions the server runs under, so it must not leak into a run
+// that did not set it.
+func TestAnOverlayIsVolatileOnlyWhenAskedFor(t *testing.T) {
+	options := func(ns *Namespace, dir string) string {
+		// Field 5 of mountinfo is the mount point; the super options are last.
+		return run(t, ns, "awk '$5 == \""+dir+"\" {print $NF}' /proc/self/mountinfo")
+	}
+
+	plain, volatile := namespace(t), namespace(t)
+	install := t.TempDir()
+	if err := plain.Overlay(install, t.TempDir()); err != nil {
+		t.Fatalf("overlay: %v", err)
+	}
+	if got := options(plain, install); got == "" || strings.Contains(got, "volatile") {
+		t.Errorf("an overlay nobody asked to be volatile has options %q", got)
+	}
+
+	t.Setenv(SlotVolatileEnv, "1")
+	if err := volatile.Overlay(install, t.TempDir()); err != nil {
+		t.Fatalf("volatile overlay: %v", err)
+	}
+	if got := options(volatile, install); !strings.Contains(got, "volatile") {
+		t.Errorf("%s=1 and the overlay's options are %q", SlotVolatileEnv, got)
+	}
+	run(t, volatile, "echo written > "+install+"/conf && sync "+install+"/conf")
+	if got := run(t, volatile, "cat "+install+"/conf"); got != "written" {
+		t.Errorf("a write through a volatile overlay reads back as %q", got)
+	}
+}
+
 // POSIX shared memory is a file on a tmpfs, and a mount namespace inherits the
 // tmpfs it was cloned from -- so an IPC namespace, which separates System V
 // segments, leaves /dev/shm shared. cub_broker and cub_cas use both.

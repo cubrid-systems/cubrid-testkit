@@ -15,8 +15,8 @@
         v
   prepare the corpus     read-only lower layer; every write goes to an overlay
         v
-  find the cases         <scenario>/**/<name>/cases/<name>.sh, then the exclusions
-        v
+  find the cases         <scenario>/**/<name>/cases/<name>.sh, then the exclusions;
+        v                a directory that cannot be read is a [WARN], not a stop
   order them             longest first, from case_plan, if an earlier run left one
         v
   deploy                 the helpers CTP's cases source, and the snapshot every

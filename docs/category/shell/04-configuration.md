@@ -19,7 +19,7 @@ These behave as they always did.
 | `testcase_retry_num` | `0` | attempts after the first failure |
 | `testcase_timeout_in_secs` | `0` | 0 is no timeout. CI uses 720 |
 | `testcase_exclude_by_macro` | — | skip a case whose text contains this, e.g. `LINUX_NOT_SUPPORTED` |
-| `testcase_exclude_from_file` | — | files of path fragments to skip, comma-separated |
+| `testcase_exclude_from_file` | — | files of path fragments to skip, comma-separated. A file that does not exist stops the run |
 | `test_continue_yn` | `false` | resume, skipping what already has a verdict |
 | `cubrid_db_charset` | `en_US` | what `cubrid_createdb` passes as the locale |
 | `feedback_type` | — | `file` |

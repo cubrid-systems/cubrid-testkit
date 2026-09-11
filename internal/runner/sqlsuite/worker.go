@@ -51,6 +51,10 @@ func (w *work) loop(ctx context.Context, name string, p place, q *dispatch.Queue
 		}
 		w.rec.Starting(c)
 		w.board.Begin(name, t.Case)
+		// A running sql case writes nothing until it ends -- the executor renders
+		// the whole case at once -- so what the page shows for one is what it
+		// is running: its statements.
+		w.board.Live(t.Case, t.Case)
 		// No answer, no run: CQT sets shouldRun false and its loop counts the
 		// case as failed without executing it (ConsoleBO.build, execute).
 		if answer, has := w.cases.answer[t.Case]; has {
@@ -79,6 +83,7 @@ func (w *work) loop(ctx context.Context, name string, p place, q *dispatch.Queue
 			q.Complete(t, true, false)
 			return err
 		}
+		w.board.Live(t.Case, "")
 		w.board.End(name, t.Case, c.Ran && c.OK && c.Err == nil)
 		// No retries: CQT has none, and the queue is only here for slots.
 		q.Complete(t, true, false)

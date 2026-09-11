@@ -1,8 +1,10 @@
 package contain
 
 import (
+	"context"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 
@@ -21,6 +23,12 @@ type Slot struct {
 // Channel opens a channel into the slot. A runner that has to reach the slot
 // while a case holds one channel -- a timeout monitor -- opens a second.
 func (s *Slot) Channel() exec.Channel { return s.NS.Channel("", s.Env...) }
+
+// Command is a process to be started in the slot, with the slot's environment
+// -- see Namespace.Command.
+func (s *Slot) Command(ctx context.Context, dir string, argv ...string) *osexec.Cmd {
+	return s.NS.Command(ctx, dir, s.Env, argv...)
+}
 
 // OpenSlots opens n places to run a case, each in namespaces of its own.
 //

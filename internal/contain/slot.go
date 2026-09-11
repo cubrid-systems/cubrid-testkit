@@ -183,6 +183,29 @@ func (n *Namespace) Channel(dir string, env ...string) exec.Channel {
 	return &nsChannel{ns: n, inner: inner}
 }
 
+// Command returns a command, not yet started, that runs argv inside this
+// namespace. env extends this process's environment, as it does for Channel.
+//
+// A channel runs a script to its end and hands back what it printed. A process
+// a runner talks to while it runs -- sql's executor, one JVM a slot hands a case
+// at a time on its standard input -- needs its pipes instead, so the caller
+// sets them and starts the command itself.
+//
+// In a process group of its own, and cancelling ctx kills the group, for the
+// reason exec.Local does it. nsenter forks to put its child in the PID
+// namespace, so the process that matters is not the one started here, and a
+// signal to nsenter alone would leave it running.
+func (n *Namespace) Command(ctx context.Context, dir string, env []string, argv ...string) *osexec.Cmd {
+	full := n.enter(argv...)
+	cmd := osexec.CommandContext(ctx, full[0], full[1:]...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 5 * time.Second
+	return cmd
+}
+
 // Private gives this slot a directory of its own at path, backed by under.
 //
 // /tmp is the case for which this exists. cub_master listens on a Unix domain

@@ -303,6 +303,36 @@ func TestAffinityHoldsADirectoryWithoutLanes(t *testing.T) {
 	}
 }
 
+// A slot still coming up needs to know whether there is anything left for it:
+// cases held for another slot's directory are not, and running ones are not.
+func TestDrainedMeansNothingForANewcomer(t *testing.T) {
+	q := New([]string{"/x/a/cases/1.sql", "/x/a/cases/2.sql", "/x/b/cases/1.sql"}, 0)
+	q.Affinity()
+	if q.Drained() {
+		t.Fatal("a queue with unclaimed cases is not drained")
+	}
+	a, _ := q.ClaimFor("slot0", LaneAny) // takes /x/a and holds its sibling
+	b, _ := q.ClaimFor("slot1", LaneAny) // takes /x/b
+	if !q.Drained() {
+		t.Error("everything is claimed or held; a third slot would find nothing")
+	}
+	if q.Finished() {
+		t.Error("drained is not finished: two cases are running and one is held")
+	}
+	q.Complete(a, true, false)
+	q.Complete(b, true, false)
+
+	plain := New([]string{"/x/c/cases/1.sql"}, 0)
+	if plain.Drained() {
+		t.Error("a plain queue with a case left is not drained")
+	}
+	c, _ := plain.Claim()
+	if !plain.Drained() {
+		t.Error("a plain queue with its only case running is drained")
+	}
+	plain.Complete(c, true, false)
+}
+
 // A retry has to go back to the slot that owns the directory, because that is
 // where the case's writes are. Retrying it elsewhere would run it against a
 // pristine corpus, which is a different test from the one that failed.

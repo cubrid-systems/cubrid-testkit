@@ -468,6 +468,31 @@ func (q *Queue) enqueue(c string, retry int) {
 	q.retryQueue = append(q.retryQueue, c)
 }
 
+// Drained reports whether a claimant arriving now would find nothing to take:
+// no first-pass case left unclaimed and no retry waiting. Cases still running,
+// or held for the slot that owns their directory, are not a newcomer's -- so a
+// runner still bringing a slot up can stop, rather than start one to find the
+// run already over.
+func (q *Queue) Drained() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.stopped {
+		return true
+	}
+	if len(q.retryQueue) > 0 {
+		return false
+	}
+	if !q.lanes {
+		return q.next >= len(q.cases)
+	}
+	for _, t := range q.taken {
+		if !t {
+			return false
+		}
+	}
+	return true
+}
+
 // Finished reports whether all work is done.
 func (q *Queue) Finished() bool {
 	q.mu.Lock()

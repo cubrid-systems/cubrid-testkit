@@ -872,7 +872,7 @@ func (s *Shell) prepareWorkspace(ctx context.Context, ch exec.Channel, cfg *conf
 			return "", err
 		}
 		if res.ExitCode != 0 {
-			fmt.Printf("[WARN] the scenario was not copied whole into %s: %v\n", workspace, exitError(res))
+			fmt.Printf("[WARN] the scenario was not copied whole into %s: %v\n", workspace, res.Failure())
 		}
 	} else {
 		workspace = scenario
@@ -903,7 +903,7 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 		// run the cases the macro exists to keep out.
 		out, runErr := probeIn(ctx, ch, fmt.Sprintf("grep %q `%s`", key, findAll(workspace)))
 		if runErr == nil && out.ExitCode != 0 && out.ExitCode != 1 {
-			runErr = fmt.Errorf("testcase_exclude_by_macro %s: %w", key, exitError(out))
+			runErr = fmt.Errorf("testcase_exclude_by_macro %s: %w", key, out.Failure())
 		}
 		if runErr != nil {
 			return nil, nil, nil, runErr

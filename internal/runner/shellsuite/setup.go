@@ -51,6 +51,7 @@ func describeSetup(cfg *conf.Config, slots, ramMB, slowSecs, slowMB int, planPat
 	suite := []struct{ k, v, note string }{
 		{"parallel_slots", itoa(slots), "cases at once"},
 		{"scenario_ram_mb", mbOrOff(ramMB), "ceiling for the corpus overlay"},
+		{"scenario_disk", cfg.GetOr("scenario_disk", "off"), "the corpus behind an overlay per slot, on disk"},
 		{"testcase_timeout_in_secs", cfg.GetOr("testcase_timeout_in_secs", "0"), "per case"},
 		{"testcase_retry_num", cfg.GetOr("testcase_retry_num", "0"), ""},
 		{"lane_slow_secs", secsOrOff(slowSecs), "duration threshold for the disk lane"},

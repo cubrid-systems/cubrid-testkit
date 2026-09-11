@@ -208,6 +208,10 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	if slowMBps > 0 && (sizePath == "" || planPath == "") {
 		return quit("lane_slow_mbps needs case_sizes and case_plan: a rate is megabytes over seconds and both halves are measured by a run, not guessed")
 	}
+	onDisk := cfg.Bool("scenario_disk", false)
+	if err := checkScenarioDisk(onDisk, ramMB, cfg.GetOr("scenario", ""), cfg.GetOr("testcase_workspace_dir", "")); err != nil {
+		return quit("%v", err)
+	}
 
 	var corpus *Corpus
 	var split laneSplit
@@ -243,6 +247,13 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 			fmt.Printf("[INFO] the corpus is read-only for this run; its writes go to %d MB of memory\n", ramMB)
 		}
 	}
+	if onDisk {
+		how := ""
+		if contain.Volatile() {
+			how = ", mounted volatile"
+		}
+		fmt.Printf("[INFO] the corpus is read-only for this run; each slot's writes go to a layer of its own on disk%s\n", how)
+	}
 
 	// Every worker gets a namespace, including the only one.
 	//
@@ -270,7 +281,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	own := s.Channels == nil
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
 	if own && (slots > 1 || contain.Active()) {
-		slotted, closeSlots, err := openSlots(slots, corpus, cfg.GetOr("scenario", ""), split)
+		slotted, closeSlots, err := openSlots(slots, corpus, cfg.GetOr("scenario", ""), split, onDisk)
 		if err != nil {
 			return quit("%v", err)
 		}
@@ -620,8 +631,19 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 // where its upper layer sits is what the lane means: memory for the fast lane,
 // disk for the slow one. Mounted inside the slot, because mounted once before
 // the slots there is only one place for it to be.
-func openSlots(n int, corpus *Corpus, corpusDir string, split laneSplit) ([]channelPair, func(), error) {
+//
+// With scenario_disk every slot has one, its upper in the slot's own directory
+// on the slot root, so that TESTKIT_SLOT_VOLATILE reaches what a shell case
+// writes most: the databases it creates in its own directory. Without an
+// overlay a case writes them into the corpus itself, as under CTP, and no
+// switch on the slots can touch that.
+func openSlots(n int, corpus *Corpus, corpusDir string, split laneSplit, onDisk bool) ([]channelPair, func(), error) {
 	var mount func(int, *contain.Slot) error
+	if onDisk {
+		mount = func(i int, s *contain.Slot) error {
+			return s.NS.Overlay(corpusDir, filepath.Join(s.Dir, "scenario"))
+		}
+	}
 	if split.on() {
 		mount = func(i int, s *contain.Slot) error {
 			if corpus == nil {
@@ -652,6 +674,31 @@ func openSlots(n int, corpus *Corpus, corpusDir string, split laneSplit) ([]chan
 		pairs[i] = channelPair{worker: s.Channel(), monitor: s.Channel(), close: func() {}}
 	}
 	return pairs, closeAll, nil
+}
+
+// checkScenarioDisk refuses what scenario_disk cannot do.
+//
+// It is one of two places for the corpus's writes, scenario_ram_mb being the
+// other. It is mounted per slot, so it needs slots, which need a contained
+// runner. And it needs the cases to run in scenario: a separate workspace is
+// filled from outside after the slots have mounted their overlays over
+// scenario, and the cases would run there instead, on no overlay at all.
+func checkScenarioDisk(on bool, ramMB int, scenario, workspace string) error {
+	if !on {
+		return nil
+	}
+	scenario, workspace = strings.TrimSpace(scenario), strings.TrimSpace(workspace)
+	switch {
+	case ramMB > 0:
+		return fmt.Errorf("scenario_disk and scenario_ram_mb are two places for the corpus's writes; set one of them")
+	case scenario == "":
+		return fmt.Errorf("scenario_disk needs scenario to be set")
+	case workspace != "" && workspace != scenario:
+		return fmt.Errorf("scenario_disk puts scenario behind an overlay, and the cases would run in testcase_workspace_dir instead; unset one of them")
+	case !contain.Active():
+		return fmt.Errorf("scenario_disk needs the runner contained; set %s=1", contain.Env)
+	}
+	return nil
 }
 
 // openChannels opens the two channels the machine needs.

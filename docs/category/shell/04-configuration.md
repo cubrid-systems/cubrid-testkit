@@ -50,6 +50,7 @@ These behave as they always did.
 | `TESTKIT_CONTAIN=1` | put the run in namespaces of its own. **Required** by slots and by `scenario_ram_mb` |
 | `TESTKIT_CONTAIN_SH` | which shell to bind over `/bin/sh`. `bash` if it can be found |
 | `TESTKIT_SLOT_ROOT` | where each run makes its own directory for the per-slot overlays, removed when the slots close. `/var/tmp/testkit-slots` when unset |
+| `TESTKIT_SLOT_VOLATILE=1` | mount the per-slot overlays `volatile`: a sync on a slot's layer returns having done nothing. Off by default, because the syncs are part of the conditions CTP runs under. On a disk-backed slot root it removes the wait every commit makes on the disk — sql went from 1,131 s to 338–394 s on eight slots (`evidence/sql-native.md` §3). Needs Linux 5.10+; changes nothing on a tmpfs, whose syncs cost nothing already |
 
 And CTP's failure snapshot, which is off the frozen surface and configurable:
 

@@ -127,7 +127,8 @@ sdc being slower and how much is eight servers sharing it has not been separated
 **The disk, taken apart.** Two changes, one at a time, on the same pins and configuration. The
 upper layers moved to `/data` with `TESTKIT_SLOT_ROOT`; then the overlay was mounted `volatile`, which
 makes every sync on it a no-op — a layer the run throws away at the end has nothing to keep. That
-second one was a build made for the measurement, and is not in the code.
+second one was a build made for the measurement; it is now `TESTKIT_SLOT_VOLATILE=1`, off by
+default (decided 2026-09-11: the syncs are part of the conditions CTP runs under).
 
 | sql, 8 slots | wall | slots' start, summed | cases, summed | a statement | flushes on the slots' disk | OK / NOK |
 |---|---:|---:|---:|---:|---:|---:|

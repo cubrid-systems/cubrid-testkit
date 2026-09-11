@@ -1115,3 +1115,27 @@ func TestAStallDoesNotAddRemainingWork(t *testing.T) {
 			"remaining went %d -> %d, wanted %d", first, second, first-5)
 	}
 }
+
+// A runner whose cases leave no feedback.log -- sql's are a rendering and an
+// answer -- answers the click itself.
+func TestARunnerCanAnswerCaseDetailItself(t *testing.T) {
+	b := New(2)
+	b.DetailFunc(func(name string) string {
+		if name == "/x/a/cases/a.sql" {
+			return "NOK: first difference at line 3\n"
+		}
+		return ""
+	})
+	addr, stop, err := b.Serve("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	if got := fetch(t, "http://"+addr+"/case?name="+url.QueryEscape("/x/a/cases/a.sql")); !strings.Contains(got, "first difference at line 3") {
+		t.Errorf("the runner's answer did not reach the page: %q", got)
+	}
+	if got := fetch(t, "http://"+addr+"/case?name="+url.QueryEscape("/x/b/cases/b.sql")); !strings.Contains(got, "has not finished") ||
+		strings.Contains(got, "feedback.log") {
+		t.Errorf("a case the runner has nothing on should say it has not finished, not mention feedback.log: %q", got)
+	}
+}

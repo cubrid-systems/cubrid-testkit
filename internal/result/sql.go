@@ -448,6 +448,90 @@ func (s *SQL) now() time.Time {
 	return time.Now()
 }
 
+// Describe is what the status page shows for a finished case: its verdict and
+// time, where its answer and its rendering are, and for one that failed, the
+// first line where they part -- blank lines aside, since the comparison takes
+// line breaks out. "" for a case that has not finished.
+func (s *SQL) Describe(file string) string {
+	s.mu.Lock()
+	c := s.cases[file]
+	var ran, ok, shouldRun bool
+	var ms int64
+	if c != nil {
+		ran, ok, shouldRun, ms = c.ran, c.ok, c.shouldRun, c.ms
+	}
+	s.mu.Unlock()
+	if c == nil || (!ran && shouldRun) {
+		return ""
+	}
+	result := filepath.Join(c.caseDir, c.name+".result")
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s\n\nanswer: %s\nresult: %s\n\n", file, c.answer, result)
+	switch {
+	case !shouldRun:
+		b.WriteString("not run: it has no answer, and CQT counts that as a failure\n")
+		return b.String()
+	case ok:
+		fmt.Fprintf(&b, "OK in %d ms\n", ms)
+		return b.String()
+	}
+	fmt.Fprintf(&b, "NOK in %d ms\n", ms)
+	want, err1 := os.ReadFile(c.answer)
+	got, err2 := os.ReadFile(result)
+	if err1 != nil || err2 != nil {
+		fmt.Fprintf(&b, "\n(cannot read both: %v %v)\n", err1, err2)
+		return b.String()
+	}
+	a, r := nonBlankLines(string(want)), nonBlankLines(string(got))
+	i := 0
+	for i < len(a) && i < len(r) && a[i].text == r[i].text {
+		i++
+	}
+	if i == len(a) && i == len(r) {
+		b.WriteString("\nthe two differ only in line breaks, which CQT removes before comparing\n")
+		return b.String()
+	}
+	show := func(name string, lines []numbered) {
+		fmt.Fprintf(&b, "\n%s, from line %d:\n", name, lineOf(lines, i))
+		for j := max(i-3, 0); j < min(i+8, len(lines)); j++ {
+			mark := "  "
+			if j == i {
+				mark = "> "
+			}
+			fmt.Fprintf(&b, "%s%s\n", mark, lines[j].text)
+		}
+	}
+	b.WriteString("\nfirst difference:\n")
+	show("answer", a)
+	show("result", r)
+	return b.String()
+}
+
+type numbered struct {
+	n    int
+	text string
+}
+
+func nonBlankLines(s string) []numbered {
+	var out []numbered
+	for i, l := range strings.Split(strings.ReplaceAll(s, "\r", ""), "\n") {
+		if strings.TrimSpace(l) != "" {
+			out = append(out, numbered{i + 1, l})
+		}
+	}
+	return out
+}
+
+func lineOf(lines []numbered, i int) int {
+	if i < len(lines) {
+		return lines[i].n
+	}
+	if len(lines) > 0 {
+		return lines[len(lines)-1].n + 1
+	}
+	return 1
+}
+
 // MainInfoTail is what run.sh appends to main.info after CQT exits.
 func (s *SQL) MainInfoTail(rel, user, machine string) error {
 	return appendFile(filepath.Join(s.dir, "main.info"),

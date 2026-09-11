@@ -203,6 +203,21 @@ func TestTheRecordsOfASmallRun(t *testing.T) {
 		t.Errorf("summary.info is not XStream's shape:\n%s", si)
 	}
 
+	// What the status page shows when a case is clicked.
+	if d := r.Describe(fail); !strings.Contains(d, "NOK in 1500 ms") || !strings.Contains(d, "first difference") ||
+		!strings.Contains(d, "answer, from line 1:\n> 3") || !strings.Contains(d, "result, from line 1:\n> ====") {
+		t.Errorf("a failed case's description should show where answer and result part:\n%s", d)
+	}
+	if d := r.Describe(pass); !strings.Contains(d, "OK in 12 ms") {
+		t.Errorf("a passed case's description: %q", d)
+	}
+	if d := r.Describe(lone); !strings.Contains(d, "not run") {
+		t.Errorf("a case with no answer should say it did not run: %q", d)
+	}
+	if d := r.Describe(corpus + "_01_a/cases/nope.sql"); d != "" {
+		t.Errorf("a case the run does not have should describe as empty, got %q", d)
+	}
+
 	if err := r.MainInfoTail("CUBRID 11.5.0 (x)", "qa", "127.0.1.1"); err != nil {
 		t.Fatal(err)
 	}

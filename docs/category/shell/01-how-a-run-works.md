@@ -44,7 +44,8 @@ to configure: every slot believes it is the only CUBRID on the machine.
                               │
    $CUBRID_DATABASES        ──┘   port 1523  (own netns)    port 1523  (own netns)
                                   PID 1 = its own init      PID 1 = its own init
-                                  its own /tmp, IPC, SHM    its own /tmp, IPC, SHM
+                                  its own IPC, /dev/shm     its own IPC, /dev/shm
+                                  /tmp is the machine's     /tmp is the machine's
 ```
 
 Four namespaces per slot:
@@ -55,6 +56,11 @@ Four namespaces per slot:
 | **PID** | `pkill cub` in a case kills that slot's servers and nothing else |
 | **IPC** | broker shared memory does not collide between slots |
 | **mount** | the overlay, and a bash-compatible `/bin/sh` bound over the machine's |
+
+**`/tmp` is not separated.** Slots did collide there, on `cub_master`'s socket `/tmp/CUBRID1523`:
+four masters over one socket, and none of them came up. That socket now goes to `CUBRID_TMP`, which
+each slot sets to a directory of its own: `$CUBRID/tmp`, behind the slot's overlay. A case that
+writes a fixed name under `/tmp` still shares it with every other slot and with the machine.
 
 The overlay is what keeps the corpus clean: **the scenario on disk is never written to**. A case's
 writes — its databases, its logs, its `.result` — land in the upper layer, and when a directory's

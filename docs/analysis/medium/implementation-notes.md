@@ -79,6 +79,13 @@ medium_dev.conf 의 추가 키. *DB createdb 단계* 에서 `cubrid createdb --r
 
 REUSE_OID 옵션은 CUBRID 의 *클래스 OID 재사용 정책* — 일부 시나리오 (예: 대량 DDL 반복) 에서만 의미. 새 시스템에서 dev/prod 변형 처리 ADR.
 
+> **정정 (2026-09-11, 측정).** 위 추정은 둘 다 틀렸다. `create_table_reuseoid` 는 `createdb` 옵션이 아니라
+> `[sql/cubrid.conf]` 섹션의 **시스템 파라미터**다 (`medium_dev.conf:76`, "It needs to CUBRID 11.x over").
+> 그리고 "일부 시나리오에서만" 이 아니다 — **11.x 에서는 medium 전체의 전제**다. 11.x 는 테이블을 기본
+> REUSE_OID 로 만들고, medium 스키마의 `dba.picture` 가 참조 도메인이 될 수 없어 `loaddb` 가 스키마
+> 단계에서 멈춘다. `medium.conf` 로는 975 중 579 가 실패하고, `medium_dev.conf` 로는 975 전부 통과한다.
+> `evidence/sql-baseline.md` §3.
+
 ---
 
 ## 6. medium 케이스의 `.api` 확장자 (10개)

@@ -438,7 +438,16 @@ user:<...>
 machine:<...>
 ```
 
+> **정정 (2026-09-11).** 위 키 목록은 실제 `main.info` 가 아니다. 실제는 CQT 가 쓰는 12키(`build`,
+> `version`, `os`, `category`, `elapse_time`, `success`, `fail`, `total`, `execute_case`, `totalTime`,
+> `end_time`, `result_path`) 뒤에 `do_summary_and_clean` 이 붙이는 3키(`cubrid_rel`, `user`, `machine` —
+> `run.sh:853-855`). `SiteRunTimes` 는 CQT 의 `summary_info` 에 있다. `evidence/sql-baseline.md` §8.
+
 ### 5-3. `summary_info` — **F1** (`=` 구분, CCI 모드 또는 core 발견 시)
+
+> **정정 (2026-09-11).** 아래는 **CCI 모드에서 `run.sh` 가 쓰는** `summary_info` 다 (`generate_summary_info`,
+> `run.sh:804-850`). JDBC 모드 run 에는 **이름이 같은 다른 파일**이 있다 — CQT 가 루트와 디렉터리마다 쓰는
+> `key:value` 형식(`total`, `success`, `fail`, `totalTime`, `SiteRunTimes`). 이 문서는 그것을 싣지 않았다.
 
 ```
 cubrid_build_id=<ver>      execute_date=<...>       Num_total=<N>
@@ -740,7 +749,7 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 11-4 | 백업 tar.gz 파일명 정확한 구분자 | F2 → F1 승격 여부 | Phase 4 |
 | 11-5 | ~~Feedback DB 스키마~~ | **해제됨** — `FeedbackDB` 는 축 O 제외 | — |
 | 11-6 | ~~RMI 모드 존치/폐기~~ | **해소 (2026-09-02) — 폐기.** 근거는 §7-7 | 완료 |
-| 11-7 | answer variant 선택의 **`runMode` 값 출처** | 알고리즘은 확인됨. 값이 어디서 오는지가 미상 | Phase 4 |
+| 11-7 | answer variant 선택의 **`runMode` 값 출처** | 알고리즘은 확인됨. 값이 어디서 오는지가 미상. **닫힘 (2026-09-11)** — `jdbc_config_file` XML 의 `<run_mode>` 요소. `test_default.xml` 은 주석 처리, `test_D_*.xml` 이 `_D_*` answer 와 짝 (`ConsoleBO.java:368-396`) | Phase 4 |
 | 11-8 | **jdbc / ha_repl / cdc_repl 출력 표면 미분석** — inventory stubs 0/5 | §10 행 10·12 와 §6-1 의 `-1` 이 유추 | **Phase 4** — jdbc 가 Phase 3 범위에서 빠져(`module-shell.md` §7-5) 더 이상 Phase 3 블로커가 아니다 |
 | 11-9 | ~~로컬 체크아웃과 baseline 차이~~ | **해소 (2026-09-02)** — `ComponentEnum.java` · `Test.java` · `bin/ctp.sh` 모두 **변경 없음**. 본 명세의 근거는 유효하다 | 완료 |
 | 11-10 | `bin/ini.sh` / `IniCommand` 의 CLI 표면 + 외부 사용자 | 등급 부여 | Phase 2 |
@@ -750,7 +759,7 @@ CTP 내부에서는 **어디서도 호출되지 않는다**. 외부 CI/수동 �
 | 11-14 | ~~shell fail-backup 의 Windows 동작~~ | **소멸 (2026-09-02)** — Windows 가 범위 밖이 되어 질문 자체가 사라졌다 | 완료 |
 | 11-15 | **`runone.sh` sed 정규화 패턴 전수 목록** | §7-6 — 모든 isolation 판정이 여기 의존 | Phase 4 (ADR-009) |
 | 11-16 | `jdbc_config_file` charset XML 스키마 | §8-5 | Phase 4 |
-| 11-17 | `ErrorInterrupt` cascade-abort 정책 | 실행 중단 동작이 관측 가능 | Phase 4 |
+| 11-17 | `ErrorInterrupt` cascade-abort 정책 | 실행 중단 동작이 관측 가능. **닫힘 (2026-09-11) — 도달 불가.** `ErrorInterruptUtil.isCaseRunError` 는 `ErrorInterrupt.ERROR_INTER` 가 참일 때만 run 을 멈추는데, 그 값은 `false` 로 선언되고 CQT 어디서도 바뀌지 않는다. 동결할 행동이 없다 | Phase 4 |
 | 11-20 | `run_shell.sh --config` 가 죽어 있다 | §1-4 — 재현할지 되살릴지 | Phase 3 |
 | 11-21 | `run_shell.sh` 의 `STOP` 파일 | §1-4 — 명세에 없던 제어 표면 | Phase 3 |
 | 11-22 | ~~`run_shell.sh` 가 실패해도 0 을 반환한다~~ | **해소 (2026-09-03)** — 명백한 버그로 판정, 축 T 에서 고친다 | 완료 |

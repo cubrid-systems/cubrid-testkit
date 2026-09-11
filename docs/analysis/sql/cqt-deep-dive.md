@@ -236,6 +236,12 @@ for (run = 0; run < test.getSqlRunTime(); run++) {  // 다중 실행 (default 1)
 }
 ```
 
+> **후속 (2026-09-11).** 실행 · 렌더링 · 비교를 소스로 확인했다 — `evidence/sql-baseline.md` §7.
+> 요지: 한 연결을 run 내내 재사용(`CubridConnManager.java:132`), 케이스마다 reset 과 autocommit
+> (`ConsoleBO.java:812-848`), 결과는 열 이름 +4칸 · 값 +5칸 · 값은 `rs.getObject().toString()` 기반
+> (`ConsoleDAO.java:873-934`, `957-1019`), 판정은 CR/LF 를 모두 지운 뒤 `String.equals`
+> (`ConsoleBO.java:633-654`). 이 사실들이 ADR-016 의 근거다.
+
 ### 4-1. 다중 connection 지원 — sql 이 *isolation 같은 동시성 시나리오* 도 표현 가능!
 
 `Sql.getConnId()` 가 빈 문자열 외 값이면 *다른 connection 으로 전환*. 즉:

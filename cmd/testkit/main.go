@@ -34,6 +34,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
+	"github.com/cubrid-systems/cubrid-testkit/internal/runner/sqlsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runshell"
 )
 
@@ -144,6 +145,11 @@ func run(args []string) int {
 	// the migration (ADR-004, ADR-013).
 	if os.Getenv("TESTKIT_NATIVE_SHELL") == "1" {
 		reg.Register(shellsuite.NewShell())
+	}
+	// sql and medium, on the same terms: opt-in until ADR-017's comparison
+	// against CTP exists (docs/design/module-sql.md §2-1).
+	if os.Getenv("TESTKIT_NATIVE_SQL") == "1" {
+		reg.Register(sqlsuite.New())
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

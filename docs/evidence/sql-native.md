@@ -124,6 +124,50 @@ with its upper layers in memory (the table above) is the same processes on the s
 with the writes going elsewhere, and its cases went from 81 s to 14 s. How much of the four times is
 sdc being slower and how much is eight servers sharing it has not been separated.
 
+**The disk, taken apart.** Two changes, one at a time, on the same pins and configuration. The
+upper layers moved to `/data` with `TESTKIT_SLOT_ROOT`; then the overlay was mounted `volatile`, which
+makes every sync on it a no-op — a layer the run throws away at the end has nothing to keep. That
+second one was a build made for the measurement, and is not in the code.
+
+| sql, 8 slots | wall | slots' start, summed | cases, summed | a statement | flushes on the slots' disk | OK / NOK |
+|---|---:|---:|---:|---:|---:|---:|
+| upper on `/var/tmp` (sdc) | 1,131 s | 409 s | 6,846 s | 10.5 ms | — | 17,457 / 2 |
+| upper on `/data` (sdb) | **722 s** | 266 s | 4,022 s | 6.2 ms | 199,133 | 17,457 / 2 |
+| on `/data`, `volatile` (run 1) | **394 s** | 233 s | 894 s | 1.4 ms | 768 | 17,454 / 5 |
+| on `/data`, `volatile` (run 2) | **338 s** | 219 s | 840 s | 1.3 ms | 739 | 17,456 / 3 |
+| CTP, serial | 1,771 s | — | 1,693 s | 2.6 ms | — | 17,459 / 0 |
+
+It was the syncs. With them gone the cases on eight slots take half of what they take in CTP's own
+serial run, which waits on one at every commit too, and the run is 4.5 to 5.2 times CTP's. What is
+left is the slots' start, one after another: 219–233 s of a 338–394 s run, where the cases of all
+eight slots fit in about 105 s.
+
+Every NOK in these runs is §4's kind but one. `1003` fails in each; a table another case left
+(`-494`) meets a different case each time — `union.sql`, `trac_343_01`, `example.sql` — and
+`create_view_data_type` is the other way round, its answer recording the `-494` of an object that
+the slot never had; `cbrd_26104`, in both `volatile` runs, prints trace statistics where CTP's answer
+has the plan of the query that reads the current user's groups. The one that is not: in the first
+`volatile` run `_08_javasp/case_join_01` got `-111` (a transaction the server aborted, "server failure
+or mode change") and took 8.6 s where every other run took 1.1–1.2 s. No kernel OOM, no core, and it
+did not recur; that run's slot logs were gone with its slots, and the next run's, copied out while it
+ran, show no mode change or restart.
+
+| medium | wall | cases, summed | OK / NOK | `.result` identical to CTP's |
+|---|---:|---:|---:|---:|
+| sqlsuite, serial, upper on `/var/tmp` | 110–125 s | 28–33 s | 975 / 0 | 975 |
+| sqlsuite, serial, on `/data`, `volatile` | **77 s** | 16 s | 975 / 0 | — |
+| sqlsuite, 4 slots, on `/data`, `volatile` | 91 s | 16 s | 975 / 0 | 975 |
+| CTP, serial | 87–90 s | 22 s | 975 / 0 | — |
+
+A serial medium run is now faster than CTP's; four slots still lose to one, two of them never
+starting because the queue had drained.
+
+**Memory is the next limit.** A run of eight slots on `/var/tmp` with `volatile` was stopped at 7%
+of its cases, just after its last slot came up, because the machine was running low on memory; it
+is not measured. A slot in medium, sampled every five seconds: its server up to 0.7–0.85 GB, the
+executor 0.55–0.7 GB, five CAS processes 15 MB each, the PL server 56 MB. Eight sql slots had this
+30 GB machine at 23 GB used, next to a desktop and other sessions that were not the run's.
+
 ## 4. What slots found in the corpus
 
 A serial run's cases run one after another on one database and one connection, so a case can depend
@@ -165,9 +209,10 @@ and is at most a handful of cases.
   be laid down again (`sandbox.sh refresh`) and CTP's baseline taken again at the same pins.
 - **Slots against one slot, whole corpora**, after the gate, with the order dependencies of §4
   accounted for.
-- **The disk, taken apart** (§3): sql on eight slots with the upper layers on `/data`
-  (`TESTKIT_SLOT_ROOT`), then with the overlay mounted `volatile`, which skips every sync to a layer
-  that is thrown away at the end.
+- **`volatile` on `/var/tmp`** (§3): stopped for memory; it decides whether the default slot root
+  has to move once `volatile` is in the code.
+- **A sql slot's memory**, sampled as medium's was, and what eight of them leave the machine.
+- **The slots started together** again, now that a start no longer waits on the disk's syncs.
 
 ## 6. What a review changed
 

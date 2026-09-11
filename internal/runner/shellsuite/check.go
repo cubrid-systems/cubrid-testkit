@@ -78,7 +78,9 @@ func (c *CheckRequirement) Check(ctx context.Context) bool {
 
 	for _, cmd := range checkedCommands {
 		c.print("==> Check command '%s' ", cmd)
-		out, err := runIn(ctx, c.Channel, "which "+cmd+" 2>&1 ")
+		// which exits 1 for a missing command, and the status is not what is
+		// judged here: the wording is, below.
+		out, err := probeIn(ctx, c.Channel, "which "+cmd+" 2>&1 ")
 		switch {
 		case err != nil:
 			c.fail("...... FAIL: %v", err)

@@ -116,7 +116,11 @@ Shrinking the buffers is what made 16+ slots possible at all: 24 × 768 MB of en
 - **The review's systemic finding**: `Run` reports failure through `Result.ExitCode`, and roughly
   eighteen call sites in `shellsuite` check only `err`. Two were fixed by hand. Making `runIn`
   return an error on non-zero exit, with an explicit opt-out for the few probes that want status as
-  data, would turn the rest into compile-time problems.
+  data, would turn the rest into compile-time problems. **Done 2026-09-11:** `runIn` now errors on a
+  non-zero exit, and nine call sites opt out through `probeIn` -- seven whose status is an answer,
+  and two walks over the corpus, discovery's `find` and the workspace `cp -r`, which warn and go on.
+  Those two are lenient because three of five corpora sampled on this machine hold a root-owned
+  0700 directory a run as root left under a case's `cases/`, and `find` exits 1 on each.
 - **The isolation audit's remaining claims**: `$CTP_HOME` written by three cases that `make clean`
   in it; `/tmp` shared (`Namespace.Private` exists and has never been called); `$HOME` shared;
   cases that size the engine from `free -g`; seven that assert on `nproc`. None reproduced yet, and

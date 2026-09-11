@@ -322,6 +322,54 @@ func TestACaseThatWritesNoResultFails(t *testing.T) {
 	}
 }
 
+// A case is judged by what it wrote, not by how it exited -- CTP never read the
+// status, and most of the corpus ends on whatever its last command returned.
+func TestACaseThatExitsNonZeroKeepsItsVerdict(t *testing.T) {
+	root := t.TempDir()
+	exits := writeCase(t, root, "exits", `echo " : OK exits" >> exits.result; exit 7`)
+
+	ch := &guardedChannel{inner: exec.NewLocal("")}
+	sink := newSink(t)
+	reported := &recordingFeedback{}
+	w := &Worker{EnvID: "env1", Channel: ch, Queue: dispatch.New([]string{exits}, 0), Sink: sink,
+		Report: reported, Local: true}
+	if err := w.Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := reported.find(exits)
+	if got == nil {
+		t.Fatal("feedback never heard about the case")
+	}
+	if !got.Success || strings.Contains(got.ResultText, "Runtime error") {
+		t.Errorf("a case that wrote OK and exited 7 was judged by its status:\n%s", got.ResultText)
+	}
+}
+
+// A result file that is not there is an empty answer, not a failure to read one.
+// cat exits 1 on it; taken as an error, the case would be a runtime error rather
+// than the blank result CTP reports for it.
+func TestACaseThatRemovesItsResultIsBlankNotARuntimeError(t *testing.T) {
+	root := t.TempDir()
+	gone := writeCase(t, root, "gone", `rm -f gone.result`)
+
+	ch := &guardedChannel{inner: exec.NewLocal("")}
+	sink := newSink(t)
+	w := &Worker{EnvID: "env1", Channel: ch, Queue: dispatch.New([]string{gone}, 0), Sink: sink,
+		Report: feedback.Null{}, Local: true}
+	if err := w.Run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	log, err := os.ReadFile(filepath.Join(sink.Dir(), "test_env1.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "blank result") || strings.Contains(string(log), "Runtime error") {
+		t.Errorf("a missing result file was not recorded as blank:\n%s", log)
+	}
+}
+
 // A retried case has produced no verdict yet: it must not be printed and must not
 // be written to the finished list, or resuming would skip a case that never
 // passed.

@@ -168,13 +168,13 @@ sqlsuite 가 처음 쓰는 시점에 `shellsuite` 에서 공용 패키지로 옮
 | 지금 | 쓰는 곳 | 옮길 곳 (안) | 시점 |
 |---|---|---|---|
 | `exec` · `conf` · `topology` · `registry` · `plan` · `dispatch` · `contain` | 그대로 | — | — |
-| `runIn`/`probeIn`/`exitError` (`prologue.go`) | 단계 스크립트 | `internal/script` — prologue 를 인자로 | P1 |
-| `safepath` · `buildinfo` · 제외 파싱 | 단계 · 탐색 | `internal/casefs` 또는 해당 패키지 | P1 |
-| `openSlots` · `slotTmp` · `channelPair` · 입장 정책 배선 | 병렬 | `internal/slots` | **P1** *(2026-09-11 — 병렬이 목표가 되어 P3 에서 당김)* |
-| `Worker` 골격 (claim · finish · 보고) · `Monitor` | 병렬 · 타임아웃 | `internal/worker` — 케이스 1건 실행을 인터페이스로 | **P1** *(동상)* |
-| `status.Board` 의 shell 전용 부분 (`familyOf`, `replay` 의 `\.sh` 정규식, 패치 표시) | 보드 | 일반화 | P1 — 보드는 슬롯과 함께 온다 |
-| `result.Sink` | 기록 | **sql 섹션 추가** (unittest 가 추가된 방식) | P1 |
-| — | 슬롯 안에서 **오래 사는 프로세스** (실행부 JVM) | `contain.Namespace` 에 추가 — 지금은 끝까지 기다리는 명령만 있다 | P1 |
+| `runIn`/`probeIn`/`exitError` (`prologue.go`) | 단계 스크립트 | ~~`internal/script`~~ → **`exec.Check` · `exec.Result.Failure`** *(2026-09-11 완료)*. prologue 는 shell task 의 환경이라 shellsuite 에 남는다 | P1 ✓ |
+| `safepath` · `buildinfo` · 제외 파싱 | 단계 · 탐색 | **옮기지 않는다** *(2026-09-11)*. 규칙이 suite 마다 다르다 — 버전은 shell 이 CTP Java 의 규칙, sql 은 `run.sh` 의 awk 이고 커밋 접미사가 없는 빌드에서 갈린다. 제외 파일이 없을 때 shell 은 실패, sql 은 제외 없음. sql 은 디렉터리를 비우지 않아 `safepath` 가 필요 없다 | — |
+| `openSlots` · `slotTmp` · `channelPair` · 입장 정책 배선 | 병렬 | ~~`internal/slots`~~ → **`contain.OpenSlots` · `contain.Slot`** *(2026-09-11 완료)*. shell 의 레인별 코퍼스 오버레이는 mount 훅으로 남는다 | P1 ✓ |
+| `Worker` 골격 (claim · finish · 보고) · `Monitor` | 병렬 · 타임아웃 | **옮기지 않는다** *(2026-09-11)*. 공유할 부분(큐·입장·affinity)은 이미 `dispatch` 에 있고 — `Queue.Affinity` 추가 — 남는 루프는 suite 마다 다르다: sql 은 케이스 사이 리셋·재시도·케이스 타임아웃이 없다 (CQT 에 없다) | — |
+| `status.Board` 의 shell 전용 부분 (`familyOf`, `replay` 의 `\.sh` 정규식, 패치 표시) | 보드 | 일반화 | **일반화 없이 붙였다** *(2026-09-11)* — 핵심 API(`Begin`·`End`·`Expect`·`Lane`·`Setup`)가 이미 일반이고 `familyOf` 도 sql 경로를 그대로 묶는다. sql 은 `[sql] status_http` 로 켠다. shell 전용인 `Detail`(feedback.log)·`replay` 는 sql 에서 쓰지 않는다 |
+| `result.Sink` | 기록 | **`result.SQL`** — sql 결과 트리는 shell 의 것과 모양이 달라 섹션이 아니라 타입 하나. "관찰되는 바이트는 전부 `result` 에서" 규칙은 그대로 | P1 |
+| — | 슬롯 안에서 **오래 사는 프로세스** (실행부 JVM) | **`contain.Namespace.Command` · `Slot.Command`**, 그룹 kill 은 `exec.Command` *(2026-09-11 완료)* | P1 ✓ |
 
 ### 3-2. 적용 항목
 
@@ -216,6 +216,17 @@ shell 이 `$CUBRID` 경로를 바꾸지 않은 이유(`beyond-axis.md` "A mount 
 어떤 케이스들이 한 DB 를 공유하는지가 바뀐다. 디렉터리 단위로 한 슬롯에 묶는 것(`dispatch` 의 slot
 affinity — shell 에서는 쓰이지 않던 기계)으로 시작하고, 판정 동일성으로 검증한다.
 
+### 3-3. 만들고 재어 보니 (2026-09-11, `evidence/sql-native.md`)
+
+| | 결정 | 근거 |
+|---|---|---|
+| 기록 | `internal/result/sql.go` 가 CQT 의 출력을 **바이트 그대로** 쓴다. Java `Hashtable` 순회와 `childList` 정렬의 버릇까지 흉내 낸다 | 실제 CQT run 6개를 그 run 의 판정으로 다시 만들어 모든 파일·모든 줄이 동일 (`sql/records.sh`) |
+| 실행부 | 슬롯마다 JVM 하나. 프로토콜은 fd 3 (표준 출력의 스레드 덤프 한 줄이 이후 모든 판정을 한 칸씩 밀지 않게) | 리뷰 |
+| 슬롯의 쓰기 | **디스크** (`TESTKIT_SLOT_ROOT`). 메모리 upper 는 뺐다 | sql 슬롯 하나가 3.3 GB 까지 자라 14 GB tmpfs 를 채우고 서버가 멈췄다. 결정: 디스크 레인 + 병렬만으로 (사용자, 2026-09-11) |
+| 실행부 JVM 크기 | 슬롯이 여럿이면 `-Xms256m -Xmx1g`, 수집 스레드 2. 직렬은 CTP 그대로 | CTP 크기로 8개가 첫 케이스 전에 16 GB |
+| CQT 의 server-message 플래그 | 슬롯 run 에서는 케이스마다 **CTP 순서에서의 값**으로 맞춘 뒤 실행 (`testkit.follow_order`) | 첫 8-슬롯 sql run 이 옮긴 판정 497 중 495 가 이것. 고친 뒤 11,137 케이스 중 0 |
+| 코퍼스 자체의 순서 의존 | 남는다 — medium `sesnsch.sql` 이 PUBLIC 로 로그인한 채 끝나 뒤 케이스 답이 PUBLIC 기준, sql 은 카탈로그 목록·남은 테이블 | §6 |
+
 ---
 
 ## 4. 문서화 (shell 수준)
@@ -242,7 +253,7 @@ evidence: `evidence/sql-baseline.md` (P0) → `evidence/regression-sql.md` (게�
 | | 내용 | 끝 |
 |---|---|---|
 | **P0** | 샌드박스 기준 run (medium · sql, 세 저장소 모두 upstream develop), 포맷 census, 분석 공백 채우기, ADR-016, 이 문서 | `evidence/sql-baseline.md` |
-| **P1** | 공통 모듈 추출(§3-1, shell 테스트로 불변 확인) → **슬롯 위의 `sqlsuite`** + `jdbc` 실행부, `TESTKIT_NATIVE_SQL` 뒤 *(2026-09-11 — 병렬을 P3 에서 당김)* | 슬롯 1개: 스모크·medium 전체가 CTP 와 동일. 슬롯 N개: 슬롯 1개와 판정·`.result` 동일 |
+| **P1** | 공통 모듈 추출(§3-1, shell 테스트로 불변 확인) → **슬롯 위의 `sqlsuite`** + `jdbc` 실행부, `TESTKIT_NATIVE_SQL` 뒤 *(2026-09-11 — 병렬을 P3 에서 당김)* | 슬롯 1개: 스모크·medium 전체가 CTP 와 동일. 슬롯 N개: 슬롯 1개와 판정·`.result` 동일. **진행 (2026-09-11):** 코드 완료. 기록은 CTP run 6개와 바이트 동일, 직렬 medium 은 `.result` 975/975 동일(샌드박스 핀). 병렬은 §3-3 |
 | **게이트** | ADR-017 확정, sql 전체를 슬롯 1개로 CTP 와 비교 | diff 0 → 병렬 기본값 on 가능 (ADR-015) |
 | **P2** | `native` 실행부 — CCI 모드 먼저, `jdbc` 를 오라클로 | CCI 모드가 `ccqt` 와 동일 |
 | **P3** | 나머지 축 B: 플랜 데이터 · 드라이버 비교 | 항목별 증거 |
@@ -259,7 +270,12 @@ evidence: `evidence/sql-baseline.md` (P0) → `evidence/regression-sql.md` (게�
 | `summary.info` · `summary.xml` 의 등급 | P0 → ADR-017 |
 | CAS 클라이언트: 확장 vs 신규 | P2 착수 전 스파이크 |
 | 보드: 러너마다 띄우는 라이브러리 vs 러너들이 보고하는 곳 (B-T11) | P3. 제안은 라이브러리 — 러너가 둘일 때 스키마를 공유하는 것으로 충분하고, 보고받는 곳은 운영 층(ADR-012)의 몫에 가깝다 |
-| 병렬에서 케이스 사이 상태 의존의 실제 크기 | **P1** — 디렉터리 affinity 로 시작, 슬롯 1 과 N 의 판정·`.result` 동일성으로 측정 |
+| 병렬에서 케이스 사이 상태 의존의 실제 크기 | **P1** — 디렉터리 affinity 로 시작, 슬롯 1 과 N 의 판정·`.result` 동일성으로 측정. *(2026-09-11)* CQT 의 server-message 플래그는 고쳤다(§3-3). 남는 것은 코퍼스가 디렉터리를 넘어 남기는 상태 — 로그인 사용자, 테이블, 카탈로그 |
+| 순서에 기대는 케이스를 병렬에서 어떻게 다룰지 | 게이트 뒤. 후보: (a) 앞 디렉터리와 한 슬롯에 묶는 목록(데이터, 증거 첨부), (b) 알려진 차이로 보고, (c) 코퍼스 수정을 upstream 에 제안 |
+| 코어의 `.err` 호출 스택 파일 | 미구현 — CQT 는 실패한 케이스에 새 코어가 있으면 `<케이스>.err` 를 gdb 로 쓴다. sqlsuite 는 `hasCore` 까지만 |
+| 서버의 표준 출력 | CTP 에서는 서버가 run 의 표준 출력을 물려받는다(§2-5). sqlsuite 에서는 서버 단계의 파이프에 묶였다가 버려진다 — 판정에는 무관, 표준 출력의 차이 |
+| medium 의 병렬 한계 | 디렉터리 8개 중 하나가 444 케이스라 슬롯을 늘려도 wall 은 그 슬롯이 정한다. 디렉터리 안의 케이스가 서로 기대는지 재고 나서 케이스 단위를 허용할지. *(2026-09-11)* 지금은 직렬이 더 빠르다 — 4슬롯 157 s, 직렬 110–125 s. 서버 기동 하나(32–48 s)가 케이스 전체(CTP 22 s)보다 크다 |
+| 슬롯 upper 를 둘 디스크 | 8-슬롯 sql 의 케이스는 CTP 직렬의 4.04배 걸린다. upper 가 있는 `/var/tmp`(sdc, SATA SSD, swap 도 여기)의 4 KB 동기 쓰기는 5.8 ms, CTP 의 DB 가 있는 `/data`(sdb)는 1.3 ms. 다음 측정: upper 를 `/data` 에 둔 run, 그 위에 overlay `volatile`(끝나면 버리는 층이라 sync 를 건너뛴다) — `evidence/sql-native.md` §3 |
 | `kcc` · `neis05` · `neis08` 코퍼스 | 이번 범위 밖 |
 | `.sql` pragma 전수 목록, `@conn:` 의 정확한 문법 | freeze §11-3 — `jdbc` 에는 필요 없고(`SQLParser` 그대로) `native` 의 Go 파서에 필요. P2 |
 | ~~`run_mode` 값의 출처~~ | **닫힘 (2026-09-11)** — `jdbc_config_file` XML 의 `<run_mode>`. §2-3 |

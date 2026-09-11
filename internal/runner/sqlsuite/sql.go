@@ -125,6 +125,7 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 	// and at the same path in every slot, so nothing in _vinf or
 	// databases.txt needs rewriting.
 	here := machine{}
+	began := time.Now()
 	for _, calls := range []string{"do_clean", "do_configure", "do_create_db"} {
 		res, err := stage(ctx, here.Channel(), st, e, logFile, calls)
 		os.Stdout.WriteString(res.Output())
@@ -132,6 +133,8 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 			return setupFailed("%s: %v", calls, err)
 		}
 	}
+	// Timings go to standard error: standard output is CTP's.
+	fmt.Fprintf(os.Stderr, "[INFO] database prepared in %s\n", since(began))
 
 	classDir, err := compileExecutor(ctx, st.ctpHome)
 	if err != nil {
@@ -199,16 +202,47 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 		Out:             os.Stdout,
 		Log:             log,
 		Failure: func(caseFile string) string {
-			return executors[0].Failure(caseFile)
+			// Asked during End, after every slot's loop has returned.
+			for _, x := range executors {
+				if x != nil {
+					return x.Failure(caseFile)
+				}
+			}
+			return ""
 		},
 	})
 	if err != nil {
 		return err
 	}
 
+	board, stopBoard, err := openBoard(ini, st, e, cases, len(places))
+	if err != nil {
+		// The page is for watching the run; a run is not stopped for want of it.
+		fmt.Fprintf(os.Stderr, "[WARN] no status page: %v\n", err)
+		board, stopBoard = nil, func() {}
+	}
+	defer stopBoard()
+	// What a click on a case shows: a sql case leaves a rendering and an answer,
+	// not a feedback.log.
+	board.DetailFunc(rec.Describe)
+
+	queue := dispatch.New(cases.all, 0)
+	if len(places) > 1 {
+		queue.Affinity()
+	}
+	w := &work{cases: cases, rec: rec, board: board, total: len(cases.all)}
+
 	// Each place starts its own server and broker, on the ports the
 	// configuration names -- the same ports in every slot, which the network
-	// namespace allows -- and then its own executor.
+	// namespace allows -- then its own executor, and takes cases from the moment
+	// that executor is ready.
+	//
+	// The servers start one slot at a time. A server's first write to a volume
+	// copies the whole file into its slot's upper layer, a gigabyte for either
+	// database, and eight of them at once on one disk took 2m43s each and
+	// finished together, where one alone takes seconds. One at a time, the first
+	// slot is working within a minute and the rest join as they come up; their
+	// executors, which want CPU rather than the disk, still start side by side.
 	executors = make([]*jdbc, len(places))
 	closeExecutors := sync.OnceFunc(func() {
 		for _, x := range executors {
@@ -218,17 +252,45 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 		}
 	})
 	defer closeExecutors()
-	var startErr error
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+	var (
+		mu       sync.Mutex
+		wg       sync.WaitGroup
+		begin    sync.Once
+		startErr []error
+		errs     = make([]error, len(places))
+	)
+	after := make(chan struct{})
+	close(after) // the first slot waits for nobody
 	for i, p := range places {
+		served := make(chan struct{})
 		wg.Add(1)
-		go func(i int, p place) {
+		go func(i int, p place, after <-chan struct{}, served chan struct{}) {
 			defer wg.Done()
-			res, err := stage(ctx, p.Channel(), st, e, logFile, "do_serve")
-			mu.Lock()
-			os.Stdout.WriteString(res.Output())
-			mu.Unlock()
+			doneServing := sync.OnceFunc(func() { close(served) })
+			defer doneServing()
+			name := placeName(i, len(places))
+			select {
+			case <-after:
+			case <-runCtx.Done():
+				return
+			}
+			// Servers come up a slot at a time, so a small corpus can be done
+			// before the later slots' turn comes; starting one then would only
+			// make the run wait for a server nobody will use.
+			if i > 0 && queue.Drained() {
+				return
+			}
+			t0 := time.Now()
+			res, err := stage(runCtx, p.Channel(), st, e, logFile, "do_serve")
+			doneServing()
+			// CTP starts one server and prints what that says. The others' say
+			// the same and are noise, unless they failed.
+			if i == 0 {
+				mu.Lock()
+				os.Stdout.WriteString(res.Output())
+				mu.Unlock()
+			}
+			t1 := time.Now()
 			var x *jdbc
 			if err == nil {
 				x, err = startJDBC(runCtx, p, st, e, classDir, rec.Root(), javaOptions(len(places)), rec.Say)
@@ -239,54 +301,38 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 				x.Close()
 				err = fmt.Errorf("CQT found %d cases and this runner %d", x.cases, len(cases.all))
 			}
-			mu.Lock()
-			defer mu.Unlock()
 			if err != nil {
-				if startErr == nil {
-					startErr = fmt.Errorf("%s: %w", placeName(i, len(places)), err)
+				mu.Lock()
+				startErr = append(startErr, fmt.Errorf("%s: %w", name, err))
+				mu.Unlock()
+				if i > 0 {
+					fmt.Fprintf(os.Stderr, "[WARN] %s did not come up: %v\n%s", name, err, res.Output())
 				}
 				return
 			}
+			fmt.Fprintf(os.Stderr, "[INFO] %s: server and broker up in %s, executor ready in %s\n",
+				name, t1.Sub(t0).Round(time.Second), since(t1))
+			mu.Lock()
 			executors[i] = x
-		}(i, p)
-	}
-	wg.Wait()
-	if startErr != nil {
-		// Nothing ran, so there is nothing to keep: a result directory here
-		// would be a run that never happened.
-		rec.Discard()
-		return setupFailed("%v", startErr)
-	}
-
-	board, stopBoard, err := openBoard(ini, st, e, cases, len(places))
-	if err != nil {
-		// The page is for watching the run; a run is not stopped for want of it.
-		fmt.Fprintf(os.Stderr, "[WARN] no status page: %v\n", err)
-		board, stopBoard = nil, func() {}
-	}
-	defer stopBoard()
-
-	rec.Begin(executors[0].startup)
-	queue := dispatch.New(cases.all, 0)
-	if len(places) > 1 {
-		queue.Affinity()
-	}
-	w := &work{cases: cases, rec: rec, board: board, total: len(cases.all)}
-	errs := make([]error, len(places))
-	for i, p := range places {
-		wg.Add(1)
-		go func(i int, p place) {
-			defer wg.Done()
-			if err := w.loop(runCtx, placeName(i, len(places)), p, queue, executors[i]); err != nil {
+			mu.Unlock()
+			begin.Do(func() { rec.Begin(x.startup) })
+			if err := w.loop(runCtx, name, p, queue, x); err != nil {
 				errs[i] = err
 				// An executor that is gone is a run that cannot finish as CTP's
 				// would have -- CQT's own loop ends on the same thing.
 				cancel()
 				queue.Stop()
 			}
-		}(i, p)
+		}(i, p, after, served)
+		after = served
 	}
 	wg.Wait()
+	if len(startErr) == len(places) {
+		// Nothing ran, so there is nothing to keep: a result directory here
+		// would be a run that never happened.
+		rec.Discard()
+		return setupFailed("%v", startErr[0])
+	}
 	// The executor that died, not the slots it took down with it.
 	var first error
 	for _, err := range errs {
@@ -436,6 +482,8 @@ func openBoard(ini *conf.Ini, st *settings, e engine, cases *caseSet, slots int)
 	})
 	return board, stop, nil
 }
+
+func since(t time.Time) time.Duration { return time.Since(t).Round(time.Second) }
 
 // placeName names a place in messages: the slot's label, or the machine.
 func placeName(i, n int) string {

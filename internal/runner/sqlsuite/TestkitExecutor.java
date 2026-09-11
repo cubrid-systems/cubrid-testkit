@@ -20,6 +20,7 @@ import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
@@ -228,8 +229,7 @@ public class TestkitExecutor {
             }
             List<Sql> sqls;
             try {
-                byte[] raw = Files.readAllBytes(Paths.get(caseFile));
-                if (!new String(raw, "UTF-8").toLowerCase().contains(TestUtil.SERVER_MESSAGE)) {
+                if (!mentions(Files.readAllBytes(Paths.get(caseFile)), TestUtil.SERVER_MESSAGE)) {
                     continue;
                 }
                 sqls = SQLParser.parseSqlFile(caseFile, test.getCodeset(), test.isNeedDebugHint());
@@ -256,6 +256,31 @@ public class TestkitExecutor {
             }
         }
         return at;
+    }
+
+    /**
+     * Whether raw holds word, ASCII letters in either case -- exactly what
+     * isPropOn's CASE_INSENSITIVE pattern can match, since without UNICODE_CASE
+     * it folds ASCII only. Not String.toLowerCase: JDK 8's is quadratic on text
+     * full of characters that lower to two, and one Turkish case of 5.4 MB took
+     * thirty seconds of every executor's start.
+     */
+    private static boolean mentions(byte[] raw, String word) {
+        byte[] w = word.getBytes(StandardCharsets.US_ASCII);
+        outer:
+        for (int i = 0; i + w.length <= raw.length; i++) {
+            for (int j = 0; j < w.length; j++) {
+                int c = raw[i + j];
+                if (c >= 'A' && c <= 'Z') {
+                    c += 'a' - 'A';
+                }
+                if (c != w[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     /**

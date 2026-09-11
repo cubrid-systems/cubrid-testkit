@@ -96,9 +96,25 @@ func findAll(dir string) string {
 //
 // docs/evidence/spec-corrections.md 11.
 func Discover(ctx context.Context, ch exec.Channel, workspace string) ([]string, error) {
-	res, err := runIn(ctx, ch, findAll(workspace))
+	// find exits 1 when it could not read a directory, and still lists what it
+	// could read. That is not a reason to stop the run: CTP never read the
+	// status, and what cannot be read is usually something a run as root left
+	// under a case's cases/ -- db21654/lob in one corpus here, log/manager in
+	// another, both root:root 700, neither holding a case. It is a reason to
+	// say so.
+	//
+	// Only 1 means that. Anything else -- a find that was killed, or not there
+	// to run -- is a list nobody should take for the whole corpus.
+	res, err := probeIn(ctx, ch, findAll(workspace))
+	if err == nil && res.ExitCode != 0 && res.ExitCode != 1 {
+		err = exitError(res)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("discover cases under %s: %w", workspace, err)
+	}
+	if res.ExitCode == 1 {
+		fmt.Printf("[WARN] not all of %s could be read, and any case in the part that could not was not found: %v\n",
+			workspace, exitError(res))
 	}
 	var cases []string
 	for _, line := range strings.Split(res.Output(), "\n") {

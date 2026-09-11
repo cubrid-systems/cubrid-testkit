@@ -266,19 +266,40 @@ func TestNoBashLeavesShAlone(t *testing.T) {
 	}
 }
 
-// Two runs on one machine would otherwise both call a slot "slot0" and mount an
-// overlay over the same upper directory -- one run quietly writing into
-// another's $CUBRID, which is not a collision that announces itself.
-func TestSlotRootIsPerRun(t *testing.T) {
-	t.Setenv(SlotRootEnv, "")
-	got := SlotRoot()
-	if !strings.Contains(got, strconv.Itoa(os.Getpid())) {
-		t.Errorf("SlotRoot() = %q and does not carry this run's pid", got)
+// A run mounts its overlays on whatever is in its slot root, so the root has to
+// be one no earlier run has written to. Keyed on the pid it was not: contained,
+// the pid is the namespace's and recurs, and a run started with the previous
+// run's $CUBRID writes already in its upper layer.
+func TestSlotRootIsFreshPerRun(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv(SlotRootEnv, base)
+
+	first, err := NewSlotRoot()
+	if err != nil {
+		t.Fatal(err)
 	}
-	// An explicit setting still wins: the caller has taken responsibility.
-	t.Setenv(SlotRootEnv, "/somewhere/else")
-	if got := SlotRoot(); got != "/somewhere/else" {
-		t.Errorf("SlotRoot() = %q, want the override", got)
+	// What a run leaves behind: a change to the install, in slot0's upper layer.
+	left := filepath.Join(first, "slot0", "CUBRID", "upper", "conf")
+	if err := os.MkdirAll(left, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := NewSlotRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == first {
+		t.Fatalf("two runs were given the same slot root %s", first)
+	}
+	if entries, err := os.ReadDir(second); err != nil || len(entries) != 0 {
+		t.Errorf("the second run's slot root is not empty: %v %v", entries, err)
+	}
+	// The setting says where runs make their roots; it is not one itself, so
+	// two runs sharing it are still kept apart.
+	for _, root := range []string{first, second} {
+		if filepath.Dir(root) != base {
+			t.Errorf("slot root %s was not made in %s", root, base)
+		}
 	}
 }
 

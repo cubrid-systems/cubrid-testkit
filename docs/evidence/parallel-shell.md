@@ -116,7 +116,11 @@ Shrinking the buffers is what made 16+ slots possible at all: 24 × 768 MB of en
 - **The review's systemic finding**: `Run` reports failure through `Result.ExitCode`, and roughly
   eighteen call sites in `shellsuite` check only `err`. Two were fixed by hand. Making `runIn`
   return an error on non-zero exit, with an explicit opt-out for the few probes that want status as
-  data, would turn the rest into compile-time problems.
+  data, would turn the rest into compile-time problems. **Done 2026-09-11:** `runIn` now errors on a
+  non-zero exit, and nine call sites opt out through `probeIn` -- seven whose status is an answer,
+  and two walks over the corpus, discovery's `find` and the workspace `cp -r`, which warn and go on.
+  Those two are lenient because three of five corpora sampled on this machine hold a root-owned
+  0700 directory a run as root left under a case's `cases/`, and `find` exits 1 on each.
 - **The isolation audit's remaining claims**: `$CTP_HOME` written by three cases that `make clean`
   in it; `/tmp` shared (`Namespace.Private` exists and has never been called); `$HOME` shared;
   cases that size the engine from `free -g`; seven that assert on `nproc`. None reproduced yet, and
@@ -125,8 +129,10 @@ Shrinking the buffers is what made 16+ slots possible at all: 24 × 768 MB of en
   run's own tail wrote it. 35 patches match the corpus and all 36 apply, but that they were applied
   in a full run is unconfirmed.
 - **Slot roots are keyed on the namespace-local pid** (`/var/tmp/testkit-slots/3`), which is small
-  and reused, so a later run can inherit an earlier run's `$CUBRID` upper layer. Confirmed on disk;
-  not fixed.
+  and reused, so a later run can inherit an earlier run's `$CUBRID` upper layer. Confirmed on disk.
+  **Fixed 2026-09-11:** each run makes its root with `MkdirTemp` and removes it when the slots
+  close. The fallback `CUBRID_TMP` (`/var/tmp/tk<pid>`, used only when `$CUBRID` is too deep for a
+  socket path) is still keyed on the pid.
 - **`cbrd_26328` hangs** on `csql ... call [CHANGE].test_proc()` — an unsubstituted placeholder —
   for 25 minutes until the timeout. Plan says 43 s.
 - **20 `cases/` directories hold a `.sh` whose name does not match the directory**, so those cases

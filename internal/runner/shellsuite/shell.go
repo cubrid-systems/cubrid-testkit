@@ -637,7 +637,10 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 	if !contain.Active() {
 		return nil, nil, fmt.Errorf("parallel_slots needs the runner contained; set %s=1", contain.Env)
 	}
-	root := contain.SlotRoot()
+	root, err := contain.NewSlotRoot()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var pairs []channelPair
 	var opened []*contain.Namespace
@@ -645,10 +648,18 @@ func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channe
 		for _, ns := range opened {
 			ns.Close()
 		}
+		// The upper layers go with the slots, and with them whatever the last
+		// case in each slot left in $CUBRID/log. Nothing reads them after this:
+		// what a case wrote is kept, when case_logs asks for it, by copying it to
+		// the result tree as the case finishes. Left here they are only disk --
+		// the next run gets a root of its own.
+		if err := os.RemoveAll(root); err != nil {
+			fmt.Printf("[WARN] cannot remove the slot root %s: %v\n", root, err)
+		}
 	}
 	for i := 0; i < n; i++ {
 		label := fmt.Sprintf("slot%d", i)
-		ns, err := contain.Open(label)
+		ns, err := contain.Open(label, root)
 		if err != nil {
 			closeAll()
 			return nil, nil, err
@@ -853,8 +864,15 @@ func (s *Shell) prepareWorkspace(ctx context.Context, ch exec.Channel, cfg *conf
 			"rm -rf " + w + "/*",
 			"cp -r " + sc + "/* " + w,
 		}, "\n")
-		if _, err := runIn(ctx, ch, script); err != nil {
+		// cp walks the corpus as discovery does, and meets the same directories
+		// a run as root left behind. What did not come across is said, and the
+		// run goes on with what did -- which is what CTP did, without saying.
+		res, err := probeIn(ctx, ch, script)
+		if err != nil {
 			return "", err
+		}
+		if res.ExitCode != 0 {
+			fmt.Printf("[WARN] the scenario was not copied whole into %s: %v\n", workspace, exitError(res))
 		}
 	} else {
 		workspace = scenario
@@ -880,7 +898,13 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 	}
 
 	if key := strings.TrimSpace(cfg.GetOr("testcase_exclude_by_macro", "")); key != "" {
-		out, runErr := runIn(ctx, ch, fmt.Sprintf("grep %q `%s`", key, findAll(workspace)))
+		// grep's 1 is "no case names the macro", which is an answer. Its 2 is a
+		// file it could not read, and a skip list built without that file would
+		// run the cases the macro exists to keep out.
+		out, runErr := probeIn(ctx, ch, fmt.Sprintf("grep %q `%s`", key, findAll(workspace)))
+		if runErr == nil && out.ExitCode != 0 && out.ExitCode != 1 {
+			runErr = fmt.Errorf("testcase_exclude_by_macro %s: %w", key, exitError(out))
+		}
 		if runErr != nil {
 			return nil, nil, nil, runErr
 		}
@@ -921,6 +945,8 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 	if files := ExcludeFiles(cfg.GetOr("testcase_exclude_from_file", "")); len(files) > 0 {
 		var patterns []string
 		for _, file := range files {
+			// Strict, and not what CTP did: it read nothing from a file that was
+			// not there and ran every case the file was meant to keep out.
 			out, runErr := runIn(ctx, ch, "cat "+shQuote(file))
 			if runErr != nil {
 				return nil, nil, nil, runErr

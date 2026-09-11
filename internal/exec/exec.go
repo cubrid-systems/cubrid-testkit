@@ -17,6 +17,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -48,6 +49,57 @@ type Result struct {
 // Stderr is still captured, because a channel that throws away the explanation of
 // its own failure is no use. It is just not what the frozen logs contain.
 func (r Result) Output() string { return r.Stdout }
+
+// Failure says how a command failed: its status, and its own explanation. It is
+// nil for a command that exited 0.
+//
+// From stderr, the first line and the last, and nothing between: a cp that was
+// refused a thousand files says so a thousand times, a Java tool puts its
+// message first and a stack under it, and a complaint from a prologue comes
+// before the script's own. Without stderr, the last thing the command printed,
+// which is where a script that reports on stdout puts its reason.
+func (r Result) Failure() error {
+	if r.ExitCode == 0 {
+		return nil
+	}
+	why := ""
+	if lines := strings.Split(strings.TrimSpace(r.Stderr), "\n"); lines[0] != "" {
+		why = strings.TrimSpace(lines[0])
+		if len(lines) > 1 {
+			why += " ... " + strings.TrimSpace(lines[len(lines)-1])
+		}
+	}
+	if why == "" {
+		out := strings.TrimSpace(r.Output())
+		why = strings.TrimSpace(out[strings.LastIndexByte(out, '\n')+1:])
+	}
+	if why == "" {
+		return fmt.Errorf("exit %d", r.ExitCode)
+	}
+	return fmt.Errorf("exit %d: %s", r.ExitCode, why)
+}
+
+// Check makes a non-zero exit an error, for a command that was expected to
+// work. It takes Run's two results as they come: exec.Check(ch.Run(ctx, s)).
+//
+// A channel reports a command's own status in the Result and keeps err for not
+// being able to run it at all, so a caller that checks err alone takes a script
+// that failed for one that worked. That is how the shell reset's guard against
+// an unset $CUBRID did nothing for its first hours, and how a patch that did not
+// apply could have been reported as applied. Most of what a runner sends is
+// housekeeping whose failure should stop something -- a snapshot, a
+// configuration, a database it is about to use -- so the unchecked Run is for a
+// command whose status is an answer, and the caller reads it itself.
+//
+// Over SSH less of this applies. That channel closes its frame with an echo, so
+// a remote script that runs to its end reports the echo's status, and only one
+// that calls exit reports its own.
+func Check(res Result, err error) (Result, error) {
+	if err == nil {
+		err = res.Failure()
+	}
+	return res, err
+}
 
 // Channel runs commands and moves files.
 type Channel interface {

@@ -259,6 +259,14 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 		startErr []error
 		errs     = make([]error, len(places))
 	)
+	// Servers come up one at a time, unless the slots' overlays are volatile. A
+	// server's first write copies its volumes up into the slot's layer, 1.1 GB a
+	// slot, and an overlay that syncs ends each copy with an fsync of it: eight
+	// at once on one SATA SSD, with the executors' old scan, were 9.5 minutes
+	// before the first case, and one at a time 75 s. A volatile overlay does not
+	// sync, and what is left of a start is waiting -- for the heartbeat to make
+	// the server active, for the broker -- which the slots can do together.
+	together := contain.Volatile()
 	after := make(chan struct{})
 	close(after) // the first slot waits for nobody
 	for i, p := range places {
@@ -324,7 +332,9 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 				queue.Stop()
 			}
 		}(i, p, after, served)
-		after = served
+		if !together {
+			after = served
+		}
 	}
 	wg.Wait()
 	if len(startErr) == len(places) {

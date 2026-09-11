@@ -270,8 +270,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	own := s.Channels == nil
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
 	if own && (slots > 1 || contain.Active()) {
-		slotted, closeSlots, err := openSlots(slots, opener, machine, corpus,
-			cfg.GetOr("scenario", ""), split)
+		slotted, closeSlots, err := openSlots(slots, corpus, cfg.GetOr("scenario", ""), split)
 		if err != nil {
 			return quit("%v", err)
 		}
@@ -614,209 +613,51 @@ func oneMachine(cfg *conf.Config, configured []*topology.Instance) (*topology.In
 	return configured[0], extra
 }
 
-// openChannels opens the two channels the machine needs.
+// openSlots opens n places to run a case, each in namespaces of its own -- see
+// contain.OpenSlots -- and gives each the two channels a worker needs.
 //
-// Two, not one. A worker spends most of its life blocked inside a case, and the
-// timeout monitor has to reach the same machine while that is happening.
-// openSlots opens n more places to run a case, each in namespaces of its own.
-//
-// What a slot needs to differ in used to be a list -- ports, shared-memory ids,
-// the install, the registry -- and each entry was somewhere the suite already
-// wrote. Namespaces answer all of them at once and without writing anything: a
-// network namespace gives every slot the whole port space so each runs on the
-// shipped 1523, an IPC namespace keeps the segments apart, a PID namespace makes
-// `ps -e` mean this slot, and an overlay makes $CUBRID writable per slot without
-// copying its 323 MB.
-//
-// Nothing is reconfigured, which is the point. A slotted run's conf files and
-// log lines are the ones a serial run produces.
-func openSlots(n int, opener func(*topology.Instance) (exec.Channel, exec.Channel, error),
-	machine *topology.Instance, corpus *Corpus, corpusDir string,
-	split laneSplit) ([]channelPair, func(), error) {
-
-	if !contain.Active() {
-		return nil, nil, fmt.Errorf("parallel_slots needs the runner contained; set %s=1", contain.Env)
-	}
-	root, err := contain.NewSlotRoot()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var pairs []channelPair
-	var opened []*contain.Namespace
-	closeAll := func() {
-		for _, ns := range opened {
-			ns.Close()
-		}
-		// The upper layers go with the slots, and with them whatever the last
-		// case in each slot left in $CUBRID/log. Nothing reads them after this:
-		// what a case wrote is kept, when case_logs asks for it, by copying it to
-		// the result tree as the case finishes. Left here they are only disk --
-		// the next run gets a root of its own.
-		if err := os.RemoveAll(root); err != nil {
-			fmt.Printf("[WARN] cannot remove the slot root %s: %v\n", root, err)
-		}
-	}
-	for i := 0; i < n; i++ {
-		label := fmt.Sprintf("slot%d", i)
-		ns, err := contain.Open(label, root)
-		if err != nil {
-			closeAll()
-			return nil, nil, err
-		}
-		opened = append(opened, ns)
-
-		// $CUBRID and the registry are the two trees a case writes to. The
-		// registry takes an overlay of its own only when it is outside the
-		// install; where CUBRID puts it by default -- $CUBRID/databases, which
-		// is also where CTP's own reset cleans and restores it -- the install's
-		// overlay already covers it, and a second overlay on a subdirectory of
-		// the first would nest them for nothing.
-		var covered []string
-		for _, dir := range []string{os.Getenv("CUBRID"), os.Getenv("CUBRID_DATABASES")} {
-			if dir == "" || under(covered, dir) {
-				continue
-			}
-			if err := ns.Overlay(dir, filepath.Join(root, label, filepath.Base(dir))); err != nil {
-				closeAll()
-				return nil, nil, err
-			}
-			covered = append(covered, dir)
-		}
-		// With lanes, the corpus overlay is this slot's rather than the run's, and
-		// where its upper layer sits is what the lane means: memory for the fast
-		// lane, disk for the slow one. Mounted here, inside the slot, because
-		// mounted once before the slots there is only one place for it to be.
-		if split.on() {
+// With lanes, the corpus overlay is each slot's rather than the run's, and
+// where its upper layer sits is what the lane means: memory for the fast lane,
+// disk for the slow one. Mounted inside the slot, because mounted once before
+// the slots there is only one place for it to be.
+func openSlots(n int, corpus *Corpus, corpusDir string, split laneSplit) ([]channelPair, func(), error) {
+	var mount func(int, *contain.Slot) error
+	if split.on() {
+		mount = func(i int, s *contain.Slot) error {
 			if corpus == nil {
-				closeAll()
-				return nil, nil, fmt.Errorf("lanes need a corpus overlay; scenario_ram_mb is unset")
+				return fmt.Errorf("lanes need a corpus overlay; scenario_ram_mb is unset")
 			}
 			onRAM := split.laneOf(i) == dispatch.LaneFast
-			upperRoot, err := corpus.Slot(label, onRAM, func(script string) error {
-				out, err := ns.Channel("").Run(context.Background(), script)
+			upperRoot, err := corpus.Slot(s.Label, onRAM, func(script string) error {
+				out, err := s.NS.Channel("").Run(context.Background(), script)
 				if err != nil {
-					return fmt.Errorf("%s: %w: %s", label, err, strings.TrimSpace(out.Output()))
+					return fmt.Errorf("%s: %w: %s", s.Label, err, strings.TrimSpace(out.Output()))
 				}
 				return nil
 			})
 			if err != nil {
-				closeAll()
-				return nil, nil, err
+				return err
 			}
-			if err := ns.Overlay(corpusDir, upperRoot); err != nil {
-				closeAll()
-				return nil, nil, err
-			}
+			return s.NS.Overlay(corpusDir, upperRoot)
 		}
+	}
+	slots, closeAll, err := contain.OpenSlots(n, mount)
+	if err != nil {
+		return nil, nil, err
+	}
+	pairs := make([]channelPair, len(slots))
+	for i, s := range slots {
 		// The monitor needs a channel of its own into the same namespace: it has
 		// to reach the machine while the case is holding the worker's.
-		// cub_master listens on a Unix domain socket named after its port --
-		// $CUBRID_TMP/CUBRID<port>, and /tmp when that is unset. Every slot keeps
-		// the shipped port, because the network namespace lets it, so without
-		// this they would all want /tmp/CUBRID1523: four masters over one socket
-		// is four masters that do not start, and every case that wanted a server
-		// fails with "Could not connect to master server on localhost".
-		//
-		// The engine's own variable rather than a private /tmp. A mount would
-		// also take away the directory the scripts are written into, and it
-		// would isolate a /tmp that cases are entitled to share.
-		tmp, err := slotTmp(label)
-		if err != nil {
-			closeAll()
-			return nil, nil, err
-		}
-		env := []string{
-			"CUBRID_TMP=" + tmp,
-			// A user namespace maps one uid, so a case that unpacks an archive
-			// recorded with somebody else's ownership cannot restore it: tar
-			// prints "Cannot change ownership to uid 1001, gid 1001: Invalid
-			// argument" and exits non-zero. The files are there -- it is the exit
-			// status that fails the case, and 51 case scripts in this corpus
-			// unpack something.
-			//
-			// On a QA machine the run is a real account and the chown succeeds,
-			// so this is the isolation's bill and not the case's. GNU tar reads
-			// TAR_OPTIONS, and --no-same-owner is what tar does for an ordinary
-			// user anyway: extract the files, own them yourself. No case here
-			// asserts anything about ownership.
-			"TAR_OPTIONS=--no-same-owner",
-		}
-		// And a linker that keeps the libraries the command line names, where
-		// the machine's would drop them. Measured per run rather than assumed,
-		// and absent on a toolchain that needs no correction -- see
-		// contain.GccShim.
-		if bin, gerr := contain.GccShim(filepath.Join(tmp, "bin")); gerr != nil {
-			closeAll()
-			return nil, nil, gerr
-		} else if bin != "" {
-			env = append(env, "PATH="+bin+":"+os.Getenv("PATH"))
-		}
-		pairs = append(pairs, channelPair{
-			worker:  ns.Channel("", env...),
-			monitor: ns.Channel("", env...),
-			close:   func() {},
-		})
+		pairs[i] = channelPair{worker: s.Channel(), monitor: s.Channel(), close: func() {}}
 	}
 	return pairs, closeAll, nil
 }
 
-// sunPathMax is the size of sockaddr_un.sun_path, and the reason a slot's
-// CUBRID_TMP cannot simply live under the slot root. A run whose working
-// directory is deep enough produces a path the kernel cannot hold a socket at,
-// and the engine says so -- "The $CUBRID_TMP is too long" -- on every command,
-// after which the case fails on a comparison rather than on the real cause.
-const sunPathMax = 108
-
-// slotTmp is the directory a slot's master keeps its socket in.
+// openChannels opens the two channels the machine needs.
 //
-// $CUBRID/tmp first, because it is already this slot's own -- $CUBRID is behind
-// a per-slot overlay, so two slots writing CUBRID1523 there do not meet -- and
-// because staying under $CUBRID keeps the cases' own normalisation working:
-// several compare output holding a socket path against an answer that says
-// "${CUBRID}/...", and a path outside $CUBRID is a path their sed does not
-// rewrite. Observed on _08_shard/_13_shard_command, whose answer expects
-// ${CUBRID}/var/CUBRID_SOCK and got /var/tmp/tk<pid>/slot1.
-//
-// Not $CUBRID/var/CUBRID_SOCK, which is what the engine itself picks when
-// CUBRID_TMP says nothing -- broker_filename.c's FID_SOCK_DIR and pl_comm.c
-// both fall back to it -- and which would make that case's answer match
-// exactly. Measured, and it does not work: the per-case reset runs
-// `rm -rf ${CUBRID}/var/*`, so a socket directory there is gone after the first
-// case, the master cannot create its socket, and a two-case run went from 26
-// seconds to 426 with both cases failing and no shard output at all. The reset
-// leaves $CUBRID/tmp alone. So _13_shard_command and _06_issues/_24_1h/cbrd_25076,
-// which assert the engine's default location, cannot be satisfied here.
-//
-// /var/tmp is the fallback and not the default. It exists because sun_path is
-// 108 bytes: an install deep enough produces a socket path the kernel cannot
-// hold, the engine says "The $CUBRID_TMP is too long" on every command, and the
-// case then fails on a comparison rather than on the real cause. Deliberately
-// not derived from TESTKIT_SLOT_ROOT, which is where the overlays go and is
-// often long.
-func slotTmp(label string) (string, error) {
-	// The longest name the engine puts here is the socket, CUBRID<port>.
-	const leaf = "/CUBRID65535"
-	if home := os.Getenv("CUBRID"); home != "" {
-		dir := filepath.Join(home, "tmp")
-		if len(dir)+len(leaf) < sunPathMax {
-			if err := os.MkdirAll(dir, 0o1777); err != nil {
-				return "", fmt.Errorf("%s: %w", label, err)
-			}
-			return dir, nil
-		}
-	}
-	dir := filepath.Join("/var/tmp", fmt.Sprintf("tk%d", os.Getpid()), label)
-	if n := len(dir) + len(leaf) + 1; n > sunPathMax {
-		return "", fmt.Errorf("%s: CUBRID_TMP would be %s, and a socket under it needs %d of the %d bytes a Unix socket path has",
-			label, dir, n, sunPathMax)
-	}
-	if err := os.MkdirAll(dir, 0o1777); err != nil {
-		return "", fmt.Errorf("%s: %w", label, err)
-	}
-	return dir, nil
-}
-
+// Two, not one. A worker spends most of its life blocked inside a case, and the
+// timeout monitor has to reach the same machine while that is happening.
 func openChannels(inst *topology.Instance) (worker, monitor exec.Channel, err error) {
 	if inst.IsLocal() {
 		// CTP reached even the local machine through SSHConnect, so a local run
@@ -997,32 +838,6 @@ func memAvailableMB() int {
 		return kb / 1024
 	}
 	return 0
-}
-
-// under reports whether dir is one of parents or sits inside one of them.
-//
-// Comparing cleaned strings is not enough: "/a/bc" starts with "/a/b" and is
-// not inside it. filepath.Rel answers the question the mount actually asks --
-// is there a path from the parent down to dir that never climbs.
-func under(parents []string, dir string) bool {
-	d, err := filepath.Abs(dir)
-	if err != nil {
-		return false
-	}
-	for _, p := range parents {
-		a, err := filepath.Abs(p)
-		if err != nil {
-			continue
-		}
-		rel, err := filepath.Rel(a, d)
-		if err != nil {
-			continue
-		}
-		if rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..") {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Shell) recordSkipped(report feedback.Feedback, cases []string, kind feedback.SkipType) {

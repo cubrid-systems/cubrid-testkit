@@ -164,10 +164,31 @@ A serial medium run is now faster than CTP's; four slots still lose to one, two 
 starting because the queue had drained.
 
 **Memory is the next limit.** A run of eight slots on `/var/tmp` with `volatile` was stopped at 7%
-of its cases, just after its last slot came up, because the machine was running low on memory; it
-is not measured. A slot in medium, sampled every five seconds: its server up to 0.7–0.85 GB, the
-executor 0.55–0.7 GB, five CAS processes 15 MB each, the PL server 56 MB. Eight sql slots had this
-30 GB machine at 23 GB used, next to a desktop and other sessions that were not the run's.
+of its cases, just after its last slot came up, because the machine was running low on memory. It
+was measured again at four slots, sampling every process of the run every five seconds:
+
+| sql, 4 slots, `volatile` | wall | cases, summed | the slots' disk | OK / NOK |
+|---|---:|---:|---|---:|
+| upper on `/data` (sdb) | **362 s** | 780 s | 24% busy, 3.0 ms a flush | 17,458 / 1 |
+| upper on `/var/tmp` (sdc) | 572 s | 1,607 s | 84% busy, 281 ms a flush | 17,458 / 1 |
+
+- **The slot root belongs on the fast disk**, `volatile` or not. Without the syncs sdc is still the
+  bound — 21.6 GB of writes it takes at 84% busy, where sdb took 23.3 GB at 24% — and the slots
+  that started while it was busy took 44 s and 91 s instead of 26. On this machine that is
+  `TESTKIT_SLOT_ROOT` on `/data`; `/var/tmp` stays the default, because which disk is fast is the
+  machine's.
+- **Four slots are as fast as eight.** Slots start one after another, 26–27 s each, and with
+  `volatile` the cases are only 780–894 s between all of them, so the wall is about the setup plus
+  N × 27 s plus the cases over N — lowest near five or six, and four already at eight's 338–394 s.
+- **A sql slot is 2.6 GB at its peak**: its server 1.38 GB, the PL server 0.58 GB, the executor
+  0.52 GB, five CAS processes 24 MB each; four slots together peaked at 10.3 GB. Eight is about
+  21 GB, on a 30 GB machine that also holds a desktop and other sessions. The runner's own share is
+  the executor. The rest is the engine as CTP's configuration runs it: 768 MB of buffers a server
+  (`data_buffer_size=512M`, `log_buffer_size=256M`), and a PL server whose JVM is given no options,
+  so its heap follows the machine's memory — 1/64 of it to start, about 480 MB here.
+
+The one NOK of each run is §4's kind: a table another case left, and an owner name (`U1` for `U0`)
+in `cbrd_24419`'s catalog listing, which depends on the users earlier cases made.
 
 ## 4. What slots found in the corpus
 
@@ -210,10 +231,8 @@ and is at most a handful of cases.
   be laid down again (`sandbox.sh refresh`) and CTP's baseline taken again at the same pins.
 - **Slots against one slot, whole corpora**, after the gate, with the order dependencies of §4
   accounted for.
-- **`volatile` on `/var/tmp`** (§3): stopped for memory; it decides whether the default slot root
-  has to move once `volatile` is in the code.
-- **A sql slot's memory**, sampled as medium's was, and what eight of them leave the machine.
-- **The slots started together** again, now that a start no longer waits on the disk's syncs.
+- **The slots started together** again, now that a start no longer waits on the disk's syncs — with
+  four of them it is the 108 s the slots now spend starting one at a time.
 
 ## 6. What a review changed
 

@@ -190,6 +190,26 @@ was measured again at four slots, sampling every process of the run every five s
 The one NOK of each run is §4's kind: a table another case left, and an owner name (`U1` for `U0`)
 in `cbrd_24419`'s catalog listing, which depends on the users earlier cases made.
 
+**Started together.** With the overlays volatile a slot's start is waiting, not the disk — `cubrid
+hb start`, a heartbeat that has to call the server active, fixed sleeps — and four slots started at
+once were all up in 27 s, where one after another they took 4 × 26 s. The runner now starts them
+together when the overlays are volatile, and one at a time otherwise, which is where one at a time
+was measured.
+
+| 4 slots, on `/data`, `volatile` | started | wall | OK / NOK |
+|---|---|---:|---:|
+| sql | one at a time | 362 s | 17,458 / 1 |
+| sql | **together** | **322 s** | 17,457 / 2 |
+| medium | one at a time | 91 s | 975 / 0 |
+| medium | together | 77 s | 972 / 3 |
+
+sql is 5.5 times CTP's serial run; its two NOK are §4's kind (a table left behind, an index listing of
+a table another case had made differently). medium started together takes a serial run's 77 s and
+fails exactly §4's three — `_05_err_x/3318`, `_05_err_x/6360`, `_06_fulltests/7015` — because
+`_04_full`, where `sesnsch.sql` logs in as PUBLIC, now runs on another slot. One at a time had hidden
+them: the later slots came in after most of medium had run on the first, in order. **medium is a
+serial run.**
+
 ## 4. What slots found in the corpus
 
 A serial run's cases run one after another on one database and one connection, so a case can depend
@@ -231,8 +251,8 @@ and is at most a handful of cases.
   be laid down again (`sandbox.sh refresh`) and CTP's baseline taken again at the same pins.
 - **Slots against one slot, whole corpora**, after the gate, with the order dependencies of §4
   accounted for.
-- **The slots started together** again, now that a start no longer waits on the disk's syncs — with
-  four of them it is the 108 s the slots now spend starting one at a time.
+- **Starting together without `volatile`**, on a fast disk: whether one at a time is still needed
+  there, or only on a disk like sdc.
 
 ## 6. What a review changed
 

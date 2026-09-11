@@ -1,7 +1,9 @@
 package shellsuite
 
 import (
+	"context"
 	"encoding/xml"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
@@ -193,6 +196,141 @@ func TestARunWithNoCasesIsNotAFailure(t *testing.T) {
 	}
 }
 
+// cp over a corpus meets what a run as root left in it and exits 1. The run goes
+// on with what came across, as CTP's did, and -- unlike CTP's -- says what did
+// not. Its status went unread before, and nothing was said.
+func TestAScenarioNotCopiedWholeIsSaidAndTheRunGoesOn(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "ws")
+	req, _ := request(t, "scenario=/corpus\ntestcase_workspace_dir="+workspace+"\n")
+	ch := answers{{"cp -r", exec.Result{ExitCode: 1,
+		Stderr: "cp: cannot open '/corpus/a/cases/db/lob': Permission denied"}}}
+
+	var got string
+	var err error
+	out := printed(t, func() {
+		got, err = NewShell().prepareWorkspace(t.Context(), ch, req.Config, true)
+	})
+	if err != nil || got != workspace {
+		t.Fatalf("the run stopped over what cp could not read: %q, %v", got, err)
+	}
+	if !strings.Contains(out, "[WARN]") || !strings.Contains(out, "Permission denied") {
+		t.Errorf("what was not copied was not said:\n%s", out)
+	}
+}
+
+// find does the same, and discovery keeps what it could list.
+func TestDiscoveryGoesOnPastWhatItCannotRead(t *testing.T) {
+	ch := answers{{"find ", exec.Result{ExitCode: 1,
+		Stdout: "/corpus/a/cases/a.sh\n",
+		Stderr: "find: '/corpus/b/cases/db/lob': Permission denied"}}}
+
+	var cases []string
+	var err error
+	out := printed(t, func() { cases, err = Discover(t.Context(), ch, "/corpus") })
+	if err != nil || len(cases) != 1 {
+		t.Fatalf("discovery gave up on what it could read: %v, %v", cases, err)
+	}
+	if !strings.Contains(out, "[WARN]") || !strings.Contains(out, "Permission denied") {
+		t.Errorf("what could not be read was not said:\n%s", out)
+	}
+
+	// Only 1 means that. A find that was killed listed some of the corpus, and
+	// that list must not be recorded as the whole run.
+	killed := answers{{"find ", exec.Result{ExitCode: -1, Stdout: "/corpus/a/cases/a.sh\n"}}}
+	if _, err := Discover(t.Context(), killed, "/corpus"); err == nil {
+		t.Error("a find that was killed was taken for a whole list")
+	}
+}
+
+// An exclusion list that is not there stops the run. CTP read nothing from it
+// and ran every case it was meant to keep out.
+func TestAMissingExclusionListStopsTheRun(t *testing.T) {
+	req, _ := request(t, "scenario=/ws\ntestcase_exclude_from_file=/nowhere/excluded.txt\n")
+	ch := answers{
+		{"cat ", exec.Result{ExitCode: 1, Stderr: "cat: /nowhere/excluded.txt: No such file or directory"}},
+		{"find ", exec.Result{Stdout: "/ws/a/cases/a.sh\n"}},
+	}
+	_, _, _, err := (&Shell{}).caseList(t.Context(), ch, newSink(t), req.Config, "/ws", false)
+	if err == nil || !strings.Contains(err.Error(), "No such file") {
+		t.Errorf("a missing exclusion list was read as an empty one: %v", err)
+	}
+}
+
+// printed runs f and returns what it wrote to standard output.
+func printed(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	// Deferred, so that an f that fails the test does not leave every later
+	// test writing into a pipe nobody reads.
+	func() {
+		defer func() {
+			os.Stdout = saved
+			w.Close()
+		}()
+		f()
+	}()
+	return <-done
+}
+
+// grep answers 1 when nothing matched, and a macro no case names is no reason to
+// stop a run. Its 2 is a file it could not read, and a skip list built without
+// that file would run the cases the macro is there to keep out.
+func TestTheMacroSkipTellsNoMatchFromAnUnreadableFile(t *testing.T) {
+	req, _ := request(t, "scenario=/ws\ntestcase_exclude_by_macro=LINUX_NOT_SUPPORTED\n")
+	found := exec.Result{Stdout: "/ws/a/cases/a.sh\n"}
+
+	nothing := answers{{"grep ", exec.Result{ExitCode: 1}}, {"find ", found}}
+	cases, skipped, _, err := (&Shell{}).caseList(t.Context(), nothing, newSink(t), req.Config, "/ws", false)
+	if err != nil || len(cases) != 1 || len(skipped) != 0 {
+		t.Errorf("no case names the macro, and got %v, %v, %v", cases, skipped, err)
+	}
+
+	unreadable := answers{
+		{"grep ", exec.Result{ExitCode: 2, Stderr: "grep: /ws/b/cases/b.sh: Permission denied"}},
+		{"find ", found},
+	}
+	_, _, _, err = (&Shell{}).caseList(t.Context(), unreadable, newSink(t), req.Config, "/ws", false)
+	if err == nil || !strings.Contains(err.Error(), "Permission denied") {
+		t.Errorf("a case file grep could not read was ignored: %v", err)
+	}
+
+	// Nor is a grep that never finished -- killed, or cancelled with the run.
+	killed := answers{{"grep ", exec.Result{ExitCode: -1}}, {"find ", found}}
+	if _, _, _, err := (&Shell{}).caseList(t.Context(), killed, newSink(t), req.Config, "/ws", false); err == nil {
+		t.Error("a grep that was killed was read as one that matched nothing")
+	}
+}
+
+// answers is a channel that replies to a script by the first fragment it
+// contains, and with an empty success to anything else.
+type answers []struct {
+	fragment string
+	res      exec.Result
+}
+
+func (a answers) Run(_ context.Context, script string) (exec.Result, error) {
+	for _, x := range a {
+		if strings.Contains(script, x.fragment) {
+			return x.res, nil
+		}
+	}
+	return exec.Result{}, nil
+}
+func (answers) Put(context.Context, string, string) error { return nil }
+func (answers) Get(context.Context, string, string) error { return nil }
+func (answers) Describe() string                          { return "answers" }
+func (answers) Close() error                              { return nil }
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	body, err := os.ReadFile(path)
@@ -251,6 +389,44 @@ func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
 func TestTheRealShellCanOpenSlots(t *testing.T) {
 	if s := NewShell(); s.Channels != nil {
 		t.Error("NewShell set Channels, which makes the run look like a caller supplied its own")
+	}
+}
+
+// A run's slots start from the install, not from what the last run's slots wrote
+// into it. They did not while the slot root was named after the pid: the root
+// outlived its run, the pid recurred -- contained, it is the namespace's -- and
+// the next run's overlay went over the old upper layer.
+func TestASlotDoesNotInheritTheLastRunsWrites(t *testing.T) {
+	contained(t)
+	base, err := os.MkdirTemp("/var/tmp", "testkit-slotroot-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	t.Setenv(contain.SlotRootEnv, base)
+	t.Setenv("CUBRID", t.TempDir())
+	t.Setenv("CUBRID_DATABASES", "")
+
+	run := func(script string) string {
+		t.Helper()
+		pairs, closeAll, err := openSlots(1, nil, nil, nil, "", laneSplit{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer closeAll()
+		res, err := pairs[0].worker.Run(t.Context(), script)
+		if err != nil || res.ExitCode != 0 {
+			t.Fatalf("%q: exit %d, %v: %s", script, res.ExitCode, err, res.Stderr)
+		}
+		return strings.TrimSpace(res.Output())
+	}
+
+	run(`echo written > "$CUBRID/leftover"`)
+	if entries, _ := os.ReadDir(base); len(entries) != 0 {
+		t.Errorf("the slot root outlived its run: %v", entries)
+	}
+	if got := run(`[ -e "$CUBRID/leftover" ] && echo inherited || echo clean`); got != "clean" {
+		t.Error("the second run's slot started with the first run's write in its install")
 	}
 }
 

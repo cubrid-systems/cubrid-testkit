@@ -186,7 +186,7 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		// "the case changed upstream", and would have called a patch that really
 		// did not apply a success and run the case unpatched while the run
 		// claimed it was patched.
-		res, perr := runIn(ctx, w.Channel, ApplyScript(c.Dir, pf))
+		res, perr := probeIn(ctx, w.Channel, ApplyScript(c.Dir, pf))
 		switch {
 		case perr != nil:
 			w.Board.Refused(c.Path, pf)
@@ -217,7 +217,7 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		// configured, and "does the corpus come out as it went in" must not
 		// have "it depends" as its answer.
 		defer func() {
-			res, rerr := runIn(context.Background(), w.Channel, RevertScript(c.Dir, pf))
+			res, rerr := probeIn(context.Background(), w.Channel, RevertScript(c.Dir, pf))
 			why := ""
 			if rerr != nil {
 				why = rerr.Error()
@@ -231,7 +231,9 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		}()
 	}
 
-	res, err := runIn(ctx, w.Channel, RunScript(c, w.Options))
+	// A case's exit status is not its verdict -- the verdict is what it wrote to
+	// its result file, and CTP never read the status either.
+	res, err := probeIn(ctx, w.Channel, RunScript(c, w.Options))
 	if err != nil {
 		add("NOK", "Runtime error ("+err.Error()+")")
 		return items, console
@@ -258,7 +260,10 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 func (w *Worker) collect(ctx context.Context, c Case) ([]string, error) {
 	var text string
 	for attempt := range collectAttempts {
-		res, err := runIn(ctx, w.Channel, CollectScript(c))
+		// cat fails on a result file that is not there, and that is an empty
+		// answer rather than an error: it is what the retries below wait out,
+		// and what a blank result is made of when they run out.
+		res, err := probeIn(ctx, w.Channel, CollectScript(c))
 		if err != nil {
 			return nil, err
 		}
@@ -377,7 +382,7 @@ func resultText(v Verdict, console string) string {
 // that is what the frozen logs contain; an explanation the runner discards is
 // an explanation nobody has.
 func (w *Worker) quietly(ctx context.Context, script, label, onError string) {
-	res, err := runIn(ctx, w.Channel, script)
+	res, err := probeIn(ctx, w.Channel, script)
 	switch {
 	case err != nil:
 		w.log("[ERROR] " + onError + " (" + err.Error() + ")")

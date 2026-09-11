@@ -19,7 +19,7 @@ These behave as they always did.
 | `testcase_retry_num` | `0` | attempts after the first failure |
 | `testcase_timeout_in_secs` | `0` | 0 is no timeout. CI uses 720 |
 | `testcase_exclude_by_macro` | — | skip a case whose text contains this, e.g. `LINUX_NOT_SUPPORTED` |
-| `testcase_exclude_from_file` | — | files of path fragments to skip, comma-separated |
+| `testcase_exclude_from_file` | — | files of path fragments to skip, comma-separated. A file that does not exist stops the run |
 | `test_continue_yn` | `false` | resume, skipping what already has a verdict |
 | `cubrid_db_charset` | `en_US` | what `cubrid_createdb` passes as the locale |
 | `feedback_type` | — | `file` |
@@ -49,7 +49,7 @@ These behave as they always did.
 | `TESTKIT_NATIVE_SHELL=1` | run `shell` here rather than handing it to CTP. The opt-in gate |
 | `TESTKIT_CONTAIN=1` | put the run in namespaces of its own. **Required** by slots and by `scenario_ram_mb` |
 | `TESTKIT_CONTAIN_SH` | which shell to bind over `/bin/sh`. `bash` if it can be found |
-| `TESTKIT_SLOT_ROOT` | where per-slot overlays go |
+| `TESTKIT_SLOT_ROOT` | where each run makes its own directory for the per-slot overlays, removed when the slots close. `/var/tmp/testkit-slots` when unset |
 
 And CTP's failure snapshot, which is off the frozen surface and configurable:
 

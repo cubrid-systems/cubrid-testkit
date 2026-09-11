@@ -21,12 +21,24 @@ func namespace(t *testing.T) *Namespace {
 	if _, err := osexec.LookPath("nsenter"); err != nil {
 		t.Skip("nsenter is not on PATH")
 	}
-	ns, err := Open(t.Name())
+	ns, err := Open(t.Name(), slotRoot(t))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { ns.Close() })
 	return ns
+}
+
+// slotRoot is a slot root made the way a run makes one, and removed when the
+// test is done with it.
+func slotRoot(t *testing.T) string {
+	t.Helper()
+	root, err := NewSlotRoot()
+	if err != nil {
+		t.Fatalf("slot root: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	return root
 }
 
 func run(t *testing.T, ns *Namespace, script string) string {
@@ -122,7 +134,7 @@ func TestASlotOutsideAContainedRunnerIsRefused(t *testing.T) {
 	if Active() {
 		t.Skip("this process is contained")
 	}
-	if _, err := Open("slot0"); err == nil {
+	if _, err := Open("slot0", t.TempDir()); err == nil {
 		t.Error("a namespace was opened from an uncontained runner")
 	}
 }

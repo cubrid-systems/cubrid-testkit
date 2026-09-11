@@ -162,6 +162,25 @@ Where the switch can reach shell is the disk lane of a split (`lane_slow_*`), wh
 mounted per slot with its upper on disk; with `scenario_ram_mb` alone the upper is a tmpfs, whose
 syncs cost nothing already. What this run also shows: `_01_utility` writes 188 GB in 24 minutes —
 `createdb`'s volumes, 512 MB each here — and keeps the disk 95% busy, so it is bound by how much it
-writes as well as by the syncs. Not measured: a disk-backed corpus overlay for every slot, mounted
-`volatile`, where a database created and deleted inside the kernel's writeback delay would never
-reach the disk at all.
+writes as well as by the syncs.
+
+**So every slot got a corpus overlay on disk: `scenario_disk=on`.** Each slot sees the corpus
+through an overlay of its own, its upper in the slot's directory under `TESTKIT_SLOT_ROOT`; the
+corpus on disk is unchanged. The same cases, slots and disk, two more runs:
+
+| `_01_utility`, 8 slots | wall | OK / NOK | writes to sdb | flushes | sdb busy |
+|---|---:|---:|---:|---:|---:|
+| in place | 1,426 s | 156 / 61 | 188 GB | 139,115 | 95% |
+| in place, `volatile` | 1,401 s | 156 / 61 | 187 GB | 139,155 | 95% |
+| `scenario_disk` | 1,454 s | 156 / 61 | 190 GB | 137,773 | 95% |
+| `scenario_disk`, `volatile` | **540 s** | **157 / 60** | **64 GB** | **2,978** | 83% |
+
+- **The overlay alone changes nothing** — 1,454 s, the same writes, the same 61 failures. It is what
+  lets `volatile` reach the databases, and `volatile` is what does the work.
+- **Two thirds of what the cases wrote never reached the disk.** A database a case creates and drops
+  again before the kernel writes it back leaves nothing to write: 188 GB became 64, and the syncs
+  went from 139,000 to 3,000. 2.6 times faster, the lowest available memory 15.3 GB, and at most
+  3.4 GB waiting to be written.
+- **Verdicts.** No new failure. One case, `_15_backupdb/itrack_10002`, fails in the three slow runs
+  and passes in the fast one; it fails at its client-server multi-threaded backups (`-C -t 2`,
+  steps 55–59). Why it passes when the run is faster is not established.

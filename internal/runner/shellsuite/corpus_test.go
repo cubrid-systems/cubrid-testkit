@@ -313,6 +313,78 @@ func TestEachLanesWritesGoWhereItsLaneSays(t *testing.T) {
 	}
 }
 
+// scenario_disk puts every slot's view of the corpus behind an overlay of its
+// own on disk. Each slot reads the corpus, writes only into its own layer, and
+// the corpus comes out as it went in -- and with TESTKIT_SLOT_VOLATILE the
+// layer is mounted volatile, which is what the key exists to reach.
+func TestScenarioDiskGivesEachSlotACorpusOfItsOwn(t *testing.T) {
+	contained(t)
+	root, dir, _ := caseTree(t, "a")
+	t.Setenv("CUBRID", t.TempDir())
+	t.Setenv("CUBRID_DATABASES", "")
+	t.Setenv(contain.SlotVolatileEnv, "1")
+
+	pairs, closeAll, err := openSlots(2, nil, root, laneSplit{}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeAll()
+	sh := func(i int, script string) string {
+		res, err := pairs[i].worker.Run(context.Background(), script)
+		if err != nil || res.ExitCode != 0 {
+			t.Fatalf("slot%d: %s: %v: %s", i, script, err, res.Output())
+		}
+		return strings.TrimSpace(res.Output())
+	}
+
+	for i := range pairs {
+		if got := sh(i, "cat "+filepath.Join(dir, "a.sh")); got != "clean" {
+			t.Errorf("slot%d cannot read the corpus through its overlay: %q", i, got)
+		}
+	}
+	sh(0, "echo zero > "+filepath.Join(dir, "db_lgat"))
+	if got := sh(1, "cat "+filepath.Join(dir, "db_lgat")+" 2>/dev/null || echo absent"); got != "absent" {
+		t.Errorf("slot1 sees slot0's write: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "db_lgat")); err == nil {
+		t.Error("a slot's write landed in the corpus")
+	}
+	if got := sh(0, "awk '$5 == \""+root+"\" {print $NF}' /proc/self/mountinfo"); !strings.Contains(got, "volatile") {
+		t.Errorf("%s=1 and the corpus overlay's options are %q", contain.SlotVolatileEnv, got)
+	}
+}
+
+// What scenario_disk cannot do is refused before a slot exists.
+func TestScenarioDiskRefusesWhatItCannotDo(t *testing.T) {
+	t.Setenv("TESTKIT_CONTAINED", "1")
+	if err := checkScenarioDisk(false, 64, "", "/elsewhere"); err != nil {
+		t.Errorf("off, and still refused: %v", err)
+	}
+	if err := checkScenarioDisk(true, 0, "/corpus", ""); err != nil {
+		t.Errorf("a plain run was refused: %v", err)
+	}
+	if err := checkScenarioDisk(true, 0, "/corpus", "/corpus"); err != nil {
+		t.Errorf("a workspace that is scenario itself was refused: %v", err)
+	}
+	for _, c := range []struct {
+		name, scenario, workspace, want string
+		ramMB                           int
+	}{
+		{"with scenario_ram_mb", "/corpus", "", "scenario_ram_mb", 64},
+		{"without scenario", "", "", "scenario to be set", 0},
+		{"with a workspace of its own", "/corpus", "/elsewhere", "testcase_workspace_dir", 0},
+	} {
+		err := checkScenarioDisk(true, c.ramMB, c.scenario, c.workspace)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: %v, want an error naming %q", c.name, err, c.want)
+		}
+	}
+	t.Setenv("TESTKIT_CONTAINED", "")
+	if err := checkScenarioDisk(true, 0, "/corpus", ""); err == nil || !strings.Contains(err.Error(), "contained") {
+		t.Errorf("an uncontained runner was not refused: %v", err)
+	}
+}
+
 // A corpus mounted once for every slot has no per-slot upper, and asking for
 // one is a mistake worth an error rather than a surprise later.
 func TestASharedCorpusHasNoPerSlotUpper(t *testing.T) {

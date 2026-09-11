@@ -18,6 +18,10 @@ type Slot struct {
 	Label string
 	NS    *Namespace
 	Env   []string
+	// Dir is this slot's own directory under the run's slot root, where the
+	// upper layers of its overlays go. A mount hook that adds an overlay puts
+	// its upper here too, and it goes with the root when the slots close.
+	Dir string
 }
 
 // Channel opens a channel into the slot. A runner that has to reach the slot
@@ -77,7 +81,7 @@ func OpenSlots(n int, mount func(i int, s *Slot) error) ([]*Slot, func(), error)
 			closeAll()
 			return nil, nil, err
 		}
-		s := &Slot{Label: label, NS: ns}
+		s := &Slot{Label: label, NS: ns, Dir: filepath.Join(root, label)}
 		slots = append(slots, s)
 
 		// $CUBRID and the registry are the two trees a case writes to. The
@@ -91,7 +95,7 @@ func OpenSlots(n int, mount func(i int, s *Slot) error) ([]*Slot, func(), error)
 			if dir == "" || under(covered, dir) {
 				continue
 			}
-			if err := ns.Overlay(dir, filepath.Join(root, label, filepath.Base(dir))); err != nil {
+			if err := ns.Overlay(dir, filepath.Join(s.Dir, filepath.Base(dir))); err != nil {
 				closeAll()
 				return nil, nil, err
 			}

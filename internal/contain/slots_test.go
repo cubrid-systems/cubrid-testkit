@@ -58,6 +58,11 @@ func TestAMountHookRunsInsideEachSlot(t *testing.T) {
 	var seen []string
 	slots, closeAll, err := OpenSlots(2, func(i int, s *Slot) error {
 		seen = append(seen, s.Label)
+		// Where a hook puts an overlay's upper: the slot's own directory, which
+		// its install's upper is already in.
+		if st, err := os.Stat(filepath.Join(s.Dir, filepath.Base(os.Getenv("CUBRID")), "upper")); err != nil || !st.IsDir() {
+			t.Errorf("%s: its Dir %q does not hold its install's upper layer: %v", s.Label, s.Dir, err)
+		}
 		return s.NS.Private("/mnt", t.TempDir())
 	})
 	if err != nil {

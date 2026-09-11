@@ -43,6 +43,12 @@ becomes a case whose verdict is read from a file nobody wrote — so the discove
 and every other `*.sh` under `cases/` is a helper. This is what keeps `PrintInfo.sh`, `common.sh` and
 `build.sh` from being run as tests.
 
+**A directory the run cannot read is skipped, and named.** A run as root leaves databases and logs
+under a case's `cases/` as `root:root 700`, and the run's uid cannot enter them. Discovery prints a
+`[WARN]` with the path and goes on with every case it could list. A case inside such a directory is
+not found, so the warning is worth reading. The workspace copy, when `testcase_workspace_dir` names a
+directory other than the scenario, does the same.
+
 Any directory depth above the case directory is yours: group cases however you like.
 
 ## A case you can copy and run
@@ -170,6 +176,9 @@ filtered on. `WINDOWS_NOT_SUPPORTED` and `AIX_NOT_SUPPORTED` exist too.
 To skip a case by path instead, put a fragment of its path in a file and point
 `testcase_exclude_from_file` at it — see [`../../../exclusions/README.md`](../../../exclusions/README.md),
 which also explains why this machine's list is kept apart from upstream's.
+
+A file named there that does not exist stops the run. CTP read nothing from it and ran every case it
+was meant to keep out.
 
 ## Traps
 

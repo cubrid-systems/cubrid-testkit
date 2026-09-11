@@ -140,6 +140,13 @@ claims that slot — and `dropInSlot` discards the corpus overlay when a directo
 finishes. Before the verdict there is nothing to keep; after either of those there is nothing left
 to copy.
 
+**And when the run ends, the slots go.** Their upper layers are removed with the run's slot root,
+so the last case in each slot loses what it left in `$CUBRID` too. After the run, what a case wrote
+survives only where it was copied: `case-logs/`, and `~/ERROR_BACKUP` for a case that dumped core or
+logged a fatal error while that backup is on. The upper layers used to outlive the run, under
+`/var/tmp/testkit-slots/<pid>`, until a later run with the same pid mounted over them and started
+from what they held.
+
 It copies **by path, through the case's own channel**, rather than reading the slot's overlay upper
 layer from outside. It is the same files either way, and this works identically whether the run has
 overlays, one slot, or neither. The destination is under `CTP_HOME`, which no slot overlays, so a

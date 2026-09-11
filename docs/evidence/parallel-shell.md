@@ -139,3 +139,29 @@ Shrinking the buffers is what made 16+ slots possible at all: 24 × 768 MB of en
   are never discovered. A coverage hole, measured at 13 in this corpus.
 - **The comment in `dispatch.go` and `corpus.go` claiming "15 of 217 directories hold more than one
   case" is false** — 0 of 3,494 do. The slot-affinity machinery is dormant.
+
+---
+
+## 5. Volatile slot overlays (2026-09-11)
+
+`TESTKIT_SLOT_VOLATILE=1` took eight sql slots from 1,131 s to 338–394 s, by making the log flush
+every commit waits on a no-op (`sql-native.md` §3). The same switch on shell, in the `regr` sandbox:
+`_01_utility`, eight slots, the slot root on `/data`, no `scenario_ram_mb`, run twice.
+
+| | wall | OK / NOK | writes to sdb | flushes | sdb busy |
+|---|---:|---:|---:|---:|---:|
+| without | 1,426 s | 156 / 61 | 188 GB | 139,115 | 95% |
+| `volatile` | 1,401 s | 156 / 61 | 187 GB | 139,155 | 95% |
+
+**No effect, and none possible in this configuration.** Without `scenario_ram_mb` there is no corpus
+overlay: a case runs in place in the corpus, as under CTP, and the databases it creates there are
+plain files on `/data`. The slot overlays cover `$CUBRID` and the registry, which a shell case barely
+writes; the flushes did not move. The verdicts did not either — the same 61 cases fail in both.
+
+Where the switch can reach shell is the disk lane of a split (`lane_slow_*`), whose corpus overlay is
+mounted per slot with its upper on disk; with `scenario_ram_mb` alone the upper is a tmpfs, whose
+syncs cost nothing already. What this run also shows: `_01_utility` writes 188 GB in 24 minutes —
+`createdb`'s volumes, 512 MB each here — and keeps the disk 95% busy, so it is bound by how much it
+writes as well as by the syncs. Not measured: a disk-backed corpus overlay for every slot, mounted
+`volatile`, where a database created and deleted inside the kernel's writeback delay would never
+reach the disk at all.

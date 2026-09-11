@@ -170,6 +170,20 @@ func (q *Queue) Assign(byDir map[string]Lane) {
 	q.lanes = true
 }
 
+// Affinity keeps each directory on the slot that claimed its first case, with
+// no lanes: the half of Assign a runner needs when its slots differ in nothing
+// but what their earlier cases left behind.
+//
+// sql's cases share a database per slot, and a case may lean on what an earlier
+// case in its directory created -- which CTP always ran first, on the same
+// connection, because it ran everything in order. Held for one slot, a
+// directory still runs that way.
+func (q *Queue) Affinity() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.lanes = true
+}
+
 // Lanes reports whether lanes are on.
 func (q *Queue) Lanes() bool {
 	q.mu.Lock()

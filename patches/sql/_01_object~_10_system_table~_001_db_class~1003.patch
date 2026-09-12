@@ -1,0 +1,101 @@
+--- cases/1003.sql
++++ cases/1003.sql
+@@ -13,7 +13,7 @@
+ select col1, col2 from test_class;
+ 
+ select class_name, owner_name, class_type, is_system_class, tde_algorithm, partitioned, is_reuse_oid_class, collation, comment from db_class 
+-where  class_type = 'VCLASS';
++where  class_type = 'VCLASS' order by class_name;
+ 
+ 
+ drop vclass test_vclass;
+--- answers/1003.answer
++++ answers/1003.answer
+@@ -8,51 +8,51 @@
+ 0
+ ===================================================
+ class_name    owner_name    class_type    is_system_class    tde_algorithm    partitioned    is_reuse_oid_class    collation    comment    
+-views     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-triggers     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-tables     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-table_privileges     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-table_constraints     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-synonyms     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-statistics     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-sequences     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-schemata     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-routines     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-routine_privileges     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-referential_constraints     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-partitions     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-parameters     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-key_column_usage     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-foreign_servers     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-domains     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-columns     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ column_privileges     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_histogram     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_synonym     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_server     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_charset     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++columns     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_attr_setdomain_elm     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_attribute     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_auth     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ db_authorization     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_user     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_charset     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_class     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ db_collation     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_direct_super_class     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ db_ha_apply_info     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_serial     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_stored_procedure_args     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_stored_procedure     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_partition     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_trigger     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_auth     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_index_key     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_histogram     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ db_index     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_meth_file     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_meth_arg_setdomain_elm     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_index_key     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ db_meth_arg     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_meth_arg_setdomain_elm     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_meth_file     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ db_method     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_attr_setdomain_elm     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_attribute     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_partition     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_serial     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_server     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_stored_procedure     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_stored_procedure_args     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_synonym     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_trigger     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++db_user     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ db_vclass     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_direct_super_class     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+-db_class     DBA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++domains     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++foreign_servers     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++key_column_usage     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++parameters     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++partitions     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++referential_constraints     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++routine_privileges     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++routines     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++schemata     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++sequences     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++statistics     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++synonyms     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++table_constraints     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++table_privileges     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++tables     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ test_vclass     DBA     VCLASS     NO     NONE     NO     NO     utf8_bin     null     
++triggers     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
++views     INFORMATION_SCHEMA     VCLASS     YES     NONE     NO     NO     utf8_bin     null     
+ 
+ ===================================================
+ 0

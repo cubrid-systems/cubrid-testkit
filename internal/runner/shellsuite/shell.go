@@ -16,6 +16,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
+	"github.com/cubrid-systems/cubrid-testkit/internal/patch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/plan"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
@@ -539,7 +540,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 
 	// A corpus changed before it ran is the first thing a reader of the verdicts
 	// has to know, so it is said here and repeated per case and on the page.
-	patches, perr := LoadPatches(cfg.GetOr("case_patch_dir", ""), cfg.GetOr("scenario", ""), cases)
+	patches, perr := patch.Load(cfg.GetOr("case_patch_dir", ""), cfg.GetOr("scenario", ""), ".sh", cases)
 	if perr != nil {
 		return quit("%v", perr)
 	}
@@ -937,7 +938,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, split laneSplit, patches *Patches, logs *CaseLogs) error {
+	record *plan.Record, split laneSplit, patches *patch.Set, logs *CaseLogs) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -971,7 +972,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, lane dispatch.Lane, slotID string, patches *Patches, logs *CaseLogs) error {
+	record *plan.Record, lane dispatch.Lane, slotID string, patches *patch.Set, logs *CaseLogs) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
 	// Which lane this slot is in: where its corpus writes land. With lanes off

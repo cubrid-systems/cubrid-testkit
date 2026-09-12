@@ -41,9 +41,27 @@ case would. A directory holding two cases keeps both names
 The diff's own paths are relative to the **case directory**, so one patch may
 touch the case script and its answer files together.
 
+`patches/sql` is the same idea for the sql family, where a case is a `.sql` file
+and its answer sits beside it:
+
+```
+_01_object/_10_system_table/_001_db_class/cases/1003.sql
+  ->  patches/sql/_01_object~_10_system_table~_001_db_class~1003.patch
+```
+
+What those patches are for is different, though. shell's carry a machine's
+layout; sql's carry **a case's dependence on what ran before it** — a listing
+with no `ORDER BY`, a trace that shows the server's own queries only when the
+session is cold. A slotted run changes which cases precede which, so a case that
+leant on the order fails in a way that is about neither the engine nor the
+runner. Each patch makes the case say what it needs, and is written to be sent
+upstream as it stands.
+
 ## The corpus comes out as it went in
 
-The patch is applied when the case starts and reverted when it finishes.
+The patch is applied when the case starts and reverted when it finishes — in the
+sql family, once before the first case and reverted at the end, because its slots
+share one corpus and every slot must read the same source.
 
 Behind the corpus overlay the revert is redundant — the writes are in the upper
 layer and go when the directory retires. It is there because that is a property
@@ -110,6 +128,18 @@ it did, delete the patch.
 | `_06_issues/_11_1h/bug_bts_5136_1` | step 2 is "check createdb with default": it creates a database with no size arguments and counts the literals `512M` and `1.1G` in `ls -lh`. Lowering `db_volume_size` so that many slots fit in memory makes the volumes 20M and the counts 0. It never names a parameter, so no search of the corpus finds it -- the dependency is on the size the files come out. Restores the shipped values; steps 3 and 4 pass sizes of their own and are unaffected. |
 | `_06_issues/_11_1h/bug_bts_5136_4` | step 1 greps `cubrid.conf` for the literal `db_volume_size = 512M` and `log_volume_size = 512M` — the shipped values, which the case exists to confirm before it changes them. This run lowers both, so step 1 measures the run instead of the engine. The four steps after it set their own sizes and are unaffected |
 | `_01_utility/_27_emergency_patch_logdb/bug_xdbms278` | the precondition — did the query spill to a temporary volume — checked before the utility the case is actually about. As written it passes only when there is exactly one, and by accident: the shell expands `testdb_t*` before grep sees it, so one volume makes the filename grep's *pattern* and the count 1, two makes it `grep <name> <binary volume>` and the count 0, and none leaves the glob literal and matches five lines of `ls`. Measured: `db_volume_size=20M` gives two and the check reads 0, the shipped 512M gives none and it reads 5. The patch counts the volumes and asks for at least one |
+
+### patches/sql
+
+Each of these is a case that read what an earlier case left. A slotted run
+changes what came earlier, and the case's verdict changes with it — so each
+patch makes the case say what it needs, rather than inherit it.
+
+| patch | why |
+|---|---|
+| `_01_object/_10_system_table/_001_db_class/1003` | lists `db_class` with no `ORDER BY`, so the row order is the catalog's history. Two runs of the same corpus put `test_vclass` in different places. Sorted by `class_name`, with the answer re-recorded from a run of the sorted case: the same 45 rows, in an order that does not depend on what ran before |
+| `_27_banana_qa/issue_16066_BINARY_charset/_01_Comparison_Expression/alter_03` | lists `db_index_key` with `order by 2,1`, which leaves the two keys of one index unordered between themselves. Adds the key's own position to the sort. The answer is unchanged — it was already in that order |
+| `_36_guava/cbrd_26104` | its trace carries the plans of the queries the *server* runs to read the current user's groups, and the server runs them only when the session has not already. Whether it has depends on what ran before. One `show` runs before the trace is turned on, so the traces below are the case's own queries; the answer is re-recorded without those plans |
 
 ## What is deliberately not here
 

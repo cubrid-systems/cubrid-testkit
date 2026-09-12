@@ -254,7 +254,7 @@ evidence: `evidence/sql-baseline.md` (P0) → `evidence/regression-sql.md` (게�
 |---|---|---|
 | **P0** | 샌드박스 기준 run (medium · sql, 세 저장소 모두 upstream develop), 포맷 census, 분석 공백 채우기, ADR-016, 이 문서 | `evidence/sql-baseline.md` |
 | **P1** | 공통 모듈 추출(§3-1, shell 테스트로 불변 확인) → **슬롯 위의 `sqlsuite`** + `jdbc` 실행부, `TESTKIT_NATIVE_SQL` 뒤 *(2026-09-11 — 병렬을 P3 에서 당김)* | 슬롯 1개: 스모크·medium 전체가 CTP 와 동일. 슬롯 N개: 슬롯 1개와 판정·`.result` 동일. **진행 (2026-09-11):** 코드 완료. 기록은 CTP run 6개와 바이트 동일, 직렬 medium 은 `.result` 975/975 동일(샌드박스 핀). 병렬은 §3-3 |
-| **게이트** | ADR-017 확정, sql 전체를 슬롯 1개로 CTP 와 비교 | diff 0 → 병렬 기본값 on 가능 (ADR-015) |
+| **게이트** | ADR-017 확정, sql 전체를 슬롯 1개로 CTP 와 비교 | diff 0 → 병렬 기본값 on 가능 (ADR-015). **통과 (2026-09-12, `evidence/regression-sql.md`)** — 세 저장소 모두 upstream develop head(engine `c3967ec2`, cases `b10727db`, ctp `a1bec876`). medium 은 모든 파일 동일, sql 은 깨끗한 run 끼리 `.result` 17,459/17,459 · 기록 파일 2,762/2,762 동일. 두 케이스(`_003_numeric/1004`, `partition_table/cbrd_25542`)는 양쪽 러너에서 run 마다 흔들린다 — 엔진 쪽 |
 | **P2** | `native` 실행부 — CCI 모드 먼저, `jdbc` 를 오라클로 | CCI 모드가 `ccqt` 와 동일 |
 | **P3** | 나머지 축 B: 플랜 데이터 · 드라이버 비교 | 항목별 증거 |
 | **문서** | `docs/category/sql/` as-built | 코드와 일치 |

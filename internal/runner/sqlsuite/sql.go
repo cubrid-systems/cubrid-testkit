@@ -22,6 +22,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
+	"github.com/cubrid-systems/cubrid-testkit/internal/patch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
@@ -155,6 +156,19 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 		return setupFailed("No Results!! please confirm your scenario path include valid case script(the current scenairo path:%s)", st.scenario)
 	}
 
+	// ---- patches ----------------------------------------------------------
+	patches, err := patch.Load(ini.GetOr("sql", "case_patch_dir", ""), st.scenario, ".sql", cases.all)
+	if err != nil {
+		return setupFailed("%v", err)
+	}
+	for _, line := range patches.Describe() {
+		fmt.Println(line)
+	}
+	if err := applyPatches(ctx, here.Channel(), patches, cases.all); err != nil {
+		return setupFailed("%v", err)
+	}
+	defer putPatchesBack(here.Channel(), patches, cases.all)
+
 	// ---- places -------------------------------------------------------------
 	// As shell does it: contained, every worker gets a slot, the only one
 	// included; not contained and serial, the one worker runs on the machine,
@@ -213,6 +227,12 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 	})
 	if err != nil {
 		return err
+	}
+	// What this run patched, beside the records it is about to write. Written
+	// now rather than at the end: a run that dies still says which of its
+	// verdicts are about a patched case.
+	if err := patches.Report(rec.Root()); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] cannot record what was patched: %v\n", err)
 	}
 
 	board, stopBoard, err := openBoard(ini, st, e, cases, len(places))
@@ -391,6 +411,54 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 	}
 	fmt.Print("-----------------------\nTesting End!\n-----------------------\n")
 	return nil
+}
+
+// applyPatches puts the run's patches into the corpus, and putPatchesBack takes
+// them out again.
+//
+// Before the first case, and not per case as shell does it. The slots share one
+// corpus -- sql has no per-slot overlay over it -- so a patch applied while
+// another slot is reading the same tree is a race. And every executor reads
+// every case at its start, to work out where CQT's server-message flag stands
+// for each (ADR-016): a patch applied after that is a patch the prediction never
+// saw.
+//
+// A patch that does not apply stops the run. It means the case has moved, and
+// running it unpatched would answer a question nobody asked.
+func applyPatches(ctx context.Context, ch exec.Channel, p *patch.Set, cases []string) error {
+	for _, c := range cases {
+		pf := p.For(c)
+		if pf == "" {
+			continue
+		}
+		res, err := exec.Check(ch.Run(ctx, patch.ApplyScript(caseDirOf(c), pf)))
+		if err != nil {
+			return fmt.Errorf("%s does not apply to %s: %w: %s", pf, c, err, strings.TrimSpace(res.Output()))
+		}
+		p.Applied(c, pf)
+	}
+	return nil
+}
+
+// putPatchesBack is best effort and says what it could not do: the run is over,
+// and a corpus left patched is a corpus the next run reads from git.
+func putPatchesBack(ch exec.Channel, p *patch.Set, cases []string) {
+	for _, c := range cases {
+		pf := p.For(c)
+		if pf == "" {
+			continue
+		}
+		if res, err := exec.Check(ch.Run(context.Background(), patch.RevertScript(caseDirOf(c), pf))); err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] %s is still patched with %s: %v: %s\n",
+				c, pf, err, strings.TrimSpace(res.Output()))
+		}
+	}
+}
+
+// caseDirOf is the directory a patch applies in: the one holding cases/ and
+// answers/, so a single patch can change a case and its answer together.
+func caseDirOf(caseFile string) string {
+	return filepath.Dir(filepath.Dir(caseFile))
 }
 
 // findCores is do_summary_and_clean's search, done where each core can be: the

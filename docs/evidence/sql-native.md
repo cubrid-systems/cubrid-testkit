@@ -3,8 +3,8 @@
 - **Date:** 2026-09-11
 - **What this is:** the P1 runner (`internal/runner/sqlsuite`, `design/module-sql.md`) measured against
   CTP. It is the evidence the code was written against and the reason several of its decisions were
-  taken; it is **not** ADR-017's gate, which needs all three repositories at upstream develop's head
-  (§5).
+  taken; it is **not** ADR-017's gate, which is `regression-sql.md` — run at upstream develop's head
+  on 2026-09-12 and passed (§5).
 - **Pins:** the sandbox of `sql-baseline.md` — engine `a7a1db84b` (11.5.0.2560), cases `b94995abf`,
   CTP `a1bec87`. Every comparison below is against CTP's own runs at the same pins
   (`sql-baseline.md` §3, §4), so the pins moving upstream since does not affect them.
@@ -246,9 +246,10 @@ and is at most a handful of cases.
 
 ## 5. Not yet measured
 
-- **ADR-017's gate**: CTP and sqlsuite, serial, over both corpora with all three repositories at
-  upstream develop's head. The engine has been rebuilt there (11.5.0.2562-1642235); the sandbox has to
-  be laid down again (`sandbox.sh refresh`) and CTP's baseline taken again at the same pins.
+- ~~**ADR-017's gate**~~ — **done 2026-09-12**, at engine `c3967ec2` (11.5.0.2568), cases
+  `b10727db`, CTP `a1bec876`, all three at upstream develop's head: `regression-sql.md`. A clean
+  sqlsuite run is a clean CTP run in all 17,459 sql `.result` files and all 2,762 record files, and
+  medium is identical in every file. Two cases are unstable in both runners, and nothing else moved.
 - **Slots against one slot, whole corpora**, after the gate, with the order dependencies of §4
   accounted for.
 - **Starting together without `volatile`**, on a fast disk: whether one at a time is still needed

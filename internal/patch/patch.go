@@ -4,6 +4,7 @@ package patch
 
 import (
 	"fmt"
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"os"
 	"path/filepath"
 	"sort"
@@ -177,7 +178,7 @@ func (p *Set) Describe() []string {
 // the point: a patch that no longer applies means the case has moved, and
 // running the case unpatched would answer a question nobody asked.
 func ApplyScript(caseDir, patchFile string) string {
-	d, f := shQuote(caseDir), shQuote(patchFile)
+	d, f := exec.Quote(caseDir), exec.Quote(patchFile)
 	return "patch -p0 --batch --forward --dry-run -d " + d + " -i " + f + " >/dev/null 2>&1 && " +
 		"patch -p0 --batch --forward -d " + d + " -i " + f
 }
@@ -196,7 +197,7 @@ func ApplyScript(caseDir, patchFile string) string {
 // so -- the revert is refused rather than making it worse, and the caller
 // reports it.
 func RevertScript(caseDir, patchFile string) string {
-	d, f := shQuote(caseDir), shQuote(patchFile)
+	d, f := exec.Quote(caseDir), exec.Quote(patchFile)
 	// --forward alongside --reverse is what stops a second revert re-applying
 	// the patch forwards: to a reversed run, an already-reverted file looks like
 	// a reversed patch, and --forward skips those instead of "fixing" them.
@@ -278,10 +279,4 @@ func (p *Set) Report(dir string) error {
 		return nil
 	}
 	return os.WriteFile(filepath.Join(dir, "patched.txt"), []byte(b.String()), 0o644)
-}
-
-// shQuote is the same quoting the suites do for their own scripts: a path goes
-// into a command line, and a case directory is a path this run did not choose.
-func shQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

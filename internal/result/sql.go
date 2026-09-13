@@ -962,6 +962,19 @@ func (s *SQL) writeJUnit(root *summary) error {
 		b.WriteString("\n      <failure message=\"unexpected result\">")
 		if s.run.Failure != nil {
 			if payload := s.run.Failure(c.file); payload != "" {
+				// Written raw, "]]>" and all, because that is what CQT writes.
+				// It hands the text to XMLStreamWriter.writeCData, and JDK 8's
+				// writer does not break the one sequence a CDATA section cannot
+				// contain -- measured: writeCData("before ]]> after") comes out
+				// as <![CDATA[before ]]> after]]>, which ends the section early
+				// and leaves the report invalid XML.
+				//
+				// So a failing case whose output contains "]]>" produces a
+				// report no parser will read, in CTP and here alike. Splitting
+				// it (feedback/junit.go does, for shell's own report, which is
+				// not compared) would be a better report and a different file,
+				// and this one is compared byte for byte. It belongs upstream,
+				// in CQT (module-sql.md §6).
 				b.WriteString("<![CDATA[" + payload + "]]>")
 			}
 		}

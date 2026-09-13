@@ -126,6 +126,21 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 	// and at the same path in every slot, so nothing in _vinf or
 	// databases.txt needs rewriting.
 	here := machine{}
+	// do_clean deletes: the database, everything under $CUBRID/logs, and every
+	// file named core* under $CUBRID and $CTP_HOME. In a shell script an unset
+	// or careless path does not fail, it becomes the root of the filesystem --
+	// measured, on the shell side, as 69 directories deleted across a machine
+	// because one variable was empty (exec.SafeToEmpty). Checked here, in front
+	// of the command, rather than trusted.
+	for _, p := range []struct{ what, dir string }{
+		{"CUBRID", os.Getenv("CUBRID")},
+		{"CTP_HOME", st.ctpHome},
+		{"the scenario", st.scenario},
+	} {
+		if err := exec.SafeToEmpty(p.what, p.dir); err != nil {
+			return setupFailed("%v", err)
+		}
+	}
 	began := time.Now()
 	for _, calls := range []string{"do_clean", "do_configure", "do_create_db"} {
 		res, err := stage(ctx, here.Channel(), st, e, logFile, calls)

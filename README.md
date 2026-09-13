@@ -144,8 +144,11 @@ being ignored.
 
 | | |
 |---|---|
-| runs natively | `unittest` · `shell` behind `TESTKIT_NATIVE_SHELL=1` |
-| dispatched to CTP | `sql` `medium` `kcc` `neis05` `neis08` `sql_by_cci` `rqg` `isolation` `ha_repl` `cdc_repl` `jdbc` `webconsole` |
+| runs natively | `unittest` · `shell` and `rqg` behind `TESTKIT_NATIVE=shell` · `sql` and `medium` behind `TESTKIT_NATIVE=sql` |
+| dispatched to CTP | `kcc` `neis05` `neis08` `sql_by_cci` `isolation` `ha_repl` `cdc_repl` `jdbc` `webconsole`, and any family whose gate is off |
+
+`TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of
+them. The older `TESTKIT_NATIVE_SHELL=1` and `TESTKIT_NATIVE_SQL=1` still work.
 
 Seven more names — `cci` `dots` `nbd` `sysbench` `tpcc` `tpcw` `ycsb` — are ones CTP accepted and
 silently did nothing about. They now say they are retired and move on to the next task: the same

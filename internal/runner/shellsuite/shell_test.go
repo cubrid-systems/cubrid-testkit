@@ -27,11 +27,11 @@ func request(t *testing.T, body string) (runner.Request, string) {
 		t.Fatal(err)
 	}
 	h := &conf.Home{Path: home}
-	cfg, err := h.Load(path)
-	if err != nil {
+	// The request carries the path; the runner reads the file itself.
+	if _, err := h.Load(path); err != nil {
 		t.Fatal(err)
 	}
-	return runner.Request{Task: cli.Shell, Home: h, ConfigPath: path, Config: cfg}, home
+	return runner.Request{Task: cli.Shell, Home: h, ConfigPath: path}, home
 }
 
 func TestValidate(t *testing.T) {
@@ -81,7 +81,7 @@ func TestLocalInstanceCarriesTheDefaultRoles(t *testing.T) {
 		"default.ssh.user=qa",
 	}, "\n"))
 
-	inst := topology.Local(req.Config)
+	inst := topology.Local(configOf(req))
 	if inst.EnvID() != "local" {
 		t.Errorf("EnvID = %q, want local", inst.EnvID())
 	}
@@ -207,7 +207,7 @@ func TestAScenarioNotCopiedWholeIsSaidAndTheRunGoesOn(t *testing.T) {
 	var got string
 	var err error
 	out := printed(t, func() {
-		got, err = NewShell().prepareWorkspace(t.Context(), ch, req.Config, true)
+		got, err = NewShell().prepareWorkspace(t.Context(), ch, configOf(req), true)
 	})
 	if err != nil || got != workspace {
 		t.Fatalf("the run stopped over what cp could not read: %q, %v", got, err)
@@ -249,7 +249,7 @@ func TestAMissingExclusionListStopsTheRun(t *testing.T) {
 		{"cat ", exec.Result{ExitCode: 1, Stderr: "cat: /nowhere/excluded.txt: No such file or directory"}},
 		{"find ", exec.Result{Stdout: "/ws/a/cases/a.sh\n"}},
 	}
-	_, _, _, err := (&Shell{}).caseList(t.Context(), ch, newSink(t), req.Config, "/ws", false)
+	_, _, _, err := (&Shell{}).caseList(t.Context(), ch, newSink(t), configOf(req), "/ws", false)
 	if err == nil || !strings.Contains(err.Error(), "No such file") {
 		t.Errorf("a missing exclusion list was read as an empty one: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestTheMacroSkipTellsNoMatchFromAnUnreadableFile(t *testing.T) {
 	found := exec.Result{Stdout: "/ws/a/cases/a.sh\n"}
 
 	nothing := answers{{"grep ", exec.Result{ExitCode: 1}}, {"find ", found}}
-	cases, skipped, _, err := (&Shell{}).caseList(t.Context(), nothing, newSink(t), req.Config, "/ws", false)
+	cases, skipped, _, err := (&Shell{}).caseList(t.Context(), nothing, newSink(t), configOf(req), "/ws", false)
 	if err != nil || len(cases) != 1 || len(skipped) != 0 {
 		t.Errorf("no case names the macro, and got %v, %v, %v", cases, skipped, err)
 	}
@@ -298,14 +298,14 @@ func TestTheMacroSkipTellsNoMatchFromAnUnreadableFile(t *testing.T) {
 		{"grep ", exec.Result{ExitCode: 2, Stderr: "grep: /ws/b/cases/b.sh: Permission denied"}},
 		{"find ", found},
 	}
-	_, _, _, err = (&Shell{}).caseList(t.Context(), unreadable, newSink(t), req.Config, "/ws", false)
+	_, _, _, err = (&Shell{}).caseList(t.Context(), unreadable, newSink(t), configOf(req), "/ws", false)
 	if err == nil || !strings.Contains(err.Error(), "Permission denied") {
 		t.Errorf("a case file grep could not read was ignored: %v", err)
 	}
 
 	// Nor is a grep that never finished -- killed, or cancelled with the run.
 	killed := answers{{"grep ", exec.Result{ExitCode: -1}}, {"find ", found}}
-	if _, _, _, err := (&Shell{}).caseList(t.Context(), killed, newSink(t), req.Config, "/ws", false); err == nil {
+	if _, _, _, err := (&Shell{}).caseList(t.Context(), killed, newSink(t), configOf(req), "/ws", false); err == nil {
 		t.Error("a grep that was killed was read as one that matched nothing")
 	}
 }
@@ -350,11 +350,11 @@ func TestSeveralConfiguredMachinesBecomeOneAndAWarning(t *testing.T) {
 		"env.instance3.ssh.host=gamma",
 	}, "\n"))
 
-	configured, err := topology.From(req.Config)
+	configured, err := topology.From(configOf(req))
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine, extra := oneMachine(req.Config, configured)
+	machine, extra := oneMachine(configOf(req), configured)
 
 	if machine.EnvID() != "env1" {
 		t.Errorf("chose %s, want the first configured machine", machine.EnvID())
@@ -367,11 +367,11 @@ func TestSeveralConfiguredMachinesBecomeOneAndAWarning(t *testing.T) {
 func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
 	req, _ := request(t, "scenario=/somewhere\n")
 
-	configured, err := topology.From(req.Config)
+	configured, err := topology.From(configOf(req))
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine, extra := oneMachine(req.Config, configured)
+	machine, extra := oneMachine(configOf(req), configured)
 
 	if !machine.IsLocal() {
 		t.Errorf("chose %s, want the local machine", machine.EnvID())

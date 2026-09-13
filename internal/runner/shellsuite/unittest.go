@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
+	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
@@ -31,7 +32,7 @@ func (u *UnitTest) Tasks() []cli.Task { return []cli.Task{cli.UnitTest} }
 // Validate checks the plug-in exists. TEST_TYPE selects it, and CTP reads that
 // from a JVM system property, so here it comes from the environment.
 func (u *UnitTest) Validate(req runner.Request) error {
-	testType := testTypeFor(req)
+	testType := testTypeFor(configOf(req))
 	path := req.Home.Jar("shell", "local", testType+".sh")
 	if _, err := os.Stat(path); err != nil {
 		return &runner.ExitError{
@@ -44,7 +45,7 @@ func (u *UnitTest) Validate(req runner.Request) error {
 
 // Run drives init, list, execute and finish, and prints what CTP printed.
 func (u *UnitTest) Run(ctx context.Context, req runner.Request) error {
-	testType := testTypeFor(req)
+	testType := testTypeFor(configOf(req))
 
 	// The result directory is named after TEST_TYPE, not after the task:
 	// GeneralLocalTest sets the log directory from System.getProperty("TEST_TYPE"),
@@ -83,7 +84,7 @@ func (u *UnitTest) Run(ctx context.Context, req runner.Request) error {
 	// FeedbackFile prints these two lines to standard output as well as to its own
 	// file, so they are part of the console surface even though they come from a
 	// feedback backend. CTP emits them once the case list is known.
-	fb := feedback.Console(categoryFor(req, testType), os.Stdout)
+	fb := feedback.Console(categoryFor(configOf(req), testType), os.Stdout)
 	fb.TaskStart("")
 	fb.TotalTestCase(len(cases), 0, 0)
 
@@ -114,9 +115,9 @@ func (u *UnitTest) Run(ctx context.Context, req runner.Request) error {
 
 // categoryFor resolves test_category, which labels the run. GeneralLocalTest
 // falls back to "general" when the configuration does not say.
-func categoryFor(req runner.Request, fallback string) string {
-	if req.Config != nil {
-		if v, ok := req.Config.Get("test_category"); ok && v != "" {
+func categoryFor(cfg *conf.Config, fallback string) string {
+	if cfg != nil {
+		if v, ok := cfg.Get("test_category"); ok && v != "" {
 			return v
 		}
 	}
@@ -131,14 +132,30 @@ func categoryFor(req runner.Request, fallback string) string {
 
 // testTypeFor resolves TEST_TYPE. CTP read it as a JVM system property and fell
 // back to "general"; the environment is where that lives for a Go program.
-func testTypeFor(req runner.Request) string {
+func testTypeFor(cfg *conf.Config) string {
 	if v := os.Getenv("TEST_TYPE"); v != "" {
 		return v
 	}
-	if req.Config != nil {
-		if v, ok := req.Config.Get("TEST_TYPE"); ok && v != "" {
+	if cfg != nil {
+		if v, ok := cfg.Get("TEST_TYPE"); ok && v != "" {
 			return v
 		}
 	}
 	return "general"
+}
+
+// configOf is the run's configuration file, parsed as shell's flat one, or nil
+// when it is not there.
+//
+// Read by the runner rather than handed to it: the sql family's file has
+// sections and this one does not, so a Request cannot carry a parse that serves
+// both (runner.Request). A missing file is not fatal for every task -- CTP
+// called the unittest entry point with a null configuration -- so this returns
+// nil and each caller says what that means for it.
+func configOf(req runner.Request) *conf.Config {
+	cfg, err := req.Home.Load(req.ConfigPath)
+	if err != nil {
+		return nil
+	}
+	return cfg
 }

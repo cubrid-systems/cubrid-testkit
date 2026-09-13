@@ -47,7 +47,7 @@ These behave as they always did.
 
 | | |
 |---|---|
-| `TESTKIT_NATIVE_SHELL=1` | run `shell` here rather than handing it to CTP. The opt-in gate |
+| `TESTKIT_NATIVE=shell` | run `shell` here rather than handing it to CTP. The opt-in gate. It names the families, comma-separated (`shell,sql`), and `all` is every one of them; `TESTKIT_NATIVE_SHELL=1` is the older spelling and still works |
 | `TESTKIT_CONTAIN=1` | put the run in namespaces of its own. **Required** by slots and by `scenario_ram_mb` |
 | `TESTKIT_CONTAIN_SH` | which shell to bind over `/bin/sh`. `bash` if it can be found |
 | `TESTKIT_SLOT_ROOT` | where each run makes its own directory for the per-slot overlays, removed when the slots close. `/var/tmp/testkit-slots` when unset |

@@ -1139,3 +1139,33 @@ func TestARunnerCanAnswerCaseDetailItself(t *testing.T) {
 		t.Errorf("a case the runner has nothing on should say it has not finished, not mention feedback.log: %q", got)
 	}
 }
+
+// A second run on one machine should find a free port rather than fail, and an
+// address the operator pinned is theirs: both suites want that, so the board
+// does it rather than each of them.
+func TestTheDefaultPortMovesAlongAndAPinnedOneDoesNot(t *testing.T) {
+	first := New(1)
+	where, stop, err := first.Open(DefaultAddr)
+	if err != nil {
+		t.Skipf("the default port is not available to this test: %v", err)
+	}
+	defer stop()
+
+	second := New(1)
+	elsewhere, stopSecond, err := second.Open(DefaultAddr)
+	if err != nil {
+		t.Fatalf("a second run could not open a page: %v", err)
+	}
+	defer stopSecond()
+	if elsewhere == where {
+		t.Errorf("both runs claim to serve %s", where)
+	}
+
+	// And one the operator pinned is theirs: the second page is not on the
+	// default, so asking for it again is asking for that address and nothing
+	// else.
+	pinned := New(1)
+	if _, _, err := pinned.Open(elsewhere); err == nil {
+		t.Errorf("%s was taken, and a run that pinned it was moved along rather than refused", elsewhere)
+	}
+}

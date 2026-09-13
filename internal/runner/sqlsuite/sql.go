@@ -414,7 +414,7 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 		return err
 	}
 	for _, c := range cores {
-		fmt.Println("CORE_FILE:" + c)
+		result.CoreFile(os.Stdout, c)
 	}
 	// The slots go before the clean: do_clean kills every cub process this
 	// namespace can see, which includes the slots', and deletes the database
@@ -557,12 +557,7 @@ func openBoard(ini *conf.Ini, st *settings, e engine, cases *caseSet, slots int)
 	}
 	board := status.New(len(cases.all))
 	board.Expect(cases.all, nil, slots)
-	where, stop, err := board.Serve(addr)
-	if err != nil && addr == status.DefaultAddr {
-		for try := 1; try <= 16 && err != nil; try++ {
-			where, stop, err = board.Serve(status.NearDefault(try))
-		}
-	}
+	where, stop, err := board.Open(addr)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -180,6 +180,10 @@ one machine, a corpus that cleans itself up, per-case patches, and a progress pa
 every configuration key with what it costs, how the memory ceiling fails a run when it is sized
 wrong, how to run it on a host and in Docker, and what to set.
 
+**[`docs/category/sql/`](docs/category/sql/README.md) is the same guide for `sql` and `medium`** —
+the stages and the executor, every key and switch, what parallel buys and what it costs on the
+machine you have, and how to read a failure that is the corpus's order rather than the engine's.
+
 The short version:
 
 ```bash
@@ -314,6 +318,7 @@ docs/
 | how it is built | [`design/architecture.md`](docs/design/architecture.md) · [`design/contracts.md`](docs/design/contracts.md) |
 | how equivalence is decided, and run | [`adr/ADR-013`](docs/adr/ADR-013-regression-equivalence.md) · [`evidence/compare/`](docs/evidence/compare/README.md) |
 | how to run the shell suite | [`category/shell/`](docs/category/shell/README.md) |
+| how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
 | how a run is made parallel | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T3, B-T12, B-T13 |
 | where the run's hours go, and what to do next | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T14 |
 | what the old system could fix cheaply | [`evidence/ctp-improvements.md`](docs/evidence/ctp-improvements.md) |

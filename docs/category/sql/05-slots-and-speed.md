@@ -1,4 +1,4 @@
-# 4. Slots and speed
+# 5. Slots and speed
 
 [← back to the sql category](README.md)
 

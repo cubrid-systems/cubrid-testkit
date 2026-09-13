@@ -6,10 +6,11 @@ rewrote. These documents are the as-built guide.
 | | |
 |---|---|
 | **[1. How a run works](01-how-a-run-works.md)** | the stages, the executor, and what a slot is here |
-| **[2. Running it](02-running-it.md)** | from an install and a corpus to a verdict |
-| **[3. Configuration](03-configuration.md)** | every key and every switch, what it costs, and what to set |
-| **[4. Slots and speed](04-slots-and-speed.md)** | what parallel buys, what it costs, and why medium is serial |
-| **[5. When a case fails](05-when-a-case-fails.md)** | reading a verdict, and the failures that are not the engine's |
+| **[2. Writing a case](02-writing-a-case.md)** | the layout, where an answer comes from, and the rules a case should follow |
+| **[3. Running it](03-running-it.md)** | from an install and a corpus to a verdict |
+| **[4. Configuration](04-configuration.md)** | every key and every switch, what it costs, and what to set |
+| **[5. Slots and speed](05-slots-and-speed.md)** | what parallel buys, what it costs, and why medium is serial |
+| **[6. When a case fails](06-when-a-case-fails.md)** | reading a verdict, and the failures that are not the engine's |
 
 The pre-implementation design — the CQT class mapping, the ADRs, and what was measured on the way —
 is [`../../design/module-sql.md`](../../design/module-sql.md); the evidence is
@@ -66,6 +67,6 @@ Success:17459
 Total:17459
 ```
 
-That is CTP's output, line for line: [when a case fails](05-when-a-case-fails.md) explains what the
-run writes beside it, and [slots and speed](04-slots-and-speed.md) how to make it take five minutes
+That is CTP's output, line for line: [when a case fails](06-when-a-case-fails.md) explains what the
+run writes beside it, and [slots and speed](05-slots-and-speed.md) how to make it take five minutes
 instead of twenty-nine.

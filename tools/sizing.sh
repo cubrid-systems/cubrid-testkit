@@ -38,14 +38,94 @@ CONF=${CUBRID:-}/conf/cubrid.conf
 say() { printf '%s\n' "$*"; }
 kv()  { printf '  %-22s %s\n' "$1" "$2"; }
 
-# ---- what the machine is ---------------------------------------------------
+# ---- what the machine is, measured -----------------------------------------
+# Counted, not measured: how many cores there are and how much memory. Measured:
+# how fast a core is, how much of that survives when every core is busy, how
+# fast memory reads, and what the disk does with a synchronous write. A slot
+# count is a claim about this machine, so the numbers behind it are taken from
+# this machine rather than from the one these models were fitted on.
 cores=$(nproc)
 mem_total=$(awk '/^MemTotal/{printf "%d", $2/1024}' /proc/meminfo)
 mem_avail=$(awk '/^MemAvailable/{printf "%d", $2/1024}' /proc/meminfo)
 
+# ms for a fixed integer loop. awk is everywhere a CUBRID machine is, and the
+# figure is only ever compared with itself: one worker against many.
+loop_ms() {
+  local t0 t1
+  t0=$(date +%s%N)
+  awk 'BEGIN{for(i=0;i<3000000;i++)x+=i}' >/dev/null 2>&1
+  t1=$(date +%s%N)
+  echo $(( (t1 - t0) / 1000000 ))
+}
+cpu_one=$(loop_ms)
+t0=$(date +%s%N)
+for _ in $(seq 1 "$cores"); do
+  awk 'BEGIN{for(i=0;i<3000000;i++)x+=i}' >/dev/null 2>&1 &
+done
+wait
+t1=$(date +%s%N)
+cpu_all=$(( (t1 - t0) / 1000000 ))
+# What the machine really delivers in parallel, in units of "one busy core".
+# A machine whose cores are threads of the same core, or which throttles, says
+# so here rather than in a slot count that does not hold.
+cpu_effective=$(awk -v one="$cpu_one" -v all="$cpu_all" -v n="$cores" \
+  'BEGIN{ if (all<=0||one<=0) {print n; exit} e = n * one / all; printf "%d", (e<1?1:(e>n?n:e)) }')
+
 say "machine"
-kv "cores" "$cores"
+kv "cores" "$cores, of which ${cpu_effective} deliver a core's work at once (${cpu_one} ms one, ${cpu_all} ms all)"
 kv "memory" "${mem_total} MB total, ${mem_avail} MB available"
+
+
+# ---- what the disk does, measured ------------------------------------------
+# Two numbers, because a run meets the disk two ways. A server waits on a
+# synchronous write at every commit, and that is a latency; a case writing its
+# database is bandwidth, and bandwidth shared between slots is what decided the
+# old four-slot bound. Both are measured here rather than assumed, on the
+# directory the slots will actually write to.
+sync_ms() { # $1 directory -> ms for one 4 KB synchronous write
+  local f=$1/.sizing-sync.$$ out
+  out=$(dd if=/dev/zero of="$f" bs=4k count=200 oflag=dsync 2>&1 | awk '/copied/{print $(NF-3)}')
+  rm -f "$f" 2>/dev/null
+  [ -n "$out" ] && awk -v s="$out" 'BEGIN{printf "%.1f", s * 1000 / 200}'
+}
+write_mbps() { # $1 directory, $2 writers, $3 MB each -> aggregate MB/s
+  local d=$1 n=$2 mb=$3 t0 t1 i
+  t0=$(date +%s%N)
+  for ((i = 0; i < n; i++)); do
+    dd if=/dev/zero of="$d/.sizing-w$i.$$" bs=1M count="$mb" conv=fdatasync >/dev/null 2>&1 &
+  done
+  wait
+  t1=$(date +%s%N)
+  rm -f "$d"/.sizing-w*."$$" 2>/dev/null
+  awk -v n="$n" -v mb="$mb" -v ns="$(( t1 - t0 ))" 'BEGIN{ if (ns<=0) exit; printf "%d", n * mb * 1e9 / ns }'
+}
+
+slot_root=${TESTKIT_SLOT_ROOT:-/var/tmp}
+[ -d "$slot_root" ] && [ -w "$slot_root" ] || slot_root=/var/tmp
+disk_sync_ms=$(sync_ms "$slot_root")
+
+say ""
+say "disk at $slot_root -- measured now, and a machine under load measures worse"
+kv "a synchronous write" "${disk_sync_ms:-?} ms -- what a commit waits for"
+
+by_disk=4
+disk_full=no
+disk_note="not measured here -- --measure-disk measures this machine's"
+if [ "$measure_disk" = yes ]; then
+  one_mbps=$(write_mbps "$slot_root" 1 256)
+  four_mbps=$(write_mbps "$slot_root" 4 128)
+  kv "one writer" "${one_mbps:-?} MB/s"
+  kv "four writers" "${four_mbps:-?} MB/s together"
+  if [ -n "${one_mbps:-}" ] && [ -n "${four_mbps:-}" ] && [ "$one_mbps" -gt 0 ]; then
+    # Four writers that deliver four times one writer means the disk is not what
+    # bounds a run; four that deliver one means it was already full at the first,
+    # and slots past that wait for it rather than work. That is advice about the
+    # syncs, not a slot count: a case does not write continuously.
+    scale=$(awk -v a="$four_mbps" -v b="$one_mbps" 'BEGIN{printf "%.1f", a / b}')
+    disk_note="four writers get ${scale}x one writer (${four_mbps} MB/s against ${one_mbps})"
+    awk -v x="$scale" 'BEGIN{exit !(x < 1.5)}' && disk_full=yes
+  fi
+fi
 
 # ---- what the engine is configured to want --------------------------------
 # Read from the file the run will actually use. A parameter absent from it takes
@@ -129,7 +209,7 @@ if [ "$family" = sql ]; then
   # ---- what bounds the slot count ----------------------------------------
   by_mem=$(( (mem_avail - 2048) / slot_mb ))
   [ "$by_mem" -lt 1 ] && by_mem=1
-  by_cpu=$cores
+  by_cpu=$cpu_effective
   # A directory is claimed whole -- its cases depend on each other's leavings,
   # so dispatch.Queue.Affinity keeps it on one slot -- and the run cannot finish
   # before its longest directory does. Measured on this corpus: 891 s of cases
@@ -140,7 +220,7 @@ if [ "$family" = sql ]; then
   say ""
   say "what bounds the slot count"
   kv "memory" "${by_mem} slots (${mem_avail} MB less 2 GB, at ${slot_mb} MB a slot)"
-  kv "cpu" "${by_cpu} slots (one a core)"
+  kv "cpu" "${by_cpu} slots (what this machine delivers at once, of ${cores} counted)"
   kv "the corpus" "${by_corpus} slots -- a directory runs on one slot, and the longest is 72 s of the 891"
 
   # ---- which disk, and whether to skip its syncs ---------------------------
@@ -155,10 +235,11 @@ if [ "$family" = sql ]; then
     [ -n "$out" ] && awk -v s="$out" 'BEGIN{printf "%.1f", s * 1000 / 200}'
   }
   say ""
-  say "the slot root -- measured now, and a machine under load measures worse"
-  best_dir= ; best_ms=
-  for d in "${TESTKIT_SLOT_ROOT:-}" /var/tmp "$([ -n "$conf_file" ] && dirname "$conf_file")"; do
-    [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ] || continue
+  say "other places the slots could write"
+  # Which disk they land on was worth 1,131 s against 722 for the same eight.
+  best_dir=$slot_root; best_ms=$disk_sync_ms
+  for d in "$([ -n "$conf_file" ] && dirname "$conf_file")" "$HOME"; do
+    [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ] && [ "$d" != "$slot_root" ] || continue
     ms=$(sync_ms "$d")
     [ -n "$ms" ] || continue
     kv "$d" "${ms} ms a synchronous write"
@@ -170,6 +251,12 @@ if [ "$family" = sql ]; then
   slots=$by_mem
   [ "$slots" -gt "$by_cpu" ] && slots=$by_cpu
   [ "$slots" -gt "$by_corpus" ] && slots=$by_corpus
+  kv "the disk" "$disk_note"
+  if [ "$disk_full" = yes ]; then
+    say "  This disk is full at one writer, so with the syncs kept the slots will"
+    say "  mostly wait for it. TESTKIT_SLOT_VOLATILE=1 is what takes the syncs out"
+    say "  of a run whose layer is thrown away anyway."
+  fi
 
   say ""
   say "for the run's conf and environment"
@@ -262,7 +349,7 @@ by_mem=$(( (mem_avail - 2048) / per_slot_mb ))
 # CPU: a case waits far more than it computes -- createdb measured 7.72 s of
 # wall against 0.53 s of CPU -- so slots could exceed cores. Whether they should
 # is not measured, so the recommendation stops at the core count and says so.
-by_cpu=$cores
+by_cpu=$cpu_effective
 
 # Disk, and this is the one that actually bound this machine. At eight slots
 # writing to disk the wall clock got *worse* than at four: 217 cases at 708 MB
@@ -276,8 +363,9 @@ by_disk=4
 say ""
 say "what bounds the slot count"
 kv "memory" "${by_mem} slots (${mem_avail} MB less 2 GB, at ${per_slot_mb} MB a slot: server plus database)"
-kv "cpu" "${by_cpu} slots (one a core; a case waits more than it computes, so more may work)"
-kv "disk, writes on disk" "${by_disk} slots -- measured: eight was slower than four"
+kv "cpu" "${by_cpu} slots (what this machine delivers at once, of ${cores} counted; a case waits more than it computes, so more may work)"
+kv "disk, writes on disk" "${by_disk} slots -- measured on this suite: eight was slower than four"
+kv "this disk, now" "$disk_note"
 say "  That bound is the syncs, not the disk's bandwidth, and there is now a way"
 say "  round it: scenario_disk=on gives each slot an overlay of the corpus, and"
 say "  TESTKIT_SLOT_VOLATILE=1 makes the syncs on it return at once. Measured on"

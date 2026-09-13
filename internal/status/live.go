@@ -23,9 +23,14 @@ type liveFiles struct {
 	of map[string]string
 }
 
-// Live records where a case writes its verdicts while it runs. Called with an
-// empty path when the case finishes, so the page stops offering a file that is
-// about to be reclaimed.
+// Live records the file the page shows while a case is running, and an empty
+// path when it finishes, so the page stops offering a file that is about to be
+// reclaimed.
+//
+// What that file is belongs to the suite. A shell case writes its verdicts as
+// it goes, so it is the growing result; a sql case writes nothing until it ends
+// -- the executor renders the whole case at once -- so it is the case's own
+// statements, which is what "what is it doing" means there.
 func (b *Board) Live(name, path string) {
 	if b == nil || name == "" {
 		return

@@ -245,6 +245,14 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 	// What a click on a case shows: a sql case leaves a rendering and an answer,
 	// not a feedback.log.
 	board.DetailFunc(rec.Describe)
+	// A verdict from patched source is a claim about the patched case, not about
+	// the corpus, and the page has to say so wherever it shows the verdict. The
+	// patches went in before the first case, so every one of them is known here.
+	for _, c := range cases.all {
+		if pf := patches.For(c); pf != "" {
+			board.Patched(c, pf)
+		}
+	}
 
 	queue := dispatch.New(cases.all, 0)
 	if len(places) > 1 {
@@ -545,8 +553,15 @@ func openBoard(ini *conf.Ini, st *settings, e engine, cases *caseSet, slots int)
 	}
 	fmt.Fprintf(os.Stderr, "[INFO] status page at http://%s/\n", where)
 	board.Watch(os.Getenv("CUBRID"), "", 0)
+	// Where a slot's writes go, named as the page groups by it. sql has no
+	// memory lane -- shell's tmpfs ceiling is its own -- so this says the disk
+	// and whether its syncs were taken out of the way.
+	lane := "disk"
+	if contain.Volatile() {
+		lane = "disk, volatile"
+	}
 	for i := 0; i < slots; i++ {
-		board.Lane(placeName(i, slots), "disk")
+		board.Lane(placeName(i, slots), lane)
 	}
 	notRun := len(cases.all) - len(cases.answer)
 	board.Setup([]status.Setting{
@@ -557,11 +572,33 @@ func openBoard(ini *conf.Ini, st *settings, e engine, cases *caseSet, slots int)
 		{Group: "suite", Key: "jdbc_config_file", Value: st.jdbcConfig, Default: "test_default.xml"},
 		{Group: "suite", Key: "cases without an answer", Value: fmt.Sprint(notRun), Default: "0", Note: "counted as failures, never run"},
 		{Group: "engine", Key: "build", Value: e.ver},
+		{Group: "environment", Key: contain.Env, Value: yesNo(contain.Active()),
+			Note: "the run's own namespaces; slots need them"},
+		{Group: "environment", Key: contain.SlotRootEnv, Value: orUnset(os.Getenv(contain.SlotRootEnv)),
+			Default: "/var/tmp/testkit-slots", Note: "where a slot's writes land"},
+		{Group: "environment", Key: contain.SlotVolatileEnv, Value: yesNo(contain.Volatile()), Default: "no",
+			Note: "a sync on a slot's layer returns having done nothing"},
+		{Group: "environment", Key: "case_patch_dir", Value: orUnset(ini.GetOr("sql", "case_patch_dir", "")),
+			Default: "off", Note: "verdicts from a patched case are about the patch"},
 	})
 	return board, stop, nil
 }
 
 func since(t time.Time) time.Duration { return time.Since(t).Round(time.Second) }
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
+}
+
+func orUnset(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "unset"
+	}
+	return s
+}
 
 // placeName names a place in messages: the slot's label, or the machine.
 func placeName(i, n int) string {

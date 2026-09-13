@@ -160,8 +160,10 @@ public class TestkitExecutor {
             }
             try {
                 if (line.startsWith("X ")) {
-                    String want = serverMessageAt.get(caseFile);
-                    if (want != null && !want.equalsIgnoreCase(test.getServerMessage())) {
+                    String want = serverMessageAt.containsKey(caseFile)
+                            ? messageState(serverMessageAt.get(caseFile))
+                            : null;
+                    if (want != null && !want.equalsIgnoreCase(messageState(test.getServerMessage()))) {
                         try {
                             replayServerMessage(bo, test, execute, want, caseFile);
                         } catch (Throwable t) {
@@ -219,7 +221,7 @@ public class TestkitExecutor {
         on.setAccessible(true);
         off.setAccessible(true);
         Map<String, String> at = new HashMap<String, String>();
-        String state = test.getServerMessage();
+        String state = messageState(test.getServerMessage());
         for (Object o : test.getCaseFileList()) {
             String caseFile = (String) o;
             at.put(caseFile, state);
@@ -291,6 +293,21 @@ public class TestkitExecutor {
      * does; the rest of what executeSqlFile does around it -- the reset, the
      * server check, the commits -- the next case does again anyway.
      */
+    /**
+     * The flag as a value, never as an absence.
+     *
+     * CQT starts with test.serverMessage unset and turns it on when a case's
+     * hint says so, so "nobody has touched it" and "off" are the same behaviour
+     * -- but not the same object, and the prediction is a map lookup. Read as an
+     * absence, every case before the corpus's first hint was left with whatever
+     * the slot's previous case had set, which is the state this was written to
+     * remove: four cases of _13_issues/_25_2h printed CTP's errors with their
+     * messages because a directory that runs later in CTP's order had run first.
+     */
+    private static String messageState(String v) {
+        return v == null ? "off" : v;
+    }
+
     private static void replayServerMessage(ConsoleBO bo, Test test, Method execute, String want, String next)
             throws Exception {
         File hint = File.createTempFile("testkit-server-message-", ".sql");

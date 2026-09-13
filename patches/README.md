@@ -140,8 +140,35 @@ patch makes the case say what it needs, rather than inherit it.
 | `_01_object/_10_system_table/_001_db_class/1003` | lists `db_class` with no `ORDER BY`, so the row order is the catalog's history. Two runs of the same corpus put `test_vclass` in different places. Sorted by `class_name`, with the answer re-recorded from a run of the sorted case: the same 45 rows, in an order that does not depend on what ran before |
 | `_27_banana_qa/issue_16066_BINARY_charset/_01_Comparison_Expression/alter_03` | lists `db_index_key` with `order by 2,1`, which leaves the two keys of one index unordered between themselves. Adds the key's own position to the sort. The answer is unchanged — it was already in that order |
 | `_36_guava/cbrd_26104` | its trace carries the plans of the queries the *server* runs to read the current user's groups, and the server runs them only when the session has not already. Whether it has depends on what ran before. One `show` runs before the trace is turned on, so the traces below are the case's own queries; the answer is re-recorded without those plans |
+| `_36_guava/cbrd_26401/invisible_plcsql` | creates 44 procedures and functions and removes none, so every later case that lists the catalog — plcsql's own, comments, grants — saw them. It now drops them at the end. One patch, and 22 of the 33 cases that a reordered run failed went with it |
+| eighteen cases that set session variables | CUBRID holds **twenty** session variables per connection (`MAX_SESSION_VARIABLES_COUNT`), and they live on the connection. Eighteen cases left twenty-six of them behind, so a case that wanted its own — `_31_cherry`'s json cases want seventeen — met `-1071 Too many session variables` for a reason that was not its own. Each now drops what it set |
+| `_34_fig/cbrd_24478/deduplicate/01_set_param` | leaves `deduplicate_key_level` at the value its last test used, and every index built afterwards on that session inherits it. The directory's next case happens to set it again, so nothing fails today; the patch puts the default back rather than relying on that |
+| `_01_object/.../_021_db_authorizations/1001`<br>`_08_javasp/4110-2`<br>`_08_javasp/4110-4` | list `_db_user`'s `password` column. `_35_fig_cake/cbrd_25352` gives PUBLIC a password and clears it with `set_password('')` — which leaves an empty password *object*, not a null, and `set_password(null)` does the same. Nothing in the corpus can put it back, so these three stop reading a column whose content is not theirs |
+| `_04_operator_function/_03_string_op/_009_length/1003` | asserts the semantic error from `length(a)`, where `a` is meant to be an attribute that does not exist. A leftover class named `a` makes the name resolve and the error disappear. The attribute is renamed to something nothing else defines; the answer is unchanged |
 
 ## What is deliberately not here
+
+**A leftover table with a name somebody else wants.** Measured on the sql corpus:
+1,922 cases create a table and never drop it, leaving 578 distinct names, and 245
+of those names are created by more than one directory — `t1` is left behind by 61
+directories and created by 423. A slotted run changes which directories share a
+database, so a case whose `create table t1` met nobody's `t1` in CTP's order can
+meet one now, and fails with `-494`. It is a different case almost every run.
+Patching it means either every case that leaves a table or every case that
+creates one: between one and two thousand files, which is a corpus-wide rule, not
+a patch set. Measured rate with the patches here: **0 to 2 cases of 17,459 per
+six-slot run**, against 0 to 2 per run for CTP by itself at the same pins.
+
+**A trace whose plan the engine does not always print.** `_36_guava/cbrd_26104`
+and `_36_guava/partition_table/*` assert `Query Plan:` and `Trace Statistics:`
+blocks for queries the server parallelises or rewrites internally, and whether
+those blocks appear does not follow from the case: CTP's own two runs at these
+pins disagree about `cbrd_25542`, and a serial sqlsuite run disagrees about
+`cbrd_25708_eq_in`. Every traced statement already carries `/*+ recompile */`.
+Making these deterministic means deciding what the test is meant to prove when
+the engine chooses a different plan, which is a question for whoever wrote it.
+
+
 
 `_01_utility/_38_csql/csql2` (CBRD-23602) compares against an answer file last
 touched in 2016, with a query that has no `ORDER BY`. Making it pass means

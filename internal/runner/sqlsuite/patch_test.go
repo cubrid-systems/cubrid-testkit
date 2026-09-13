@@ -143,9 +143,43 @@ func TestTheShippedSQLPatchesApplyToTheCorpus(t *testing.T) {
 		if out, aerr := osexec.Command("bash", "-c", patch.ApplyScript(work, abs)).CombinedOutput(); aerr != nil {
 			t.Errorf("%s no longer applies -- the case has probably been fixed upstream, "+
 				"so delete the patch:\n%s", e.Name(), out)
+			continue
+		}
+		if missing := headerWithoutAHunk(filepath.Join(pdir, e.Name())); missing != "" {
+			t.Errorf("%s names %s and changes nothing in it: a patch that applies is not "+
+				"the same as a patch that is whole", e.Name(), missing)
 		}
 	}
 	t.Logf("%d patches apply", n)
+}
+
+// headerWithoutAHunk names a file the patch says it changes and then does not,
+// or "" when every header has one.
+//
+// It happened: a case whose answer holds a NUL byte -- chr(0) is a thing cases
+// test -- made diff say "Binary files differ" and nothing else, and the patch
+// came out with the answer's header and no hunk. `patch` applied the half it
+// had and said nothing, so the case ran patched against an unpatched answer and
+// failed in every run, including a serial one.
+func headerWithoutAHunk(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(b), "\n")
+	for i, l := range lines {
+		if !strings.HasPrefix(l, "--- ") || i+1 >= len(lines) {
+			continue
+		}
+		name := strings.TrimPrefix(l, "--- ")
+		if !strings.HasPrefix(lines[i+1], "+++ "+name) {
+			continue // a removed line that begins with "-- ", not a header
+		}
+		if i+2 >= len(lines) || !strings.HasPrefix(lines[i+2], "@@") {
+			return name
+		}
+	}
+	return ""
 }
 
 // caseDirFor turns a patch name back into the directory it applies in: the one

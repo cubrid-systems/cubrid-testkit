@@ -1,0 +1,18 @@
+--- cases/json_007.sql
++++ cases/json_007.sql
+@@ -75,3 +75,7 @@
+ select cast('{"a":1}' as json);  
+ 
+ --+ holdcas off;
++
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @j;
+--- answers/json_007.answer
++++ answers/json_007.answer
+@@ -228,3 +228,5 @@
+ cast('{"a":1}' as json)    
+ {"a":1}     
+ 
++===================================================
++0

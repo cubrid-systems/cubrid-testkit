@@ -1,0 +1,18 @@
+--- cases/cbrd_20769_exp.sql
++++ cases/cbrd_20769_exp.sql
+@@ -109,3 +109,7 @@
+ DEALLOCATE VARIABLE  @a, @b;
+ 
+ --+ holdcas off;
++
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @a, @b;
+--- answers/cbrd_20769_exp.answer
++++ answers/cbrd_20769_exp.answer
+@@ -206,3 +206,5 @@
+ 0
+ ===================================================
+ 0
++===================================================
++0

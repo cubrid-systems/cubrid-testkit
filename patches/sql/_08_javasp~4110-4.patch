@@ -1,0 +1,24 @@
+--- cases/4110-4.sql
++++ cases/4110-4.sql
+@@ -15,8 +15,8 @@
+ 
+ call testresult('select * from kor order by id, name');
+ select testresult('select * from kor order by id, name') from db_root;
+-call testresult('select name,id,password from _db_user order by 1');
+---select testresult('select name,id,password from _db_user') from db_root;
++call testresult('select name,id from _db_user order by 1');
++--select testresult('select name,id from _db_user') from db_root;
+ call testresult('select * from kor union all select * from kor order by id, name');
+ call testresult('select id first_row, name second_row  from kor order by 1,2');
+ call testresult('select func(id, id) func_result  from kor order by 1');
+--- answers/4110-4.answer
++++ answers/4110-4.answer
+@@ -26,7 +26,7 @@
+ 
+ ===================================================
+     
+-name|id|password|DBA|null|null|INFORMATION_SCHEMA|null|null|PUBLIC|null|null|     
++name|id|DBA|null|INFORMATION_SCHEMA|null|PUBLIC|null|     
+ 
+ ===================================================
+     

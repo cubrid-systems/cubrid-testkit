@@ -55,21 +55,22 @@ func quit(format string, args ...any) error {
 // Validate refuses a configuration that cannot describe a run, and refuses one
 // that asks for something excluded on the axis split.
 func (s *Shell) Validate(req runner.Request) error {
-	if req.Config == nil {
+	cfg := configOf(req)
+	if cfg == nil {
 		return quit("no configuration file")
 	}
-	if strings.TrimSpace(req.Config.GetOr("scenario", "")) == "" {
+	if strings.TrimSpace(cfg.GetOr("scenario", "")) == "" {
 		return quit("The parameter 'scenario' must be set correctly in %s !", req.ConfigPath)
 	}
 
-	if _, err := topology.From(req.Config); err != nil {
+	if _, err := topology.From(cfg); err != nil {
 		return quit("%v", err)
 	}
 
 	// Updating the case corpus is an operations decision and is not done here.
 	// Asked for and silently skipped, it would mean passing on stale cases and
 	// believing the result -- so it fails instead.
-	if req.Config.Bool("testcase_update_yn", false) {
+	if cfg.Bool("testcase_update_yn", false) {
 		return quit("testcase_update_yn=yes asks for a case update, which this runner does not do " +
 			"(docs/concept/migration-exclusions.md). Update the corpus separately, then run with " +
 			"testcase_update_yn=no")
@@ -80,8 +81,11 @@ func (s *Shell) Validate(req runner.Request) error {
 // Run is the whole task: work out what to test, put the machines in a known
 // state, hand the cases out, and say what happened.
 func (s *Shell) Run(ctx context.Context, req runner.Request) error {
-	cfg := req.Config
-	category := categoryFor(req, string(req.Task))
+	cfg := configOf(req)
+	if cfg == nil {
+		return quit("no configuration file")
+	}
+	category := categoryFor(cfg, string(req.Task))
 	continueMode := cfg.Bool("test_continue_yn", false)
 
 	configured, err := topology.From(cfg)

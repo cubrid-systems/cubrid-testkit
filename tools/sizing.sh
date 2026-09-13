@@ -1,7 +1,12 @@
 #!/bin/bash
 # Say what this machine can run at once, and why.
 #
-#   tools/sizing.sh [--measure-disk]
+#   tools/sizing.sh [--measure-disk] [shell|sql] [a run's conf file]
+#
+# shell is the default. `sql` sizes the sql family -- sql and medium -- whose
+# slots cost something different and whose bound is a different one; give it the
+# conf the run will use and it reads the [sql/cubrid.conf] section the runner
+# writes into the engine's own file.
 #
 # Every number below came from measuring this suite rather than from a rule of
 # thumb, and the script says which measurement each one rests on. Where a figure
@@ -18,7 +23,16 @@
 set -u
 
 measure_disk=no
-[ "${1:-}" = "--measure-disk" ] && measure_disk=yes
+family=shell
+conf_file=
+for arg in "$@"; do
+  case "$arg" in
+    --measure-disk) measure_disk=yes ;;
+    shell|sql|medium) family=$arg ;;
+    *) conf_file=$arg ;;
+  esac
+done
+[ "$family" = medium ] && family=sql
 
 CONF=${CUBRID:-}/conf/cubrid.conf
 say() { printf '%s\n' "$*"; }
@@ -66,12 +80,123 @@ log_mb=$(mb "$(param log_buffer_size 256M)")
 logvol_mb=$(mb "$(param log_volume_size 512M)")
 dbvol_mb=$(mb "$(param db_volume_size 512M)")
 
+# The sql family writes its own values into the engine's file before it runs
+# (stages.sh's do_configure, from the run conf's [sql/cubrid.conf] section), so
+# what is in $CONF now is what the last run left. Read the run's conf when it is
+# given, and say which file each number came from.
+from=$CONF
+if [ "$family" = sql ] && [ -n "$conf_file" ] && [ -f "$conf_file" ]; then
+  section() { # $1 name, $2 default: a key of [sql/cubrid.conf]
+    local v
+    v=$(awk -F= -v k="$1" '
+      /^[ \t]*\[/ { insec = ($0 ~ /^[ \t]*\[sql\/cubrid\.conf\][ \t]*$/); next }
+      insec && $0 ~ "^[ \t]*" k "[ \t]*=" { v=$2; gsub(/[ \t\r]/,"",v); print v }' "$conf_file" | tail -1)
+    [ -n "$v" ] || v=$2
+    echo "$v"
+  }
+  data_mb=$(mb "$(section data_buffer_size "${data_mb}M")")
+  log_mb=$(mb "$(section log_buffer_size "${log_mb}M")")
+  logvol_mb=$(mb "$(section log_volume_size "${logvol_mb}M")")
+  dbvol_mb=$(mb "$(section db_volume_size "${dbvol_mb}M")")
+  from="$conf_file [sql/cubrid.conf], over $CONF"
+fi
+
 say ""
-say "engine, from $CONF"
+say "engine, from $from"
 kv "data_buffer_size" "${data_mb} MB"
 kv "log_buffer_size" "${log_mb} MB"
 kv "log_volume_size" "${logvol_mb} MB"
 kv "db_volume_size" "${dbvol_mb} MB"
+
+if [ "$family" = sql ]; then
+  # ---- what one sql slot costs --------------------------------------------
+  # Measured on four slots over the sql corpus, sampling every process of the
+  # run every five seconds (evidence/sql-native.md §3). A slot peaked at 2.6 GB
+  # with 512 MB of data buffer and 256 of log: its server 1.38 GB, the PL server
+  # 0.58, the executor's JVM 0.52, five CAS processes 0.12 together.
+  #
+  # Only the server moves with the buffers, so the rest is a floor no parameter
+  # here reaches: 1.22 GB of JVMs and CAS, and a server that is its buffers plus
+  # about 0.61 GB of its own.
+  slot_mb=$(( 1220 + 610 + data_mb + log_mb ))
+
+  say ""
+  say "one sql slot costs"
+  kv "server" "~$(( 610 + data_mb + log_mb )) MB (its buffers, plus a floor of 610)"
+  kv "PL server, executor, CAS" "~1220 MB, and no parameter here changes it"
+  kv "a slot" "~${slot_mb} MB at its peak"
+
+  # ---- what bounds the slot count ----------------------------------------
+  by_mem=$(( (mem_avail - 2048) / slot_mb ))
+  [ "$by_mem" -lt 1 ] && by_mem=1
+  by_cpu=$cores
+  # A directory is claimed whole -- its cases depend on each other's leavings,
+  # so dispatch.Queue.Affinity keeps it on one slot -- and the run cannot finish
+  # before its longest directory does. Measured on this corpus: 891 s of cases
+  # over 1,168 directories, the longest 72 s, so about twelve slots is where the
+  # wall stops improving however much memory there is.
+  by_corpus=12
+
+  say ""
+  say "what bounds the slot count"
+  kv "memory" "${by_mem} slots (${mem_avail} MB less 2 GB, at ${slot_mb} MB a slot)"
+  kv "cpu" "${by_cpu} slots (one a core)"
+  kv "the corpus" "${by_corpus} slots -- a directory runs on one slot, and the longest is 72 s of the 891"
+
+  # ---- which disk, and whether to skip its syncs ---------------------------
+  # What a slot writes goes to TESTKIT_SLOT_ROOT, and a server waits on a
+  # synchronous write at every commit. Measured: 5.8 ms on this machine's root
+  # SSD against 1.3 ms on its data disk, and eight slots on the slow one took
+  # 1,131 s where the same eight on the fast one took 722.
+  sync_ms() { # $1 directory -> ms per 4 KB synchronous write, or ""
+    local f=$1/.sizing-sync.$$ out
+    out=$(dd if=/dev/zero of="$f" bs=4k count=200 oflag=dsync 2>&1 | awk '/copied/{print $(NF-3)}')
+    rm -f "$f" 2>/dev/null
+    [ -n "$out" ] && awk -v s="$out" 'BEGIN{printf "%.1f", s * 1000 / 200}'
+  }
+  say ""
+  say "the slot root -- measured now, and a machine under load measures worse"
+  best_dir= ; best_ms=
+  for d in "${TESTKIT_SLOT_ROOT:-}" /var/tmp "$([ -n "$conf_file" ] && dirname "$conf_file")"; do
+    [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ] || continue
+    ms=$(sync_ms "$d")
+    [ -n "$ms" ] || continue
+    kv "$d" "${ms} ms a synchronous write"
+    if [ -z "$best_ms" ] || awk -v a="$ms" -v b="$best_ms" 'BEGIN{exit !(a<b)}'; then
+      best_ms=$ms; best_dir=$d
+    fi
+  done
+
+  slots=$by_mem
+  [ "$slots" -gt "$by_cpu" ] && slots=$by_cpu
+  [ "$slots" -gt "$by_corpus" ] && slots=$by_corpus
+
+  say ""
+  say "for the run's conf and environment"
+  say ""
+  say "  [sql]"
+  say "  parallel_slots=${slots}"
+  say "  case_patch_dir=<this repository>/patches/sql"
+  say ""
+  say "  TESTKIT_NATIVE_SQL=1 TESTKIT_CONTAIN=1"
+  [ -n "$best_dir" ] && say "  TESTKIT_SLOT_ROOT=${best_dir}   # ${best_ms} ms a synchronous write, the fastest of those tried"
+  say "  TESTKIT_SLOT_VOLATILE=1        # the slot's layer is thrown away; its syncs are the run's"
+  say ""
+  say "what volatile is worth"
+  kv "eight slots, syncs kept" "722 s, 199,133 flushes"
+  kv "eight slots, volatile" "338-394 s, 750 flushes"
+  kv "and the cases" "half the time CTP's serial run spends on them"
+  say ""
+  say "medium"
+  say "  Run it serial. Its cases are 12.6 s in total and one directory is half of"
+  say "  them, while a slot costs 26 s to start: measured 77 s serial against 77-91"
+  say "  with four slots."
+  say ""
+  say "not measured"
+  say "  Whether the slots can start together without volatile, and what a machine"
+  say "  with more memory does above ${by_corpus} slots."
+  exit 0
+fi
 
 # ---- what one slot costs --------------------------------------------------
 # server ~= 157 MB + 0.26 * (data_buffer + log_buffer).
@@ -153,6 +278,12 @@ say "what bounds the slot count"
 kv "memory" "${by_mem} slots (${mem_avail} MB less 2 GB, at ${per_slot_mb} MB a slot: server plus database)"
 kv "cpu" "${by_cpu} slots (one a core; a case waits more than it computes, so more may work)"
 kv "disk, writes on disk" "${by_disk} slots -- measured: eight was slower than four"
+say "  That bound is the syncs, not the disk's bandwidth, and there is now a way"
+say "  round it: scenario_disk=on gives each slot an overlay of the corpus, and"
+say "  TESTKIT_SLOT_VOLATILE=1 makes the syncs on it return at once. Measured on"
+say "  _01_utility at eight slots: 1,426 s becomes 540, and two thirds of the"
+say "  188 GB never reaches the disk (evidence/parallel-shell.md §5). How many"
+say "  slots that allows has not been measured."
 
 if [ "$measure_disk" = yes ]; then
   d=${TMPDIR:-/tmp}/sizing.$$

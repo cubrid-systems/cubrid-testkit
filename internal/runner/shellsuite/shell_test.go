@@ -444,3 +444,46 @@ func TestMemAvailableIsWhatTheKernelWillGive(t *testing.T) {
 		t.Error("this machine has /proc/meminfo and MemAvailable was not read")
 	}
 }
+
+// feedback_type was in the configuration reference, in the recommended settings
+// and in feedback's own doc comments, and no code read it: every run wrote a
+// feedback.log whatever the file said. It is read now, and what each answer
+// means is migration-exclusions.md's decision.
+func TestFeedbackTypeDecidesWhetherARunKeepsFeedback(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		kept  bool
+	}{
+		{"", true},
+		{"file", true},
+		{"db", true},    // the events are kept; only their destination changes
+		{"none", false}, // CTP's own "no feedback at all"
+	} {
+		t.Run("feedback_type="+c.value, func(t *testing.T) {
+			scenario := t.TempDir()
+			writeCase(t, scenario, "passing", `echo " : OK passing" >> passing.result`)
+			lines := []string{"scenario=" + scenario, "test_category=shell", "testcase_retry_num=0"}
+			if c.value != "" {
+				lines = append(lines, "feedback_type="+c.value)
+			}
+			req, home := request(t, strings.Join(lines, "\n"))
+
+			ch := &guardedChannel{inner: exec.NewLocal("")}
+			s := &Shell{Channels: func(*topology.Instance) (exec.Channel, exec.Channel, error) {
+				return ch, ch, nil
+			}}
+			if err := s.Run(t.Context(), req); err != nil {
+				t.Fatalf("the run failed: %v", err)
+			}
+
+			log := filepath.Join(home, "result", "shell", "current_runtime_logs", "feedback.log")
+			_, err := os.Stat(log)
+			if c.kept && err != nil {
+				t.Errorf("no feedback.log: %v", err)
+			}
+			if !c.kept && err == nil {
+				t.Error("a run told to keep no feedback wrote feedback.log anyway")
+			}
+		})
+	}
+}

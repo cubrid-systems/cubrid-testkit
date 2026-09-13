@@ -22,7 +22,7 @@ These behave as they always did.
 | `testcase_exclude_from_file` | — | files of path fragments to skip, comma-separated. A file that does not exist stops the run |
 | `test_continue_yn` | `false` | resume, skipping what already has a verdict |
 | `cubrid_db_charset` | `en_US` | what `cubrid_createdb` passes as the locale |
-| `feedback_type` | — | `file` |
+| `feedback_type` | `file` | `file` writes the run's feedback.log and the files beside it. `db` asks for a database this runner does not write to: it says so and writes the files instead, so the events are kept and only their destination changes. Anything else is CTP's own "no feedback at all" — no feedback.log, and `replay` and `failures` have nothing to read |
 
 ## This runner's keys
 

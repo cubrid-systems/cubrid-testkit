@@ -126,11 +126,32 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	}
 	defer sink.Close()
 
-	report, err := feedback.Open(sink.Dir(), category, os.Stdout, continueMode, os.Getenv("MSG_ID"))
-	if err != nil {
-		return err
+	// feedback_type, which CTP read and this runner did not: the key was in the
+	// configuration reference and in feedback's own doc comments, and every run
+	// got a file whatever it said. Now it is read, and the two answers that are
+	// not "file" are the ones migration-exclusions.md decided:
+	// db keeps the events and changes only where they are meant to land, which
+	// this runner cannot do, so it says so and writes the file; anything else is
+	// CTP's own "no feedback at all".
+	var report feedback.Feedback = feedback.Null{}
+	switch t := strings.ToLower(strings.TrimSpace(cfg.GetOr("feedback_type", "file"))); t {
+	case "", "file", "db", "database":
+		if t == "db" || t == "database" {
+			fmt.Printf("[WARN] feedback_type=%s asks for a database this runner does not write to; "+
+				"the events are kept in %s instead\n", t, sink.Dir())
+		}
+		f, err := feedback.Open(sink.Dir(), category, os.Stdout, continueMode, os.Getenv("MSG_ID"))
+		if err != nil {
+			return err
+		}
+		report = f
+		// Close is the file backend's, not the interface's: nothing to close
+		// when a run keeps no feedback.
+		defer f.Close()
+	default:
+		fmt.Printf("[WARN] feedback_type=%s is not a backend, so this run keeps no feedback -- "+
+			"no feedback.log, and `testkit replay` and `testkit failures` will have nothing to read\n", t)
 	}
-	defer report.Close()
 
 	opener := s.Channels
 	if opener == nil {
@@ -496,12 +517,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		// trade -- so the default moves along until it finds a free one and says
 		// where it landed. An address the operator pinned is not moved: they
 		// asked for that one.
-		where, stop, err := board.Serve(addr)
-		if err != nil && addr == status.DefaultAddr {
-			for try := 1; try <= 16 && err != nil; try++ {
-				where, stop, err = board.Serve(status.NearDefault(try))
-			}
-		}
+		where, stop, err := board.Open(addr)
 		if err != nil {
 			return quit("%v", err)
 		}

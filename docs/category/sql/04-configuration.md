@@ -1,4 +1,4 @@
-# 3. Configuration
+# 4. Configuration
 
 [← back to the sql category](README.md)
 
@@ -48,7 +48,7 @@ All under `[sql]`.
 | key | default | impact | |
 |---|---|---|---|
 | `parallel_slots` | `1` | **large** | how many cases run at once. A directory is claimed whole, so this is slots, not case-level fan-out |
-| `case_patch_dir` | off | none directly | corpus changes this run carries, applied before the first case and reverted at the end. See [when a case fails](05-when-a-case-fails.md) |
+| `case_patch_dir` | off | none directly | corpus changes this run carries, applied before the first case and reverted at the end. See [when a case fails](06-when-a-case-fails.md) |
 | `status_http` | off | none | the progress page. `on` is `127.0.0.1:51523`; a bare port takes every interface |
 
 There is no `testcase_retry_num` and no `testcase_timeout_in_secs` here: CQT has neither, and a

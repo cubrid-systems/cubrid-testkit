@@ -1,4 +1,4 @@
-# 5. When a case fails
+# 6. When a case fails
 
 [← back to the sql category](README.md)
 

@@ -1,4 +1,4 @@
-# 2. Running it
+# 3. Running it
 
 [← back to the sql category](README.md)
 
@@ -55,7 +55,7 @@ log_buffer_size=256M
 
 `tools/sizing.sh sql sql.conf` measures this machine — its cores, what they deliver at once, its
 memory, and what its disk does with a synchronous write — and prints the settings it would use.
-[Slots and speed](04-slots-and-speed.md) is the reasoning behind them; [configuration](03-configuration.md)
+[Slots and speed](05-slots-and-speed.md) is the reasoning behind them; [configuration](04-configuration.md)
 is every key.
 
 The run exits 0 whether or not cases failed, as CTP's does. A configuration it cannot run with, or a

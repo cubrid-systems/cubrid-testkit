@@ -284,7 +284,8 @@ internal/                cli · conf · registry · dispatch · runner (legacy, 
                          runshell · exec · result · feedback · topology ·
                          contain (namespaces per slot) · plan (case durations) ·
                          status (the progress page)
-tools/sizing.sh          how many slots and how big a ceiling, for this machine
+tools/sizing.sh          how many slots, which disk, and how big a ceiling, for this machine
+                         (`tools/sizing.sh sql <conf>` for the sql family)
 ext/cubrid-sqlancer/     submodule — a SQLancer provider for CUBRID
 docs/
   ROADMAP.md             phases, exit conditions, risks, the re-evaluation gate

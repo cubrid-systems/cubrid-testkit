@@ -169,6 +169,21 @@ func OpenSQL(run SQLRun) (*SQL, error) {
 // Root is the result directory.
 func (s *SQL) Root() string { return s.dir }
 
+// TestID names this run, as CQT's TestUtil.getTestId does.
+func (s *SQL) TestID() string { return s.testID }
+
+// CaseResultDir is CaseResult.getResultDir: the directory a failed case's
+// copies go in, which is also where its core stack belongs. It is "" for a
+// path that is not a case of this run.
+func (s *SQL) CaseResultDir(caseFile string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rc := s.cases[caseFile]; rc != nil {
+		return rc.bottom
+	}
+	return ""
+}
+
 // Discard removes a result directory whose run never started: a run whose
 // servers or executors could not be brought up has nothing to record, and a
 // half-made tree would read as a run that happened.

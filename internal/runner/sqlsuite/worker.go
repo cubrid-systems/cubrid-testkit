@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-testkit/internal/coredump"
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
@@ -76,7 +77,10 @@ func (w *work) loop(ctx context.Context, name string, p place, q *dispatch.Queue
 				c.OK = matches(rendered, want)
 			}
 			if !c.OK || c.Err != nil {
-				c.HasCore = newCores(ctx, p, cores)
+				if found := newCores(ctx, p, cores); len(found) > 0 {
+					c.HasCore = true
+					w.coreErr(ctx, p, t.Case, found)
+				}
 			}
 		}
 		if err := w.rec.Case(c); err != nil {
@@ -93,12 +97,12 @@ func (w *work) loop(ctx context.Context, name string, p place, q *dispatch.Queue
 // newCores is CQT's search after a failed case (CommonFileUtile.getCoreFiles):
 // files under $CUBRID named CORE.<digits> in any case, that this place has not
 // already reported. It runs in the place because a slot's $CUBRID is its own.
-func newCores(ctx context.Context, p place, seen map[string]bool) bool {
+func newCores(ctx context.Context, p place, seen map[string]bool) []string {
 	res, err := p.Channel().Run(ctx, `find "$CUBRID" -type f -iname 'core.*' 2>/dev/null`)
 	if err != nil {
-		return false
+		return nil
 	}
-	found := false
+	var found []string
 	for _, path := range strings.Split(strings.TrimSpace(res.Output()), "\n") {
 		if path == "" || seen[path] {
 			continue
@@ -109,7 +113,53 @@ func newCores(ctx context.Context, p place, seen map[string]bool) bool {
 			continue
 		}
 		seen[path] = true
-		found = true
+		found = append(found, path)
 	}
 	return found
+}
+
+// coreErr is CQT's <case>.err (ConsoleBO.saveCoreCallStackFile): gdb's stack
+// for each core the case left, written beside the case's failure copies.
+//
+// CQT writes them all after its last case. Here they are written as the case
+// ends, because the core, the $CUBRID holding it and the program that dumped
+// it are a slot's, and the slot is gone by the end of the run. The analysis
+// runs in that slot for the same reason.
+//
+// Everything it can go wrong on is a warning and not a failure: a core is
+// already the worst news the run has, and losing its stack is not a reason to
+// lose the verdicts after it.
+func (w *work) coreErr(ctx context.Context, p place, caseFile string, cores []string) {
+	dir := w.rec.CaseResultDir(caseFile)
+	if dir == "" {
+		return
+	}
+	var stacks []coredump.Stack
+	for _, core := range cores {
+		s, err := coredump.Analyze(ctx, p.Channel(), core)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] no stack for %s: %v\n", core, err)
+			continue
+		}
+		stacks = append(stacks, s)
+	}
+	if len(stacks) == 0 {
+		return
+	}
+	// CORE_DIR is where the cores were left: the backup directory the
+	// environment names, under this run's id, or $CUBRID.
+	where := os.Getenv("CUBRID")
+	if backup := os.Getenv("CORE_BACKUP_DIR"); backup != "" {
+		where = filepath.Join(backup, w.rec.TestID())
+	}
+	path := filepath.Join(dir, strings.TrimSuffix(filepath.Base(caseFile), ".sql")+".err")
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] cannot write %s: %v\n", path, err)
+		return
+	}
+	defer f.Close()
+	if err := coredump.Report(f, where, stacks); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] cannot write %s: %v\n", path, err)
+	}
 }

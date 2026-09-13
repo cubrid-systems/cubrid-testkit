@@ -2,6 +2,7 @@ package sqlsuite
 
 import (
 	"fmt"
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,6 +135,4 @@ func (s *settings) logName(e engine, epoch int64) string {
 	return filepath.Join(s.ctpHome, "sql", "log", fmt.Sprintf("%s_%s_%d.log", s.category, e.ver, epoch))
 }
 
-func shQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
+func shQuote(s string) string { return exec.Quote(s) }

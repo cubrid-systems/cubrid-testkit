@@ -4,6 +4,7 @@
 
 - [What a verdict is](#what-a-verdict-is)
 - [Where to look](#where-to-look)
+  - [A case that dumped core](#a-case-that-dumped-core)
 - [Failures that are not the engine's](#failures-that-are-not-the-engines)
 - [Carrying a corpus fix as a patch](#carrying-a-corpus-fix-as-a-patch)
 - [What is unstable at the moment](#what-is-unstable-at-the-moment)
@@ -20,8 +21,9 @@ Two consequences worth holding on to:
 - **An answer is a recording, not an assertion.** It was produced by a run of this corpus against
   some engine, and it carries whatever that run produced — including a listing's row order, a plan,
   and an error that a leftover object caused.
-- **A case with no answer is counted and never run.** CQT keeps it in the list, in `N`, and in the
-  failures, without executing it.
+- **A case with no answer is counted and never run.** CQT keeps it in the list and in `N` without
+  executing it, and its summary counts it in neither column — so `Total` is not `Success + Fail`,
+  and `main.info`'s `execute_case` is the two added up.
 
 ## Where to look
 
@@ -30,6 +32,7 @@ cubrid-testcases/sql/<family>/cases/<name>.result     what this run produced
 cubrid-testcases/sql/<family>/answers/<name>.answer   what it is judged against
 $CTP_HOME/sql/result/…/sql/<family>/<name>.result     a copy, kept because it failed
 $CTP_HOME/sql/result/…/sql/<family>/<name>.answer     the answer, beside it
+$CTP_HOME/sql/result/…/sql/<family>/<name>.err        gdb's stack, if the case dumped core
 $CTP_HOME/sql/result/…/summary.xml                    every case, its time, its verdict
 ```
 
@@ -38,6 +41,31 @@ overwritten by the next run.
 
 The status page (`status_http=on`) answers the same question while the run is going: a failing case
 shows the first line where the result leaves the answer, with the lines around it.
+
+### A case that dumped core
+
+After a case fails, the run looks under `$CUBRID` for a `core.<digits>`, and a core it has not seen
+before is that case's. It then asks `gdb` for a `bt full` and writes the answer as `<name>.err`
+beside the failure copies:
+
+```
+SUMMARY:
+CORE_DIR:/home/q/CUBRID
+core.410914 [cub_server] Core dumped in pt_check_where at src/parser/semantic_check.c:9814
+
+==================core.410914==================
+#0  0x00007f1f in __pthread_kill_implementation () from /lib/x86_64-linux-gnu/libc.so.6
+…
+```
+
+The one-line summary names the innermost frame in CUBRID's own source, skipping the error machinery
+every crash leaves on the way out. It is empty when the binary carries no symbols, which leaves the
+header line ending at the program's name.
+
+Two things are worth knowing. The analysis runs **in the slot the core is in**, as the case ends
+rather than after the run — a slot's `$CUBRID` and the `cub_server` that dumped the core go when the
+slot does. And a run that found any core skips the final clean, so the cores are still there
+afterwards; a slot's are copied out to `<result root>/slot_cores/` before its overlay is discarded.
 
 ## Failures that are not the engine's
 

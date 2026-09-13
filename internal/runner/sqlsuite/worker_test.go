@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -271,22 +273,113 @@ func TestACoreIsFoundTheWayCQTFindsOne(t *testing.T) {
 	// Not a core: the suffix has to be digits.
 	write("core.notanumber")
 	seen := map[string]bool{}
-	if newCores(t.Context(), machine{}, seen) {
-		t.Error("core.notanumber was taken for a core")
+	if found := newCores(t.Context(), machine{}, seen); len(found) > 0 {
+		t.Errorf("core.notanumber was taken for a core: %v", found)
 	}
 
-	// A core, in any case, at any depth.
+	// A core, in any case, at any depth -- and the path comes back, because it
+	// is what gdb is pointed at.
 	write("databases/CORE.1234")
-	if !newCores(t.Context(), machine{}, seen) {
-		t.Error("CORE.1234 under databases/ was not found")
+	found := newCores(t.Context(), machine{}, seen)
+	if len(found) != 1 || found[0] != filepath.Join(cubrid, "databases/CORE.1234") {
+		t.Errorf("found %v, want the one core under databases/", found)
 	}
 	// The same core is one core: the next failed case does not report it again.
-	if newCores(t.Context(), machine{}, seen) {
-		t.Error("a core already reported was reported a second time")
+	if found := newCores(t.Context(), machine{}, seen); len(found) > 0 {
+		t.Errorf("a core already reported came back again: %v", found)
 	}
 	write("core.7")
-	if !newCores(t.Context(), machine{}, seen) {
-		t.Error("a core that appeared after the last search was not found")
+	if found := newCores(t.Context(), machine{}, seen); len(found) != 1 {
+		t.Errorf("a core that appeared after the last search: %v", found)
+	}
+}
+
+// A case that dumps core gets CQT's <case>.err beside its failure copies.
+func TestACaseThatCoresGetsItsStackBesideIt(t *testing.T) {
+	if _, err := osexec.LookPath("gdb"); err != nil {
+		t.Skip("gdb is not on this machine")
+	}
+	cubrid := t.TempDir()
+	t.Setenv("CUBRID", cubrid)
+	t.Setenv("CORE_BACKUP_DIR", "")
+	// Not a real core: gdb will refuse it, which is the path that has to leave
+	// the run standing.
+	if err := os.WriteFile(filepath.Join(cubrid, "core.42"), []byte("not a core"), 0o664); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	w, cases := aRun(t, &out, []string{"crashes"}, map[string]string{"crashes": "ok"})
+	if err := w.run(t, cases, always("something else")); err != nil {
+		t.Fatalf("a core ended the run: %v", err)
+	}
+	c, err := w.rec.End()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Fail != 1 {
+		t.Errorf("counts were %+v; want the case failed", c)
+	}
+	// No stack, no file -- CQT writes nothing for a core it could not read.
+	if _, err := os.Stat(filepath.Join(w.rec.CaseResultDir(cases[0]), "crashes.err")); !os.IsNotExist(err) {
+		t.Errorf("a core gdb refused still produced a .err: %v", err)
+	}
+}
+
+// The same, with a core gdb can actually read: the whole chain, from the
+// verdict that triggers the search to the file a reader opens.
+func TestARealCoreReachesTheErrFile(t *testing.T) {
+	for _, tool := range []string{"gdb", "gcore", "sleep"} {
+		if _, err := osexec.LookPath(tool); err != nil {
+			t.Skipf("%s is not on this machine", tool)
+		}
+	}
+	cubrid := t.TempDir()
+	t.Setenv("CUBRID", cubrid)
+	t.Setenv("CORE_BACKUP_DIR", "")
+
+	sleep, _ := osexec.LookPath("sleep")
+	cmd := osexec.Command(sleep, "300")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+	// gcore leaves core.<pid>, which is the name CQT's search looks for.
+	if out, err := osexec.Command("gcore", "-o", filepath.Join(cubrid, "core"), strconv.Itoa(cmd.Process.Pid)).CombinedOutput(); err != nil {
+		t.Skipf("gcore could not take a core here: %v\n%s", err, out)
+	}
+	core := "core." + strconv.Itoa(cmd.Process.Pid)
+	if _, err := os.Stat(filepath.Join(cubrid, core)); err != nil {
+		t.Skipf("gcore wrote no %s: %v", core, err)
+	}
+
+	var out bytes.Buffer
+	w, cases := aRun(t, &out, []string{"crashes"}, map[string]string{"crashes": "ok"})
+	if err := w.run(t, cases, always("something else")); err != nil {
+		t.Fatalf("a core ended the run: %v", err)
+	}
+	if _, err := w.rec.End(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(w.rec.CaseResultDir(cases[0]), "crashes.err")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("no .err beside the case: %v", err)
+	}
+	got := string(b)
+	for _, want := range []string{
+		"SUMMARY:\n",
+		"CORE_DIR:" + cubrid + "\n",
+		core + " [",
+		"\n==================" + core + "==================\n#0",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the .err has no %q:\n%s", want, got)
+		}
 	}
 }
 

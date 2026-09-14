@@ -32,6 +32,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
+	"github.com/cubrid-systems/cubrid-testkit/internal/runner/isolationsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/sqlsuite"
@@ -146,6 +147,9 @@ func run(args []string) int {
 	}
 	if native("sql") {
 		reg.Register(sqlsuite.New())
+	}
+	if native("isolation") {
+		reg.Register(isolationsuite.New())
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

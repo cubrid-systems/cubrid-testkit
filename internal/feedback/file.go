@@ -38,6 +38,9 @@ type File struct {
 
 	dir       string // empty means nothing is written to disk
 	continued bool
+	// isolation is the isolation module's FeedbackFile, which is a different
+	// class from shell's and says a few things differently -- see OpenIsolation.
+	isolation bool
 
 	mu    sync.Mutex
 	log   *os.File
@@ -69,23 +72,8 @@ func Console(category string, out io.Writer) *File {
 // picks the counters up where they were left.
 func Open(dir, category string, out io.Writer, continueMode bool, msgID string) (*File, error) {
 	f := &File{Category: category, Out: out, MsgID: msgID, dir: dir, continued: continueMode}
-
-	flags := os.O_CREATE | os.O_WRONLY
-	if continueMode {
-		flags |= os.O_APPEND
-	} else {
-		flags |= os.O_TRUNC
-	}
-	log, err := os.OpenFile(filepath.Join(dir, "feedback.log"), flags, 0o644)
-	if err != nil {
-		return nil, fmt.Errorf("feedback log: %w", err)
-	}
-	f.log = log
-
-	if continueMode {
-		if err := f.readStats(); err != nil {
-			return nil, err
-		}
+	if err := f.openLog(); err != nil {
+		return nil, err
 	}
 
 	x, err := openJUnit(filepath.Join(dir, "test-"+category+".xml"), category)
@@ -95,6 +83,47 @@ func Open(dir, category string, out io.Writer, continueMode bool, msgID string) 
 	}
 	f.xml = x
 	return f, nil
+}
+
+// OpenIsolation is Open for the isolation task.
+//
+// CTP's isolation module has a FeedbackFile of its own
+// (isolation/impl/FeedbackFile.java), and it is not shell's. It writes two of
+// the four files -- feedback.log and test_status.data, with no current_task_id
+// and no JUnit report -- and it says four things differently: no task id or MSG id
+// when the task starts, no colon and no retry count after [OK] and [NOK], and a
+// console that says "The category:" where the log says "Test Category:". All of
+// it is in the run directory a comparison reads, so all of it is reproduced.
+func OpenIsolation(dir, category string, out io.Writer, continueMode bool) (*File, error) {
+	f := &File{Category: category, Out: out, dir: dir, continued: continueMode, isolation: true}
+	if err := f.openLog(); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// openLog opens feedback.log. A continued run appends to it and picks the
+// counters up where they were left.
+func (f *File) openLog() error {
+	flags := os.O_CREATE | os.O_WRONLY
+	if f.continued {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+	log, err := os.OpenFile(filepath.Join(f.dir, "feedback.log"), flags, 0o644)
+	if err != nil {
+		return fmt.Errorf("feedback log: %w", err)
+	}
+	f.log = log
+
+	if f.continued {
+		if err := f.readStats(); err != nil {
+			f.log.Close()
+			return err
+		}
+	}
+	return nil
 }
 
 // println writes to the feedback log only. Nil entries are skipped, which is how
@@ -121,6 +150,10 @@ func (f *File) TaskStart(string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.start = time.Now()
+	if f.isolation {
+		f.println("[TASK START] Current Time is " + javaDate(time.Now()))
+		return
+	}
 	f.writeTaskID(0)
 	f.println("[Task Id] is 0")
 	// Java concatenated a null MsgID into the string, so a run without the
@@ -132,7 +165,9 @@ func (f *File) TaskContinue() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.start = time.Now()
-	f.println("[Task Id] is 0")
+	if !f.isolation {
+		f.println("[Task Id] is 0")
+	}
 	f.println("[TASK CONTINUE] Current Time is " + javaDate(time.Now()))
 }
 
@@ -148,7 +183,14 @@ func (f *File) TotalTestCase(total, macroSkipped, tempSkipped int) {
 	f.stats.Total = total
 	f.stats.Skip = macroSkipped + tempSkipped
 
-	f.emit("Test Category:%s", f.Category)
+	if f.isolation {
+		f.println("Test Category:" + f.Category)
+		if f.Out != nil {
+			fmt.Fprintln(f.Out, "The category:"+f.Category)
+		}
+	} else {
+		f.emit("Test Category:%s", f.Category)
+	}
 	f.emit("The Number of Test Cases: %d (macro skipped: %d, bug skipped: %d)",
 		total, macroSkipped, tempSkipped)
 
@@ -172,10 +214,16 @@ func (f *File) CaseStop(ev CaseStop) {
 	case SkipTypeNo:
 		if ev.Success {
 			head = "[OK]: "
+			if f.isolation {
+				head = "[OK]"
+			}
 			f.stats.Success++
 			f.xml.testCase(ev.Case, ev.EnvID, ev.Elapsed, "", "", "")
 		} else {
 			head = "[NOK]: " + result.RetryFlag + " = " + strconv.Itoa(ev.RetryCount)
+			if f.isolation {
+				head = "[NOK]"
+			}
 			f.stats.Fail++
 			f.xml.testCase(ev.Case, ev.EnvID, ev.Elapsed, "failure", "Test failed", ev.ResultText)
 		}

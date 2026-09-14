@@ -16,7 +16,7 @@ A separate reviewer read the Phase 1 documents against the Phase 0 analysis.
 
 | Spec said | Actually | Source |
 |---|---|---|
-| isolation cases live under `cases/` with a sibling `answers/` | `.ctl` and `.answer` sit **in the same directory**; the `cases/` rule is shell's `Test.java` only | `case-formats.md:22,152` |
+| isolation cases live under `cases/` with a sibling `answers/` | `.ctl` and `.answer` sit **in the same directory**; the `cases/` rule is shell's `Test.java` only. *(Wrong in turn, 2026-09-15: the answers are in `answer/` beside the cases — §8)* | `case-formats.md:22,152` |
 | `.ctl` has 4 DSL tokens | **8** — `sleep`, `pause for deadlock resolution`, `wait until … unblocked`, `… finished` were missing | `ctl-grammar.md` |
 | — | `runone.sh` normalises results through a **10+ line sed chain** before comparing. Absent from the spec entirely, though every isolation verdict passes through it | `ctl-grammar.md` |
 | `<name>.<DB>_<CHARSET>` | `<name>.answer_<DB>_<C>` — the `answer_` prefix had been dropped | `case-formats.md:93` |
@@ -203,6 +203,39 @@ run disagreed with the documents. `evidence/sql-baseline.md` has the runs. Line 
 **What this method catches:** what a document can only guess. Four of these closed questions the
 analysis had left open, and one of them (`medium.conf`) turns a single failed setup step into 579
 case failures that do not mention it.
+
+## 8. Found by measuring isolation before rewriting it *(2026-09-15)*
+
+The same method as §7, applied to `isolation`: CTP run in a sandbox, and the source read wherever a run or the corpus
+disagreed with the documents. `evidence/isolation-baseline.md` has the runs. Line numbers are at `cubrid-testtools`
+develop `a1bec87`, `CTP/isolation/`.
+
+| Spec said | Actually | Source |
+|---|---|---|
+| `.ctl` and `.answer` sit in the same directory (§3-1 — itself a correction, §1 above) | answers are in **`answer/`** beside the cases: `runone.sh` reads `$casedir/answer/<name>.answer*`, and the corpus has 189 such directories and no answer beside a case. A run writes `result/<name>.result`, `result/<name>.log` and `<name>.result` | `runone.sh:35`, `:41`, `:298` |
+| `sh runone.sh [-n] -r <retry+1> <tc> <timeout_sec> <db_name>` (§7-1) | the last argument is the **client program**. `cubrid_testdb_name`, default `cubrid`, is mapped through `DB_TEST_MAP` to `qacsql`; the database is always `ctldb` | `Context.java:258-269`, `Constants.java:40-45`, `runone.sh:122`, `:145-164` |
+| the normalization is "10+ lines" of `sed` deleting ten patterns (§1 above, `ctl-grammar.md` §7) | **fifteen steps**, and five of them rewrite rather than delete: the parenthesis before `has been unilaterally aborted`, killed pids, `key: <n>(OID:`, `: <n>\|<n>\|<n>`, and the host name and digits in lock-wait errors. Blank lines are deleted too | `runone.sh:48-73` |
+| `MC: sleep <ms>` (`ctl-grammar.md` §4) | **seconds**: `sleepms (sleep_time * 1000)` | `qactl.c:2412-2428` |
+| the levels are `_01` `_02` `_04` `_05` `_06`, with `_03` empty (`test-corpus.md` §2) | `_07_serializable` exists as well | corpus `6ab786aa9` |
+| `config/` holds case metadata of unknown meaning (`test-corpus.md` §5) | one file: the exclusion list daily runs use, 18 entries | corpus |
+| how the isolation jar reaches `shell.common.*` at run time is unknown (`analysis/isolation/design.md` §6) | the jar's manifest: `Class-Path: ../../common/lib/cubridqa-common.jar ../../shell/lib/cubridqa-shell.jar` | `cubridqa-isolation.jar` `META-INF/MANIFEST.MF` |
+| `$ctlpath` is an environment variable the machine provides (`design.md` §5-1) | the runner sets it in every script it sends, and puts it on `PATH` | `IsolationScriptInput.java:35-36` |
+| `feedback_type` is `file`, `db` or `null` (`io-contract.md` §6) | `file`, **`database`**, and anything else is no feedback | `Context.java:192-204` |
+| exit `-1` when the scenario directory is missing (`io-contract.md` §1) | **0**: `Main` prints `[ERROR]` and returns. `-1` is for an unreadable build and a failed requirement check | `Main.java:80-85`, `:67-71`, `TestFactory.java:310-314` |
+| the run directory holds `main_snapshot.properties`, `dispatch_tc_{ALL,FIN_*}.txt` and `test_*.log` (`io-contract.md` §5) | **seven files**: `check_local.log`, `feedback.log` and `test_status.data` as well. None of shell's `current_task_id`, `monitor_*.log` or JUnit report | `isolation-baseline.md` §2 |
+| the worker's diff compares `<tc>.answer` with `<tc>.log` (`design.md` §4) | `answer/<name>.answer` with `result/<name>.log` — the **base answer only**, even for a case that has others | `Test.java:148-172` |
+| the backup archive is named and packed like shell's (§5-5) | named alike, packed relative: `cd <dir>; tar zvcf ../<name> .`, where shell's stores the directory's path | `TestFactory.java:146` |
+| 6,778 `.ctl` and 6,853 answers (`test-corpus.md` §1) | at `6ab786aa9`: 6,790 `.ctl`; 6,865 `.answer`, 58 `.answer1`, 6 `.answer2`, 3 `.answer_1`; three misspelled answers and a `compare.log` that `answer*` never matches; 59 cases with more than one answer | corpus |
+| — | **Deploy appends `inquire_on_exit=3` to `cubrid.conf` on every run**; two runs leave two lines | `DeployOneNode.java:75-79`, measured |
+| — | **ctltool is rebuilt inside the CTP tree** on the first case of every run (`make clean qactl qacsql`), and `runone.log`, `.test.log`, `timeout.log` and `csql.err` accumulate there | `prepare.sh:56-64`, measured |
+| — | **the kills are the user's, not the run's**: `pkill -9 -u $(whoami) cub` in setup, `pkill -u $(whoami) -9 sleep` after every case, the user's `qactl` and `qacsql` in cleanup, and `kill -9` of the user's `cub_admin`, `cub_master` and `cub_server` in deploy | `prepare.sh:39`, `runone.sh:390`, `clean.sh:33-35`, `Constants.java:74-81` |
+| — | **ctltool's scripts are committed without an execute bit** (`100644`), and `runone.sh` runs `timeout3.sh` as a program. CTP sets the bit on every run inside `TestCaseGithub.update` — the step named for pulling cases, which runs `chmod u+x *.sh` whether or not a pull is configured. Measured: the first native run left that step out and failed 58 of 58 cases on `Permission denied` | `TestCaseGithub.java:95-96`, `git ls-files -s CTP/isolation/ctltool` |
+| — | the same step runs `upgrade.sh`, which prints **the process's whole environment** to standard output before it decides to skip — whatever secrets the environment holds end up in the run's console log | `TestCaseGithub.java:89-90`, `sample-1` |
+
+**What this method catches:** the first row is a correction that was itself wrong. §1 fixed the layout from
+`case-formats.md`, which had read the corpus; nobody had read the script that finds the answers. Three rows change
+the design — the client argument, the `answer/` directory and whose processes are killed — and the last one is why
+even a one-slot native isolation run is contained (`design/module-isolation.md` §0).
 
 ## What this says about the freeze
 

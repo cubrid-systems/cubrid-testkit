@@ -31,7 +31,7 @@ import (
 // is there for the next, and a process started by one is visible to the next,
 // while neither is visible outside.
 //
-// docs/concept/beyond-axis.md B-T3.
+// docs/project/concept/beyond-axis.md B-T3.
 type Namespace struct {
 	keeper  *osexec.Cmd
 	pid     int
@@ -348,7 +348,7 @@ func (n *Namespace) Overlay(target, upperRoot string) error {
 // What a server waits on at every commit is its log's fsync, and on a SATA SSD
 // that is most of a sql case: eight sql slots on one took 1,131 s, the same
 // slots with their overlays volatile 338-394 s, and their cases half the time
-// CTP's serial run spends on them (docs/evidence/sql-native.md §3).
+// CTP's serial run spends on them (docs/project/evidence/sql-native.md §3).
 //
 // It is sound for a slot because a slot's layer is thrown away at the end, and a
 // sync only matters to a machine that goes down: a server killed in the middle of

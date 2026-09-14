@@ -3,7 +3,7 @@
 //
 // CTP had three dispatch mechanisms sitting side by side -- shelling out,
 // in-process reflection, and one branch that returned before the task loop began.
-// Collapsing them into one lookup is M1 (docs/concept/north-star.md §2).
+// Collapsing them into one lookup is M1 (docs/project/concept/north-star.md §2).
 package registry
 
 import (

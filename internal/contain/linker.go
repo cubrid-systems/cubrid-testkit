@@ -44,7 +44,7 @@ const LinkerEnv = "TESTKIT_NO_LINK_SHIM"
 // a case might reach has to be covered and not only the one CTP's helper names.
 //
 // It does not paper over a defect that would fail in CI. CTP's link order is
-// wrong and stays wrong -- it is item C2 in docs/evidence/ctp-improvements.md
+// wrong and stays wrong -- it is item C2 in docs/project/evidence/ctp-improvements.md
 // and belongs upstream. What this removes is a difference between this machine
 // and the machine the verdicts are compared against, which is the whole job.
 func GccShim(dir string) (string, error) {

@@ -3,7 +3,7 @@ package cli
 import "strings"
 
 // Task is a name ctp.sh accepts as a positional argument. The set is frozen:
-// see docs/concept/external-surface-freeze.md §1-2.
+// see docs/project/concept/external-surface-freeze.md §1-2.
 type Task string
 
 // The fourteen tasks that do something. Order matters only for help output.

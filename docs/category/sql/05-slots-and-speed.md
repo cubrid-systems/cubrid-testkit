@@ -9,7 +9,7 @@
 - [Why medium is serial](#why-medium-is-serial)
 
 Every figure here was measured on one 16-core, 30 GB machine, against the same corpus and engine.
-The workings are in [`evidence/sql-native.md`](../../evidence/sql-native.md); this is what to do with
+The workings are in [`project/evidence/sql-native.md`](../../project/evidence/sql-native.md); this is what to do with
 them.
 
 ## What it costs today

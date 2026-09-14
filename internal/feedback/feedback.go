@@ -2,9 +2,9 @@
 //
 // The events are axis T -- they describe the test run itself. Where they are
 // *stored* is axis O, which is why there is no database backend here: FeedbackDB
-// was excluded (docs/concept/migration-exclusions.md §1-5). Null and File remain.
+// was excluded (docs/project/concept/migration-exclusions.md §1-5). Null and File remain.
 //
-// docs/design/contracts.md C5.
+// docs/project/design/contracts.md C5.
 package feedback
 
 import "time"

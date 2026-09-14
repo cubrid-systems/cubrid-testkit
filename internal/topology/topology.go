@@ -11,7 +11,7 @@
 //	default.<role>.<property>          applies to every instance
 //	env.instance<N>.<role>.<property>  applies to instance N, and wins
 //
-// Both are frozen (docs/concept/external-surface-freeze.md §2-3). <property> is
+// Both are frozen (docs/project/concept/external-surface-freeze.md §2-3). <property> is
 // not drawn from a list: whatever follows the role is carried through, which is
 // how an arbitrary cubrid.conf parameter reaches the remote machine.
 package topology

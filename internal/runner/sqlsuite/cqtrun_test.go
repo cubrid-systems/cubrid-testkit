@@ -28,7 +28,7 @@ import (
 // The records are written where CQT wrote them, because the orders hash those
 // very paths: run it with the run's result root behind a scratch mount, and
 // the corpus behind an overlay, since a failed case's .result is written
-// beside it. docs/evidence/sql/records.sh does both.
+// beside it. docs/project/evidence/sql/records.sh does both.
 func TestTheRecordsAreCQTs(t *testing.T) {
 	ref, capture := os.Getenv("TESTKIT_CQT_REF"), os.Getenv("TESTKIT_CQT_OUT")
 	if ref == "" || capture == "" {

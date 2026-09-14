@@ -14,7 +14,7 @@
 // because the old code makes every decision it always made. Standard output,
 // standard error and the exit code pass through untouched.
 //
-// This is the routing shim of docs/design/architecture.md §5-1. It is not the
+// This is the routing shim of docs/project/design/architecture.md §5-1. It is not the
 // jar-compatibility layer NG5 forbids: nothing old calls into anything new.
 package legacy
 

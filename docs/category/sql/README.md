@@ -13,9 +13,9 @@ rewrote. These documents are the as-built guide.
 | **[6. When a case fails](06-when-a-case-fails.md)** | reading a verdict, and the failures that are not the engine's |
 
 The pre-implementation design — the CQT class mapping, the ADRs, and what was measured on the way —
-is [`../../design/module-sql.md`](../../design/module-sql.md); the evidence is
-[`../../evidence/sql-native.md`](../../evidence/sql-native.md) and
-[`../../evidence/regression-sql.md`](../../evidence/regression-sql.md).
+is [`../../design/module-sql.md`](../../project/design/module-sql.md); the evidence is
+[`../../evidence/sql-native.md`](../../project/evidence/sql-native.md) and
+[`../../evidence/regression-sql.md`](../../project/evidence/regression-sql.md).
 
 ## In one picture
 

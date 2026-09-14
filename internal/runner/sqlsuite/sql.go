@@ -4,7 +4,7 @@
 // suites that run a corpus against one prepared database can run it in
 // parallel.
 //
-// docs/design/module-sql.md.
+// docs/project/design/module-sql.md.
 package sqlsuite
 
 import (

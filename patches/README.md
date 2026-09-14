@@ -41,9 +41,27 @@ case would. A directory holding two cases keeps both names
 The diff's own paths are relative to the **case directory**, so one patch may
 touch the case script and its answer files together.
 
+`patches/sql` is the same idea for the sql family, where a case is a `.sql` file
+and its answer sits beside it:
+
+```
+_01_object/_10_system_table/_001_db_class/cases/1003.sql
+  ->  patches/sql/_01_object~_10_system_table~_001_db_class~1003.patch
+```
+
+What those patches are for is different, though. shell's carry a machine's
+layout; sql's carry **a case's dependence on what ran before it** — a listing
+with no `ORDER BY`, a trace that shows the server's own queries only when the
+session is cold. A slotted run changes which cases precede which, so a case that
+leant on the order fails in a way that is about neither the engine nor the
+runner. Each patch makes the case say what it needs, and is written to be sent
+upstream as it stands.
+
 ## The corpus comes out as it went in
 
-The patch is applied when the case starts and reverted when it finishes.
+The patch is applied when the case starts and reverted when it finishes — in the
+sql family, once before the first case and reverted at the end, because its slots
+share one corpus and every slot must read the same source.
 
 Behind the corpus overlay the revert is redundant — the writes are in the upper
 layer and go when the directory retires. It is there because that is a property
@@ -111,7 +129,46 @@ it did, delete the patch.
 | `_06_issues/_11_1h/bug_bts_5136_4` | step 1 greps `cubrid.conf` for the literal `db_volume_size = 512M` and `log_volume_size = 512M` — the shipped values, which the case exists to confirm before it changes them. This run lowers both, so step 1 measures the run instead of the engine. The four steps after it set their own sizes and are unaffected |
 | `_01_utility/_27_emergency_patch_logdb/bug_xdbms278` | the precondition — did the query spill to a temporary volume — checked before the utility the case is actually about. As written it passes only when there is exactly one, and by accident: the shell expands `testdb_t*` before grep sees it, so one volume makes the filename grep's *pattern* and the count 1, two makes it `grep <name> <binary volume>` and the count 0, and none leaves the glob literal and matches five lines of `ls`. Measured: `db_volume_size=20M` gives two and the check reads 0, the shipped 512M gives none and it reads 5. The patch counts the volumes and asks for at least one |
 
+### patches/sql
+
+Each of these is a case that read what an earlier case left. A slotted run
+changes what came earlier, and the case's verdict changes with it — so each
+patch makes the case say what it needs, rather than inherit it.
+
+| patch | why |
+|---|---|
+| `_01_object/_10_system_table/_001_db_class/1003` | lists `db_class` with no `ORDER BY`, so the row order is the catalog's history. Two runs of the same corpus put `test_vclass` in different places. Sorted by `class_name`, with the answer re-recorded from a run of the sorted case: the same 45 rows, in an order that does not depend on what ran before |
+| `_27_banana_qa/issue_16066_BINARY_charset/_01_Comparison_Expression/alter_03` | lists `db_index_key` with `order by 2,1`, which leaves the two keys of one index unordered between themselves. Adds the key's own position to the sort. The answer is unchanged — it was already in that order |
+| `_36_guava/cbrd_26104` | its trace carries the plans of the queries the *server* runs to read the current user's groups, and the server runs them only when the session has not already. Whether it has depends on what ran before. One `show` runs before the trace is turned on, so the traces below are the case's own queries; the answer is re-recorded without those plans |
+| `_36_guava/cbrd_26401/invisible_plcsql` | creates 44 procedures and functions and removes none, so every later case that lists the catalog — plcsql's own, comments, grants — saw them. It now drops them at the end. One patch, and 22 of the 33 cases that a reordered run failed went with it |
+| eighteen cases that set session variables | CUBRID holds **twenty** session variables per connection (`MAX_SESSION_VARIABLES_COUNT`), and they live on the connection. Eighteen cases left twenty-six of them behind, so a case that wanted its own — `_31_cherry`'s json cases want seventeen — met `-1071 Too many session variables` for a reason that was not its own. Each now drops what it set |
+| `_34_fig/cbrd_24478/deduplicate/01_set_param` | leaves `deduplicate_key_level` at the value its last test used, and every index built afterwards on that session inherits it. The directory's next case happens to set it again, so nothing fails today; the patch puts the default back rather than relying on that |
+| `_01_object/.../_021_db_authorizations/1001`<br>`_08_javasp/4110-2`<br>`_08_javasp/4110-4` | list `_db_user`'s `password` column. `_35_fig_cake/cbrd_25352` gives PUBLIC a password and clears it with `set_password('')` — which leaves an empty password *object*, not a null, and `set_password(null)` does the same. Nothing in the corpus can put it back, so these three stop reading a column whose content is not theirs |
+| `_04_operator_function/_03_string_op/_009_length/1003` | asserts the semantic error from `length(a)`, where `a` is meant to be an attribute that does not exist. A leftover class named `a` makes the name resolve and the error disappear. The attribute is renamed to something nothing else defines; the answer is unchanged |
+
 ## What is deliberately not here
+
+**A leftover table with a name somebody else wants.** Measured on the sql corpus:
+1,922 cases create a table and never drop it, leaving 578 distinct names, and 245
+of those names are created by more than one directory — `t1` is left behind by 61
+directories and created by 423. A slotted run changes which directories share a
+database, so a case whose `create table t1` met nobody's `t1` in CTP's order can
+meet one now, and fails with `-494`. It is a different case almost every run.
+Patching it means either every case that leaves a table or every case that
+creates one: between one and two thousand files, which is a corpus-wide rule, not
+a patch set. Measured rate with the patches here: **0 to 2 cases of 17,459 per
+six-slot run**, against 0 to 2 per run for CTP by itself at the same pins.
+
+**A trace whose plan the engine does not always print.** `_36_guava/cbrd_26104`
+and `_36_guava/partition_table/*` assert `Query Plan:` and `Trace Statistics:`
+blocks for queries the server parallelises or rewrites internally, and whether
+those blocks appear does not follow from the case: CTP's own two runs at these
+pins disagree about `cbrd_25542`, and a serial sqlsuite run disagrees about
+`cbrd_25708_eq_in`. Every traced statement already carries `/*+ recompile */`.
+Making these deterministic means deciding what the test is meant to prove when
+the engine chooses a different plan, which is a question for whoever wrote it.
+
+
 
 `_01_utility/_38_csql/csql2` (CBRD-23602) compares against an answer file last
 touched in 2016, with a query that has no `ORDER BY`. Making it pass means

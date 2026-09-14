@@ -1,7 +1,10 @@
-package shellsuite
+// Package patch carries the corpus changes a run needs and does not own, as
+// diffs that can be sent upstream as they stand.
+package patch
 
 import (
 	"fmt"
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"os"
 	"path/filepath"
 	"sort"
@@ -45,7 +48,11 @@ import (
 //
 // The diff's own paths are relative to the case directory, so one patch may
 // touch the case script and its answer files together.
-type Patches struct {
+//
+// Both suites carry patches: shell applies a case's patch when the case runs and
+// reverts it after, sql applies the run's before the first case and reverts them
+// at the end, because its slots share one corpus.
+type Set struct {
 	// dir is the category root, e.g. patches/shell.
 	dir string
 	// byCase maps a case script to the patch file for it.
@@ -61,7 +68,7 @@ type Patches struct {
 }
 
 // LoadPatches indexes dir against the cases this run will execute.
-func LoadPatches(dir, scenario string, cases []string) (*Patches, error) {
+func Load(dir, scenario, ext string, cases []string) (*Set, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return nil, nil
@@ -70,13 +77,13 @@ func LoadPatches(dir, scenario string, cases []string) (*Patches, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Patches{dir: dir, byCase: map[string]string{}}
+	p := &Set{dir: dir, byCase: map[string]string{}}
 
 	// Index by the name a case's patch would have, so the lookup is a map hit
 	// rather than a walk per case.
 	want := map[string]string{}
 	for _, c := range cases {
-		if n := PatchName(root, c); n != "" {
+		if n := Name(root, c, ext); n != "" {
 			want[n] = c
 		}
 	}
@@ -102,16 +109,17 @@ func LoadPatches(dir, scenario string, cases []string) (*Patches, error) {
 	return p, nil
 }
 
-// PatchName is what a case's patch file is called, without the extension.
+// Name is what a case's patch file is called, without the extension. ext is the
+// case's own suffix -- ".sh" for shell, ".sql" for the sql family.
 //
 // The two segments that come out are the ones that carry no information: the
 // "cases" every case sits in, and a file name that repeats its directory.
-func PatchName(scenarioRoot, script string) string {
+func Name(scenarioRoot, script, ext string) string {
 	rel, err := filepath.Rel(scenarioRoot, script)
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return ""
 	}
-	parts := strings.Split(strings.TrimSuffix(rel, ".sh"), string(filepath.Separator))
+	parts := strings.Split(strings.TrimSuffix(rel, ext), string(filepath.Separator))
 	kept := parts[:0]
 	for _, s := range parts {
 		if s != "cases" {
@@ -125,7 +133,7 @@ func PatchName(scenarioRoot, script string) string {
 }
 
 // For returns the patch file for a case, or "".
-func (p *Patches) For(script string) string {
+func (p *Set) For(script string) string {
 	if p == nil {
 		return ""
 	}
@@ -133,7 +141,7 @@ func (p *Patches) For(script string) string {
 }
 
 // Count is how many of this run's cases carry a patch.
-func (p *Patches) Count() int {
+func (p *Set) Count() int {
 	if p == nil {
 		return 0
 	}
@@ -142,7 +150,7 @@ func (p *Patches) Count() int {
 
 // Describe is the line the run prints, because a corpus that was changed before
 // it ran is the first thing a reader of the verdicts needs to know.
-func (p *Patches) Describe() []string {
+func (p *Set) Describe() []string {
 	if p == nil || (len(p.byCase) == 0 && len(p.orphans) == 0) {
 		return nil
 	}
@@ -170,7 +178,7 @@ func (p *Patches) Describe() []string {
 // the point: a patch that no longer applies means the case has moved, and
 // running the case unpatched would answer a question nobody asked.
 func ApplyScript(caseDir, patchFile string) string {
-	d, f := shQuote(caseDir), shQuote(patchFile)
+	d, f := exec.Quote(caseDir), exec.Quote(patchFile)
 	return "patch -p0 --batch --forward --dry-run -d " + d + " -i " + f + " >/dev/null 2>&1 && " +
 		"patch -p0 --batch --forward -d " + d + " -i " + f
 }
@@ -189,7 +197,7 @@ func ApplyScript(caseDir, patchFile string) string {
 // so -- the revert is refused rather than making it worse, and the caller
 // reports it.
 func RevertScript(caseDir, patchFile string) string {
-	d, f := shQuote(caseDir), shQuote(patchFile)
+	d, f := exec.Quote(caseDir), exec.Quote(patchFile)
 	// --forward alongside --reverse is what stops a second revert re-applying
 	// the patch forwards: to a reversed run, an already-reverted file looks like
 	// a reversed patch, and --forward skips those instead of "fixing" them.
@@ -207,7 +215,7 @@ func RevertScript(caseDir, patchFile string) string {
 // A file of its own rather than a new line in an existing one: what the runner
 // prints on standard output and writes into the result tree is CTP's shape and
 // is frozen (ADR-003). A file nothing else reads adds nothing to parse.
-func (p *Patches) Applied(script, patchFile string) {
+func (p *Set) Applied(script, patchFile string) {
 	if p == nil {
 		return
 	}
@@ -229,7 +237,7 @@ func (p *Patches) Applied(script, patchFile string) {
 // were configured".
 //
 // Sorted, so the line is stable between runs.
-func (p *Patches) Unapplied() []string {
+func (p *Set) Unapplied() []string {
 	if p == nil {
 		return nil
 	}
@@ -248,7 +256,7 @@ func (p *Patches) Unapplied() []string {
 // Report writes the record into the result directory. Nothing is written when
 // nothing was patched, so the file's presence is itself the answer to "did this
 // run patch anything".
-func (p *Patches) Report(dir string) error {
+func (p *Set) Report(dir string) error {
 	if p == nil || dir == "" {
 		return nil
 	}

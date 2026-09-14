@@ -107,14 +107,14 @@ func Discover(ctx context.Context, ch exec.Channel, workspace string) ([]string,
 	// to run -- is a list nobody should take for the whole corpus.
 	res, err := probeIn(ctx, ch, findAll(workspace))
 	if err == nil && res.ExitCode != 0 && res.ExitCode != 1 {
-		err = exitError(res)
+		err = res.Failure()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("discover cases under %s: %w", workspace, err)
 	}
 	if res.ExitCode == 1 {
 		fmt.Printf("[WARN] not all of %s could be read, and any case in the part that could not was not found: %v\n",
-			workspace, exitError(res))
+			workspace, res.Failure())
 	}
 	var cases []string
 	for _, line := range strings.Split(res.Output(), "\n") {

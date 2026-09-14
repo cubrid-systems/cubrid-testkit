@@ -1,0 +1,19 @@
+--- cases/01_set_param.sql
++++ cases/01_set_param.sql
+@@ -19,3 +19,8 @@
+ set system parameters 'print_index_detail=no';
+ set system parameters 'print_index_detail=on';
+ set system parameters 'print_index_detail=off';
++
++-- The case leaves the level where its last test put it, and every index
++-- created afterwards on this session is built to that level. Put the
++-- default back, so what follows does not inherit a test's setting.
++set system parameters 'deduplicate_key_level=-1';
+--- answers/01_set_param.answer
++++ answers/01_set_param.answer
+@@ -28,3 +28,5 @@
+ 0
+ ===================================================
+ 0
++===================================================
++0

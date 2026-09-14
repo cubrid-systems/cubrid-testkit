@@ -1,0 +1,72 @@
+--- cases/cbrd_26104.sql
++++ cases/cbrd_26104.sql
+@@ -15,6 +15,12 @@
+ create view v_tbl_a as select count(*) cn from tbl_a;
+ create view v_tbl_b as select count(*) cn from tbl_b;
+ 
++-- A show statement makes the server read the current user's groups, and the
++-- plans of those internal queries land in the trace. Whether it reads them
++-- depends on what ran before this case, so one show runs here, before the
++-- trace is on, and the traces below are the case's own queries.
++show tables like 'tbl_%';
++
+ set trace on;
+ 
+ evaluate 'union all - should work';
+--- answers/cbrd_26104.answer
++++ answers/cbrd_26104.answer
+@@ -15,6 +15,11 @@
+ ===================================================
+ 0
+ ===================================================
++Tables_in_basic    
++tbl_a     
++tbl_b     
++
++===================================================
+ 0
+ ===================================================
+     
+@@ -749,42 +754,6 @@
+ ===================================================
+ trace    
+ 
+-Query Plan:
+-  FOLLOW (edge: t.g=[_db_user])
+-    NESTED LOOPS (inner join)
+-      INDEX SCAN (u.u__db_user_name) (key range: u.[name]= CURRENT_USER )
+-      TABLE SCAN (t)
+-
+-  rewritten query: (select set{ CURRENT_USER }+coalesce(sum(set{t.g.[name]}), set{}) from [_db_user] u, table(u.[groups]) t (g) where u.[name]= CURRENT_USER )
+-
+-  FOLLOW (edge: t.g=[_db_user])
+-    NESTED LOOPS (inner join)
+-      INDEX SCAN (u.u__db_user_name) (key range: u.[name]= CURRENT_USER )
+-      TABLE SCAN (t)
+-
+-  rewritten query: (select set{ CURRENT_USER }+coalesce(sum(set{t.g.[name]}), set{}) from [_db_user] u, table(u.[groups]) t (g) where u.[name]= CURRENT_USER )
+-
+-  FOLLOW (edge: t.g=[_db_user])
+-    NESTED LOOPS (inner join)
+-      INDEX SCAN (u.u__db_user_name) (key range: u.[name]= CURRENT_USER )
+-      TABLE SCAN (t)
+-
+-  rewritten query: (select set{ CURRENT_USER }+coalesce(sum(set{t.g.[name]}), set{}) from [_db_user] u, table(u.[groups]) t (g) where u.[name]= CURRENT_USER )
+-
+-  FOLLOW (edge: au.grantee=[_db_user])
+-    TABLE SCAN (au)
+-
+-  rewritten query: (select sum(set{au.object_of}) from [_db_auth] au where {au.grantee.[name]} subseteq (select set{ CURRENT_USER }+coalesce(sum(set{t.g.[name]}), set{}) from [_db_user] u, table(u.[groups]) t (g) where u.[name]= CURRENT_USER ) and au.auth_type= ?:? )
+-
+-  FOLLOW (edge: show_tables.[owner]=[_db_user])
+-    NESTED LOOPS (inner join)
+-      INDEX SCAN (show_tables.i__db_class_class_name_owner) (key range: (show_tables.class_name>= ?:?  and show_tables.class_name< ?:? ), key filter: (show_tables.class_name like  ?:? ))
+-      INDEX SCAN (coll.pk__db_collation_coll_id) (key range: (show_tables.collation_id=coll.coll_id), covered: true)
+-  skip order by: true
+-
+-  rewritten query: select show_tables.class_name from [_db_class] show_tables, [_db_collation] coll where (show_tables.class_name like  ?:? ) and (show_tables.class_name>= ?:?  and show_tables.class_name< ?:? ) and (( cast(case when show_tables.is_system_class=? then 'YES' else 'NO' end as varchar(?)))='NO') and (show_tables.collation_id=coll.coll_id) and ({'DBA'} subseteq (select set{ CURRENT_USER }+coalesce(sum(set{t.g.[name]}), set{}) from [_db_user] u, table(u.[groups]) t (g) where u.[name]= CURRENT_USER ) or {show_tables.[owner].[name]} subseteq (select set{ CURRENT_USER }+coalesce(sum(set{t.g.[name]}), set{}) from [_db_user] u, table(u.[groups]) t (g) where u.[name]= CURRENT_USER ) or {show_tables.class_of} subseteq (select sum(set{au.object_of}) from [_db_auth] au where {au.grantee.[name]} subseteq (select set{ CURRENT_USER }+coalesce(sum(set{t.g.[name]}), set{}) from [_db_user] u, table(u.[groups]) t (g) where u.[name]= CURRENT_USER ) and au.auth_type= ?:? )) order by ?
+-
+-
+ Trace Statistics:
+   SELECT (time: ?, fetch: ?, fetch_time: ?, ioread: ?)
+     SCAN (index: _db_class.i__db_class_class_name_owner), (btree time: ?, fetch: ?, ioread: ?, readkeys: ?, filteredkeys: ?, rows: ?) (lookup time: ?, rows: ?)

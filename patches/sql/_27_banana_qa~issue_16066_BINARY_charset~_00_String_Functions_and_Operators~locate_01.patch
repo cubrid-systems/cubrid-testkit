@@ -1,0 +1,18 @@
+--- cases/locate_01.sql
++++ cases/locate_01.sql
+@@ -42,3 +42,7 @@
+ set names utf8;
+ commit;
+ --+ holdcas off;
++
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @a;
+--- answers/locate_01.answer
++++ answers/locate_01.answer
+@@ -90,3 +90,5 @@
+ 0
+ ===================================================
+ 0
++===================================================
++0

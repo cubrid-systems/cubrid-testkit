@@ -12,6 +12,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
+	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
@@ -28,11 +29,11 @@ func request(t *testing.T, body string) (runner.Request, string) {
 		t.Fatal(err)
 	}
 	h := &conf.Home{Path: home}
-	cfg, err := h.Load(path)
-	if err != nil {
+	// The request carries the path; the runner reads the file itself.
+	if _, err := h.Load(path); err != nil {
 		t.Fatal(err)
 	}
-	return runner.Request{Task: cli.Shell, Home: h, ConfigPath: path, Config: cfg}, home
+	return runner.Request{Task: cli.Shell, Home: h, ConfigPath: path}, home
 }
 
 func TestValidate(t *testing.T) {
@@ -82,7 +83,7 @@ func TestLocalInstanceCarriesTheDefaultRoles(t *testing.T) {
 		"default.ssh.user=qa",
 	}, "\n"))
 
-	inst := topology.Local(req.Config)
+	inst := topology.Local(configOf(req))
 	if inst.EnvID() != "local" {
 		t.Errorf("EnvID = %q, want local", inst.EnvID())
 	}
@@ -208,7 +209,7 @@ func TestAScenarioNotCopiedWholeIsSaidAndTheRunGoesOn(t *testing.T) {
 	var got string
 	var err error
 	out := printed(t, func() {
-		got, err = NewShell().prepareWorkspace(t.Context(), ch, req.Config, true)
+		got, err = NewShell().prepareWorkspace(t.Context(), ch, configOf(req), true)
 	})
 	if err != nil || got != workspace {
 		t.Fatalf("the run stopped over what cp could not read: %q, %v", got, err)
@@ -250,7 +251,7 @@ func TestAMissingExclusionListStopsTheRun(t *testing.T) {
 		{"cat ", exec.Result{ExitCode: 1, Stderr: "cat: /nowhere/excluded.txt: No such file or directory"}},
 		{"find ", exec.Result{Stdout: "/ws/a/cases/a.sh\n"}},
 	}
-	_, _, _, err := (&Shell{}).caseList(t.Context(), ch, newSink(t), req.Config, "/ws", false)
+	_, _, _, err := (&Shell{}).caseList(t.Context(), ch, newSink(t), configOf(req), "/ws", false)
 	if err == nil || !strings.Contains(err.Error(), "No such file") {
 		t.Errorf("a missing exclusion list was read as an empty one: %v", err)
 	}
@@ -290,7 +291,7 @@ func TestTheMacroSkipTellsNoMatchFromAnUnreadableFile(t *testing.T) {
 	found := exec.Result{Stdout: "/ws/a/cases/a.sh\n"}
 
 	nothing := answers{{"grep ", exec.Result{ExitCode: 1}}, {"find ", found}}
-	cases, skipped, _, err := (&Shell{}).caseList(t.Context(), nothing, newSink(t), req.Config, "/ws", false)
+	cases, skipped, _, err := (&Shell{}).caseList(t.Context(), nothing, newSink(t), configOf(req), "/ws", false)
 	if err != nil || len(cases) != 1 || len(skipped) != 0 {
 		t.Errorf("no case names the macro, and got %v, %v, %v", cases, skipped, err)
 	}
@@ -299,14 +300,14 @@ func TestTheMacroSkipTellsNoMatchFromAnUnreadableFile(t *testing.T) {
 		{"grep ", exec.Result{ExitCode: 2, Stderr: "grep: /ws/b/cases/b.sh: Permission denied"}},
 		{"find ", found},
 	}
-	_, _, _, err = (&Shell{}).caseList(t.Context(), unreadable, newSink(t), req.Config, "/ws", false)
+	_, _, _, err = (&Shell{}).caseList(t.Context(), unreadable, newSink(t), configOf(req), "/ws", false)
 	if err == nil || !strings.Contains(err.Error(), "Permission denied") {
 		t.Errorf("a case file grep could not read was ignored: %v", err)
 	}
 
 	// Nor is a grep that never finished -- killed, or cancelled with the run.
 	killed := answers{{"grep ", exec.Result{ExitCode: -1}}, {"find ", found}}
-	if _, _, _, err := (&Shell{}).caseList(t.Context(), killed, newSink(t), req.Config, "/ws", false); err == nil {
+	if _, _, _, err := (&Shell{}).caseList(t.Context(), killed, newSink(t), configOf(req), "/ws", false); err == nil {
 		t.Error("a grep that was killed was read as one that matched nothing")
 	}
 }
@@ -351,11 +352,11 @@ func TestSeveralConfiguredMachinesBecomeOneAndAWarning(t *testing.T) {
 		"env.instance3.ssh.host=gamma",
 	}, "\n"))
 
-	configured, err := topology.From(req.Config)
+	configured, err := topology.From(configOf(req))
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine, extra := oneMachine(req.Config, configured)
+	machine, extra := oneMachine(configOf(req), configured)
 
 	if machine.EnvID() != "env1" {
 		t.Errorf("chose %s, want the first configured machine", machine.EnvID())
@@ -368,11 +369,11 @@ func TestSeveralConfiguredMachinesBecomeOneAndAWarning(t *testing.T) {
 func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
 	req, _ := request(t, "scenario=/somewhere\n")
 
-	configured, err := topology.From(req.Config)
+	configured, err := topology.From(configOf(req))
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine, extra := oneMachine(req.Config, configured)
+	machine, extra := oneMachine(configOf(req), configured)
 
 	if !machine.IsLocal() {
 		t.Errorf("chose %s, want the local machine", machine.EnvID())
@@ -389,75 +390,6 @@ func TestNoConfiguredMachineIsThisMachine(t *testing.T) {
 func TestTheRealShellCanOpenSlots(t *testing.T) {
 	if s := NewShell(); s.Channels != nil {
 		t.Error("NewShell set Channels, which makes the run look like a caller supplied its own")
-	}
-}
-
-// A run's slots start from the install, not from what the last run's slots wrote
-// into it. They did not while the slot root was named after the pid: the root
-// outlived its run, the pid recurred -- contained, it is the namespace's -- and
-// the next run's overlay went over the old upper layer.
-func TestASlotDoesNotInheritTheLastRunsWrites(t *testing.T) {
-	contained(t)
-	base, err := os.MkdirTemp("/var/tmp", "testkit-slotroot-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(base) })
-	t.Setenv(contain.SlotRootEnv, base)
-	t.Setenv("CUBRID", t.TempDir())
-	t.Setenv("CUBRID_DATABASES", "")
-
-	run := func(script string) string {
-		t.Helper()
-		pairs, closeAll, err := openSlots(1, nil, nil, nil, "", laneSplit{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer closeAll()
-		res, err := pairs[0].worker.Run(t.Context(), script)
-		if err != nil || res.ExitCode != 0 {
-			t.Fatalf("%q: exit %d, %v: %s", script, res.ExitCode, err, res.Stderr)
-		}
-		return strings.TrimSpace(res.Output())
-	}
-
-	run(`echo written > "$CUBRID/leftover"`)
-	if entries, _ := os.ReadDir(base); len(entries) != 0 {
-		t.Errorf("the slot root outlived its run: %v", entries)
-	}
-	if got := run(`[ -e "$CUBRID/leftover" ] && echo inherited || echo clean`); got != "clean" {
-		t.Error("the second run's slot started with the first run's write in its install")
-	}
-}
-
-// The registry gets an overlay of its own only when it is outside the install.
-// CUBRID's own default puts it at $CUBRID/databases -- and CTP's reset cleans
-// and restores it there -- in which case the install's overlay already covers
-// it and a second one would nest overlayfs on overlayfs for nothing.
-func TestTheRegistryIsCoveredByTheInstallWhenItIsInsideIt(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		parents []string
-		dir     string
-		want    bool
-	}{
-		{"CUBRID's default layout", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases", true},
-		{"the same directory", []string{"/opt/CUBRID"}, "/opt/CUBRID", true},
-		{"a registry kept outside", []string{"/opt/CUBRID"}, "/var/db/registry", false},
-		{"a sibling, not a child", []string{"/opt/CUBRID"}, "/opt/CUBRID-old", false},
-		// The reason this is not a string prefix test: "/a/bc" starts with
-		// "/a/b" and is not inside it. A prefix check would skip a real overlay
-		// and the slot would share the machine's registry with every other one.
-		{"a name that merely starts the same", []string{"/a/b"}, "/a/bc", false},
-		{"a path that climbs back out", []string{"/opt/CUBRID"}, "/opt/CUBRID/../other", false},
-		{"nothing covered yet", nil, "/opt/CUBRID", false},
-		{"deeper inside", []string{"/opt/CUBRID"}, "/opt/CUBRID/databases/x/y", true},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			if got := under(c.parents, c.dir); got != c.want {
-				t.Errorf("under(%q, %q) = %v, want %v", c.parents, c.dir, got, c.want)
-			}
-		})
 	}
 }
 
@@ -512,5 +444,79 @@ func TestMemAvailableIsWhatTheKernelWillGive(t *testing.T) {
 	}
 	if got == 0 {
 		t.Error("this machine has /proc/meminfo and MemAvailable was not read")
+	}
+}
+
+// feedback_type was in the configuration reference, in the recommended settings
+// and in feedback's own doc comments, and no code read it: every run wrote a
+// feedback.log whatever the file said. It is read now, and what each answer
+// means is migration-exclusions.md's decision.
+func TestFeedbackTypeDecidesWhetherARunKeepsFeedback(t *testing.T) {
+	for _, c := range []struct {
+		value string
+		kept  bool
+	}{
+		{"", true},
+		{"file", true},
+		{"db", true},    // the events are kept; only their destination changes
+		{"none", false}, // CTP's own "no feedback at all"
+	} {
+		t.Run("feedback_type="+c.value, func(t *testing.T) {
+			scenario := t.TempDir()
+			writeCase(t, scenario, "passing", `echo " : OK passing" >> passing.result`)
+			lines := []string{"scenario=" + scenario, "test_category=shell", "testcase_retry_num=0"}
+			if c.value != "" {
+				lines = append(lines, "feedback_type="+c.value)
+			}
+			req, home := request(t, strings.Join(lines, "\n"))
+
+			ch := &guardedChannel{inner: exec.NewLocal("")}
+			s := &Shell{Channels: func(*topology.Instance) (exec.Channel, exec.Channel, error) {
+				return ch, ch, nil
+			}}
+			if err := s.Run(t.Context(), req); err != nil {
+				t.Fatalf("the run failed: %v", err)
+			}
+
+			log := filepath.Join(home, "result", "shell", "current_runtime_logs", "feedback.log")
+			_, err := os.Stat(log)
+			if c.kept && err != nil {
+				t.Errorf("no feedback.log: %v", err)
+			}
+			if !c.kept && err == nil {
+				t.Error("a run told to keep no feedback wrote feedback.log anyway")
+			}
+		})
+	}
+}
+
+// The page groups slots by lane, and the lane has to say which of the two
+// disk modes a run is in: "disk" and "disk, volatile" are a factor of 2.6
+// apart, and a page that calls both "disk" cannot tell them apart.
+func TestTheLaneSaysWhetherTheDiskIsVolatile(t *testing.T) {
+	for _, c := range []struct {
+		what     string
+		lane     dispatch.Lane
+		corpus   bool
+		volatile bool
+		want     string
+	}{
+		{"no lanes, writes on disk", dispatch.LaneAny, false, false, "disk"},
+		{"no lanes, disk mounted volatile", dispatch.LaneAny, false, true, "disk, volatile"},
+		{"no lanes, writes in memory", dispatch.LaneAny, true, false, "tmpfs"},
+		// A tmpfs upper never waited for a sync, so volatile says nothing
+		// about it and must not appear.
+		{"memory, volatile set anyway", dispatch.LaneAny, true, true, "tmpfs"},
+		{"the disk lane of a split", dispatch.LaneSlow, true, true, "disk, volatile"},
+		{"the fast lane of a split", dispatch.LaneFast, true, true, dispatch.LaneFast.String()},
+	} {
+		if c.volatile {
+			t.Setenv(contain.SlotVolatileEnv, "1")
+		} else {
+			t.Setenv(contain.SlotVolatileEnv, "")
+		}
+		if got := laneName(c.lane, c.corpus); got != c.want {
+			t.Errorf("%s: lane = %q, want %q", c.what, got, c.want)
+		}
 	}
 }

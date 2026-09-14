@@ -113,9 +113,14 @@ func (s *Sink) TestCase(name, envID string, ok bool, maxRetryCount, retryCount i
 	fmt.Fprintf(s.stdout, "[TESTCASE] %s EnvId=%s [NOK]\n", name, envID)
 }
 
-// Core announces a core file. Test cases in the frozen testcases repositories grep
-// for this line, so it is F1 with a consumer that can be named.
-func (s *Sink) Core(path string) { fmt.Fprintf(s.stdout, "CORE_FILE:%s\n", path) }
+// Core announces a core file, on this sink's own output.
+func (s *Sink) Core(path string) { CoreFile(s.stdout, path) }
+
+// CoreFile announces a core file. Test cases in the frozen testcases
+// repositories grep for this line, so it is F1 with a consumer that can be
+// named -- and both families produce it, which is why it is written here rather
+// than formatted wherever a core happens to be found.
+func CoreFile(w io.Writer, path string) { fmt.Fprintf(w, "CORE_FILE:%s\n", path) }
 
 // Worker appends to test_<envId>.log, the per-environment detail log.
 func (s *Sink) Worker(envID, line string) error {

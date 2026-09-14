@@ -1,0 +1,18 @@
+--- cases/cbrd_25567.sql
++++ cases/cbrd_25567.sql
+@@ -63,3 +63,7 @@
+ 
+ set trace off;
+ drop table if exists t;
++
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @v;
+--- answers/cbrd_25567.answer
++++ answers/cbrd_25567.answer
+@@ -119,3 +119,5 @@
+ 0
+ ===================================================
+ 0
++===================================================
++0

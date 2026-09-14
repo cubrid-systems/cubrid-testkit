@@ -1,0 +1,18 @@
+--- cases/03_04_01-07_normal_session_variables.sql
++++ cases/03_04_01-07_normal_session_variables.sql
+@@ -29,3 +29,7 @@
+ 
+ 
+ --+ server-message off
++
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @p1, @p2;
+--- answers/03_04_01-07_normal_session_variables.answer
++++ answers/03_04_01-07_normal_session_variables.answer
+@@ -42,3 +42,5 @@
+ ===================================================
+ 0
+ 
++===================================================
++0

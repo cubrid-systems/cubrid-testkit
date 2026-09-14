@@ -1,0 +1,18 @@
+--- cases/20567_limit_DELETE_hostvar.sql
++++ cases/20567_limit_DELETE_hostvar.sql
+@@ -119,3 +119,7 @@
+ 
+ --+ holdcas off;
+ 
++
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @a;
+--- answers/20567_limit_DELETE_hostvar.answer
++++ answers/20567_limit_DELETE_hostvar.answer
+@@ -150,3 +150,5 @@
+ 0
+ ===================================================
+ 0
++===================================================
++0

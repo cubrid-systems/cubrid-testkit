@@ -22,7 +22,7 @@ These behave as they always did.
 | `testcase_exclude_from_file` | — | files of path fragments to skip, comma-separated. A file that does not exist stops the run |
 | `test_continue_yn` | `false` | resume, skipping what already has a verdict |
 | `cubrid_db_charset` | `en_US` | what `cubrid_createdb` passes as the locale |
-| `feedback_type` | — | `file` |
+| `feedback_type` | `file` | `file` writes the run's feedback.log and the files beside it. `db` asks for a database this runner does not write to: it says so and writes the files instead, so the events are kept and only their destination changes. Anything else is CTP's own "no feedback at all" — no feedback.log, and `replay` and `failures` have nothing to read |
 
 ## This runner's keys
 
@@ -31,6 +31,7 @@ These behave as they always did.
 | `parallel_slots` | `1` | **large** | how many cases run at once |
 | `scenario_ram_mb` | off | **large; can fail a run** | the corpus overlay's upper layer becomes a tmpfs of this size. See [the ceiling](05-the-ceiling.md) |
 | `scenario_ram_high_water` | `80` | protective | percent of the ceiling above which no new case starts |
+| `scenario_disk` | off | situational | every slot sees the corpus through an overlay of its own, its upper layer in the slot's directory under `TESTKIT_SLOT_ROOT`, removed with it. The corpus on disk is unchanged. What makes `TESTKIT_SLOT_VOLATILE` reach the databases a case creates in its directory. Not with `scenario_ram_mb` or a `testcase_workspace_dir` of its own; needs `TESTKIT_CONTAIN=1` |
 | `heavy_in_flight_max` | `slots/4` | protective | how many of the heaviest cases may run at once |
 | `case_plan` | off | small; grows with slots | per-case durations. Read to order the run, written from what it measured |
 | `case_sizes` | off | none directly | per-directory peak footprints, read by the lane keys |
@@ -46,10 +47,11 @@ These behave as they always did.
 
 | | |
 |---|---|
-| `TESTKIT_NATIVE_SHELL=1` | run `shell` here rather than handing it to CTP. The opt-in gate |
+| `TESTKIT_NATIVE=shell` | run `shell` here rather than handing it to CTP. The opt-in gate. It names the families, comma-separated (`shell,sql`), and `all` is every one of them; `TESTKIT_NATIVE_SHELL=1` is the older spelling and still works |
 | `TESTKIT_CONTAIN=1` | put the run in namespaces of its own. **Required** by slots and by `scenario_ram_mb` |
 | `TESTKIT_CONTAIN_SH` | which shell to bind over `/bin/sh`. `bash` if it can be found |
 | `TESTKIT_SLOT_ROOT` | where each run makes its own directory for the per-slot overlays, removed when the slots close. `/var/tmp/testkit-slots` when unset |
+| `TESTKIT_SLOT_VOLATILE=1` | mount the per-slot overlays `volatile`: a sync on a slot's layer returns having done nothing. Off by default, because the syncs are part of the conditions CTP runs under. **For shell it reaches the corpus only through `scenario_disk` or the disk lane's overlay** (`lane_slow_*`): otherwise a case runs in place in the corpus, as under CTP, and its databases are not on any overlay — `_01_utility` on eight slots took 1,426 s without it and 1,401 s with it, with the same 139,000 flushes and the same verdicts (`evidence/parallel-shell.md` §5). sql's databases are, and there it took eight slots from 1,131 s to 338–394 s (`evidence/sql-native.md` §3). Needs Linux 5.10+; changes nothing on a tmpfs, whose syncs cost nothing already |
 
 And CTP's failure snapshot, which is off the frozen surface and configurable:
 
@@ -134,8 +136,15 @@ scenario_ram_high_water=80
 case_plan=/path/to/plan           # written on the first run, read on the next
 case_sizes=/path/to/sizes         # likewise
 case_patch_dir=/path/to/patches/shell
+case_logs=fail                    # what a failed case wrote, kept
 status_http=on
 ```
+
+`case_logs` is not optional on a run this long. A full corpus takes two to three hours and ends with
+a handful of failures; the per-case output lives under `$CTP_HOME/result`, which the next run
+deletes, so without this the only way to read a failure is to run the whole thing again. Measured
+the hard way: a 162-minute run at develop head ended with 32 failures and nothing left to read them
+from. See [keeping what failed](06-keeping-what-failed.md).
 
 and in the engine's `cubrid.conf`:
 

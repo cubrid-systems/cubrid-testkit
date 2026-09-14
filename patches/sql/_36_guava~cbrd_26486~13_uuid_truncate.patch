@@ -1,0 +1,20 @@
+--- cases/13_uuid_truncate.sql
++++ cases/13_uuid_truncate.sql
+@@ -30,4 +30,7 @@
+ select min(k) min_k, max(k) max_k from uuid_trunc_t;
+ select count(case when substr(uuid_format(u), 20, 1) in ('8', '9', 'A', 'B') then 1 end) variant_ok
+ from uuid_trunc_t;
+-drop table uuid_trunc_t;
+\ No newline at end of file
++drop table uuid_trunc_t;
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @max_u_before;
+--- answers/13_uuid_truncate.answer
++++ answers/13_uuid_truncate.answer
+@@ -52,3 +52,5 @@
+ 
+ ===================================================
+ 0
++===================================================
++0

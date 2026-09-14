@@ -1,0 +1,20 @@
+--- cases/12_uuid_replace.sql
++++ cases/12_uuid_replace.sql
+@@ -35,4 +35,7 @@
+ insert into uuid_replace_t(k, v) values (1, 100) on duplicate key update v = 100, u = uuid(7);
+ select (u <> @u1_before) uuid_changed from uuid_replace_t where k = 1;
+ select count(*) total, count(distinct u) uniq from uuid_replace_t;
+-drop table uuid_replace_t;
+\ No newline at end of file
++drop table uuid_replace_t;
++-- Session variables live on the connection, and CUBRID holds twenty of
++-- them. A case that leaves one spends the next case's budget.
++DROP VARIABLE @u2_before, @u3_before, @u1_before;
+--- answers/12_uuid_replace.answer
++++ answers/12_uuid_replace.answer
+@@ -66,3 +66,5 @@
+ 
+ ===================================================
+ 0
++===================================================
++0

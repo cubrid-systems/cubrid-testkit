@@ -98,3 +98,43 @@ func TestACancelledCaseNeverLooksLikeSuccess(t *testing.T) {
 		t.Error("a cancelled case ran to completion")
 	}
 }
+
+// A script that exits non-zero has failed, and Check says so. The channel keeps
+// err for not being able to run a script at all, and every caller that checked
+// err alone took a failed script for one that worked.
+func TestCheckTakesANonZeroExitAsAnError(t *testing.T) {
+	l := NewLocal("")
+	res, err := Check(l.Run(t.Context(),
+		`echo partial; echo "the message" >&2; echo "a line between" >&2; echo "the last word" >&2; exit 3`))
+	if err == nil {
+		t.Fatal("a script that exited 3 was reported as a success")
+	}
+	for _, want := range []string{"exit 3", "the message", "the last word"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error does not say %q: %v", want, err)
+		}
+	}
+	// Bounded: a cp refused a thousand files says so a thousand times.
+	if strings.Contains(err.Error(), "a line between") {
+		t.Errorf("the error carries all of stderr rather than its first and last lines: %v", err)
+	}
+	// What it printed before it failed is still the caller's to read.
+	if !strings.Contains(res.Output(), "partial") {
+		t.Errorf("the output was lost with the failure: %q", res.Output())
+	}
+	if _, err := Check(l.Run(t.Context(), "true")); err != nil {
+		t.Errorf("a script that exited 0 was reported as a failure: %v", err)
+	}
+}
+
+// A script that reports on stdout, as check_disk_space does, still gets its
+// reason into the error -- the last thing it printed.
+func TestFailureFallsBackToTheLastLineAScriptPrinted(t *testing.T) {
+	err := Result{Stdout: "first\nUsage: nothing like this\n", ExitCode: 1}.Failure()
+	if err == nil || err.Error() != "exit 1: Usage: nothing like this" {
+		t.Errorf("got %v, want the status and the last line", err)
+	}
+	if err := (Result{ExitCode: 2}).Failure(); err == nil || err.Error() != "exit 2" {
+		t.Errorf("got %v, want the bare status when the script said nothing", err)
+	}
+}

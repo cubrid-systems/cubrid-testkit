@@ -22,6 +22,9 @@ import (
 type detail struct {
 	mu   sync.Mutex
 	path string
+	// fn answers instead of the file, for a runner whose cases leave no
+	// feedback.log -- the sql suite's are a rendering and an answer.
+	fn func(name string) string
 }
 
 // Detail says where the run's feedback.log is, which is what makes a finished
@@ -34,6 +37,17 @@ func (b *Board) Detail(feedbackPath string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.detail = &detail{path: feedbackPath}
+}
+
+// DetailFunc is Detail for a runner whose cases leave no feedback.log: fn
+// says what a finished case did, and "" for a case it has nothing on yet.
+func (b *Board) DetailFunc(fn func(name string) string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.detail = &detail{fn: fn}
 }
 
 func (d *detail) where() string {
@@ -51,6 +65,9 @@ func (d *detail) where() string {
 // case. So the block is from the header that names this case to the next header,
 // whatever that names.
 func (d *detail) block(name string) string {
+	if d.fn != nil {
+		return d.fn(name)
+	}
 	path := d.where()
 	if path == "" || name == "" {
 		return ""
@@ -108,6 +125,10 @@ func (b *Board) serveDetail(w http.ResponseWriter, r *http.Request) {
 	if text == "" {
 		// Not an error: a case that has not finished has no block yet, and
 		// saying so is more use than a 404.
+		if d.fn != nil {
+			w.Write([]byte("nothing recorded for this case yet: it has not finished.\n"))
+			return
+		}
 		w.Write([]byte("nothing recorded for this case yet.\n\n" +
 			"A case gets a block in feedback.log when it finishes. If it has finished,\n" +
 			"the run may be writing to a different result tree than the page was told about:\n  " +

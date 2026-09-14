@@ -274,6 +274,13 @@ java cqt.webconsole.Starter <webconsole.conf> <webRoot> <start|stop>
 `ComponentEnum` 에 없어 `ctp.sh` task 가 아니고 `common/ext/run_sql_by_cci.sh` 가 직접 몬다 —
 그쪽이 어떻게 답을 고르는지는 **Phase 4 에서 확인할 것** (§11-24).
 
+> **정정 (2026-09-11).** 위 첫 문장은 틀렸다. `getAnswerFile` 이 만드는 경로가 하나인 것은 맞지만,
+> 그 뒤 `ConsoleBO.java:368-396` 이 `<answer>_<run_mode>` → `<answer>_<run_mode_secondary>` 를 조립해
+> 있으면 그것을 쓴다. `run_mode` 는 `jdbc_config_file` XML 의 `<run_mode>` 이고, `_D_<charset>_C_<collation>`
+> 237개가 그 대상이다. `.answer_cci` 는 C 쪽이 고른다 — `ccqt` 의 `getanswerfile`
+> (`sql_by_cci/execute.c:2584`~) 이 `…answer` 에 `_cci` 를 붙인 경로를 먼저 찾는다 (§11-24 의 절반).
+> `.answer_win` 을 고르는 코드는 여전히 찾지 못했다. `evidence/sql-baseline.md` §7.
+
 ### `answers32` — 기전은 있고 대상이 없다
 
 디렉터리 이름을 고르는 경로가 둘 겹쳐 있다:

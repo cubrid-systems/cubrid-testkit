@@ -1,0 +1,26 @@
+--- cases/4110-2.sql
++++ cases/4110-2.sql
+@@ -13,9 +13,9 @@
+  CREATE  FUNCTION jdbc1(i string) RETURN string as language java name 'jdbc_cubrid415.main1(java.lang.String) return java.lang.String';
+ 
+ 
+- call jdbc1('select name,id,password from _db_user order by 1') ;
+- call jdbc1('select name,id,password from _db_user ','') ;
+-$varchar,$select name,id,password from _db_user;
++ call jdbc1('select name,id from _db_user order by 1') ;
++ call jdbc1('select name,id from _db_user ','') ;
++$varchar,$select name,id from _db_user;
+   call jdbc1(?) ;
+ 
+ rollback;
+--- answers/4110-2.answer
++++ answers/4110-2.answer
+@@ -18,7 +18,7 @@
+ 0
+ ===================================================
+     
+-name|id|password|DBA|null|null|INFORMATION_SCHEMA|null|null|PUBLIC|null|null|     
++name|id|DBA|null|INFORMATION_SCHEMA|null|PUBLIC|null|     
+ 
+ ===================================================
+ Error:-888

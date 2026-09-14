@@ -1,0 +1,11 @@
+--- cases/1003.sql
++++ cases/1003.sql
+@@ -3,7 +3,7 @@
+ create CLASS t (b string );
+ insert INTO t values ('22');
+ 
+-SELECT length(a) from t;
++SELECT length(no_such_attribute) from t;
+ 
+ 
+ DROP t;

@@ -1,0 +1,30 @@
+--- cases/1001.sql
++++ cases/1001.sql
+@@ -2,7 +2,7 @@
+ --Create user with method 'add_user' of db_root
+ call login('dba') on class db_user;
+ call add_user('test_user') on class db_root;
+-select  name,id,password,direct_groups,groups,authorization from _db_user order by 1;
++select  name,id,direct_groups,groups,authorization from _db_user order by 1;
+ drop user test_user;
+ 
+ --+ holdcas off;
+--- answers/1001.answer
++++ answers/1001.answer
+@@ -7,11 +7,11 @@
+ _db_user     
+ 
+ ===================================================
+-name    id    password    direct_groups    groups    authorization    
+-DBA     null     null               _db_authorization     
+-INFORMATION_SCHEMA     null     null     _db_user,     _db_user,     _db_authorization     
+-PUBLIC     null     null               _db_authorization     
+-TEST_USER     null     null     _db_user,     _db_user,     _db_authorization     
++name    id    direct_groups    groups    authorization    
++DBA     null               _db_authorization     
++INFORMATION_SCHEMA     null     _db_user,     _db_user,     _db_authorization     
++PUBLIC     null               _db_authorization     
++TEST_USER     null     _db_user,     _db_user,     _db_authorization     
+ 
+ ===================================================
+ 0

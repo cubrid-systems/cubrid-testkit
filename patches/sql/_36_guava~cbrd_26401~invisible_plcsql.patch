@@ -1,0 +1,155 @@
+--- cases/invisible_plcsql.sql
++++ cases/invisible_plcsql.sql
+@@ -739,4 +739,52 @@
+ -- - CASE statements (2 cases)
+ -- - SYS_REFCURSOR (2 cases)
+ -- - Complex scenarios (3 cases)
+--- ============================================
+\ No newline at end of file
++-- ============================================
++-- The case creates these and nothing removed them, so every later case that
++-- lists the catalog saw them. A case cleans up after itself.
++drop procedure test_complex_loop;
++drop procedure test_mixed_sql;
++drop procedure test_nested_calls;
++drop procedure test_open_for;
++drop procedure test_case_expr_invisible;
++drop procedure test_case_invisible;
++drop procedure test_bulk_update;
++drop procedure test_bulk_insert;
++drop procedure test_local_function;
++drop procedure test_local_procedure;
++drop procedure test_exception_cursor;
++drop procedure test_exception_not_null;
++drop procedure test_inout_param;
++drop procedure double_invisible;
++drop procedure test_out_params;
++drop procedure get_invisible_values;
++drop function sum_invisible_cols;
++drop function count_by_c1;
++drop function get_invisible_c1;
++drop procedure test_dynamic_table;
++drop procedure test_dynamic_update;
++drop procedure test_dynamic_insert;
++drop procedure test_dynamic_explicit;
++drop procedure test_dynamic_select_star;
++drop procedure test_delete_invisible;
++drop procedure test_update_where_invisible;
++drop procedure test_update_invisible;
++drop procedure test_insert_with_invisible;
++drop procedure test_insert_no_invisible;
++drop procedure test_select_where_invisible;
++drop procedure test_select_agg_invisible;
++drop procedure test_select_into_explicit;
++drop procedure test_select_into_star;
++drop procedure test_nested_for_loops;
++drop procedure test_for_loop_order;
++drop procedure test_for_loop_where;
++drop procedure test_for_loop_explicit;
++drop procedure test_for_loop_star_where;
++drop procedure test_for_loop_star;
++drop procedure test_cursor_param;
++drop procedure test_cursor_order_invisible;
++drop procedure test_cursor_where_invisible;
++drop procedure test_cursor_explicit;
++drop procedure test_cursor_star;
++drop table if exists t1;
++drop table if exists t2;
+--- answers/invisible_plcsql.answer
++++ answers/invisible_plcsql.answer
+@@ -539,3 +539,95 @@
+ ===================================================
+ 0
+ 
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0
++===================================================
++0

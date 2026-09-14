@@ -170,6 +170,20 @@ func (q *Queue) Assign(byDir map[string]Lane) {
 	q.lanes = true
 }
 
+// Affinity keeps each directory on the slot that claimed its first case, with
+// no lanes: the half of Assign a runner needs when its slots differ in nothing
+// but what their earlier cases left behind.
+//
+// sql's cases share a database per slot, and a case may lean on what an earlier
+// case in its directory created -- which CTP always ran first, on the same
+// connection, because it ran everything in order. Held for one slot, a
+// directory still runs that way.
+func (q *Queue) Affinity() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.lanes = true
+}
+
 // Lanes reports whether lanes are on.
 func (q *Queue) Lanes() bool {
 	q.mu.Lock()
@@ -452,6 +466,31 @@ func (q *Queue) enqueue(c string, retry int) {
 		}
 	}
 	q.retryQueue = append(q.retryQueue, c)
+}
+
+// Drained reports whether a claimant arriving now would find nothing to take:
+// no first-pass case left unclaimed and no retry waiting. Cases still running,
+// or held for the slot that owns their directory, are not a newcomer's -- so a
+// runner still bringing a slot up can stop, rather than start one to find the
+// run already over.
+func (q *Queue) Drained() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.stopped {
+		return true
+	}
+	if len(q.retryQueue) > 0 {
+		return false
+	}
+	if !q.lanes {
+		return q.next >= len(q.cases)
+	}
+	for _, t := range q.taken {
+		if !t {
+			return false
+		}
+	}
+	return true
 }
 
 // Finished reports whether all work is done.

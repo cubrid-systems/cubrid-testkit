@@ -2,6 +2,7 @@ package result
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,6 +10,38 @@ import (
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 )
+
+// The isolation module names its archive after itself and packs the directory's
+// contents relative to it, so what comes out of it is ./dispatch_tc_ALL.txt and
+// not a path to the run directory.
+func TestIsolationPacksTheRunDirectoryFromInside(t *testing.T) {
+	home := &conf.Home{Path: t.TempDir()}
+	s, err := Open(home, "isolation", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.All([]string{"/s/a/a.ctl"}); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	name, err := s.BackupIsolation("11.5.0.2574-f1ae86f", "64bits", 0,
+		time.Date(2026, 9, 15, 3, 7, 22, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "isolation_result_11.5.0.2574-f1ae86f_64bits_0_2026.9.15_3.7.22.tar.gz"; name != want {
+		t.Errorf("name = %q, want %q", name, want)
+	}
+	archive := filepath.Join(home.Path, "result", "isolation", name)
+	out, err := exec.Command("tar", "tzf", archive).CombinedOutput()
+	if err != nil {
+		t.Fatalf("the archive was not written beside the run directory: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "./dispatch_tc_ALL.txt\n") {
+		t.Errorf("the archive holds:\n%s\nwant ./dispatch_tc_ALL.txt", out)
+	}
+}
 
 func TestBackupPacksTheRunDirectory(t *testing.T) {
 	home := &conf.Home{Path: t.TempDir()}

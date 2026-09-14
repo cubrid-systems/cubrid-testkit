@@ -136,8 +136,15 @@ scenario_ram_high_water=80
 case_plan=/path/to/plan           # written on the first run, read on the next
 case_sizes=/path/to/sizes         # likewise
 case_patch_dir=/path/to/patches/shell
+case_logs=fail                    # what a failed case wrote, kept
 status_http=on
 ```
+
+`case_logs` is not optional on a run this long. A full corpus takes two to three hours and ends with
+a handful of failures; the per-case output lives under `$CTP_HOME/result`, which the next run
+deletes, so without this the only way to read a failure is to run the whole thing again. Measured
+the hard way: a 162-minute run at develop head ended with 32 failures and nothing left to read them
+from. See [keeping what failed](06-keeping-what-failed.md).
 
 and in the engine's `cubrid.conf`:
 

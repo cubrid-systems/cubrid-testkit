@@ -988,6 +988,28 @@ type channelPair struct {
 	close           func()
 }
 
+// laneName is what the page calls a slot's lane: where its corpus writes land,
+// and -- for the disk -- whether the syncs on it were taken out of the way.
+//
+// With lanes off every slot is in the same one, named for where the run's
+// writes go, which is the honest reading of what it is doing. Two runs that
+// differ only in volatile differ by a factor of 2.6 on _01_utility, so a page
+// that calls both of them "disk" cannot be used to tell which is on the screen.
+// A tmpfs upper never waited for a sync, so volatile says nothing about it.
+func laneName(lane dispatch.Lane, inMemory bool) string {
+	name := lane.String()
+	if name == "" {
+		name = "disk"
+		if inMemory {
+			name = "tmpfs"
+		}
+	}
+	if name == "disk" && contain.Volatile() {
+		name = "disk, volatile"
+	}
+	return name
+}
+
 func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
@@ -998,14 +1020,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	// Which lane this slot is in: where its corpus writes land. With lanes off
 	// every slot is in the same one, named for where the run's writes go, which
 	// is the honest reading of what it is doing.
-	name := lane.String()
-	if name == "" {
-		name = "disk"
-		if corpus != nil {
-			name = "tmpfs"
-		}
-	}
-	board.Lane(slotID, name)
+	board.Lane(slotID, laneName(lane, corpus != nil))
 	ssh := machine.SSH()
 	w := &Worker{
 		EnvID:     machine.EnvID(),

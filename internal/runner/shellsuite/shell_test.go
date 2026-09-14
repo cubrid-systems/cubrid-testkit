@@ -11,6 +11,8 @@ import (
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
+	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
@@ -485,5 +487,36 @@ func TestFeedbackTypeDecidesWhetherARunKeepsFeedback(t *testing.T) {
 				t.Error("a run told to keep no feedback wrote feedback.log anyway")
 			}
 		})
+	}
+}
+
+// The page groups slots by lane, and the lane has to say which of the two
+// disk modes a run is in: "disk" and "disk, volatile" are a factor of 2.6
+// apart, and a page that calls both "disk" cannot tell them apart.
+func TestTheLaneSaysWhetherTheDiskIsVolatile(t *testing.T) {
+	for _, c := range []struct {
+		what     string
+		lane     dispatch.Lane
+		corpus   bool
+		volatile bool
+		want     string
+	}{
+		{"no lanes, writes on disk", dispatch.LaneAny, false, false, "disk"},
+		{"no lanes, disk mounted volatile", dispatch.LaneAny, false, true, "disk, volatile"},
+		{"no lanes, writes in memory", dispatch.LaneAny, true, false, "tmpfs"},
+		// A tmpfs upper never waited for a sync, so volatile says nothing
+		// about it and must not appear.
+		{"memory, volatile set anyway", dispatch.LaneAny, true, true, "tmpfs"},
+		{"the disk lane of a split", dispatch.LaneSlow, true, true, "disk, volatile"},
+		{"the fast lane of a split", dispatch.LaneFast, true, true, dispatch.LaneFast.String()},
+	} {
+		if c.volatile {
+			t.Setenv(contain.SlotVolatileEnv, "1")
+		} else {
+			t.Setenv(contain.SlotVolatileEnv, "")
+		}
+		if got := laneName(c.lane, c.corpus); got != c.want {
+			t.Errorf("%s: lane = %q, want %q", c.what, got, c.want)
+		}
 	}
 }

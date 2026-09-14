@@ -183,6 +183,22 @@ func (n *Namespace) Channel(dir string, env ...string) exec.Channel {
 	return &nsChannel{ns: n, inner: inner}
 }
 
+// Command returns a command, not yet started, that runs argv inside this
+// namespace. env extends this process's environment, as it does for Channel.
+//
+// A channel runs a script to its end and hands back what it printed. A process
+// a runner talks to while it runs -- sql's executor, one JVM a slot hands a case
+// at a time on its standard input -- needs its pipes instead, so the caller
+// sets them and starts the command itself.
+//
+// The group kill exec.Command arranges matters more here than anywhere:
+// nsenter forks to put its child in the PID namespace, so the process that
+// matters is not the one started here, and a signal to nsenter alone would
+// leave it running.
+func (n *Namespace) Command(ctx context.Context, dir string, env []string, argv ...string) *osexec.Cmd {
+	return exec.Command(ctx, dir, env, n.enter(argv...)...)
+}
+
 // Private gives this slot a directory of its own at path, backed by under.
 //
 // /tmp is the case for which this exists. cub_master listens on a Unix domain
@@ -312,14 +328,38 @@ func (n *Namespace) Overlay(target, upperRoot string) error {
 			return fmt.Errorf("%s: %q cannot be an overlay directory: the option string is comma-separated", n.label, d)
 		}
 	}
-	script := fmt.Sprintf("mount -t overlay overlay -o lowerdir=%s,upperdir=%s,workdir=%s %s",
-		target, upper, work, target)
+	opts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", target, upper, work)
+	why := whyOverlayFailed(target)
+	if Volatile() {
+		opts = "volatile," + opts
+		why += fmt.Sprintf("\n  %s=1 asks for a volatile overlay, which needs Linux 5.10 or later.", SlotVolatileEnv)
+	}
+	script := fmt.Sprintf("mount -t overlay overlay -o %s %s", opts, target)
 	if out, err := n.run(context.Background(), 20*time.Second, script); err != nil {
 		return fmt.Errorf("%s: overlay %s: %w: %s%s", n.label, target, err,
-			strings.TrimSpace(out), whyOverlayFailed(target))
+			strings.TrimSpace(out), why)
 	}
 	return nil
 }
+
+// Volatile reports whether slot overlays are mounted volatile: every fsync,
+// syncfs and sync on the slot's layer returns at once, having done nothing.
+//
+// What a server waits on at every commit is its log's fsync, and on a SATA SSD
+// that is most of a sql case: eight sql slots on one took 1,131 s, the same
+// slots with their overlays volatile 338-394 s, and their cases half the time
+// CTP's serial run spends on them (docs/evidence/sql-native.md §3).
+//
+// It is sound for a slot because a slot's layer is thrown away at the end, and a
+// sync only matters to a machine that goes down: a server killed in the middle of
+// a case loses nothing, since what it wrote is in the page cache, and recovery
+// reads it back from there. It is still not the default, because the syncs are
+// part of the conditions CTP ran under, and a run that skips them is a different
+// run.
+func Volatile() bool { return os.Getenv(SlotVolatileEnv) == "1" }
+
+// SlotVolatileEnv names the switch for volatile slot overlays.
+const SlotVolatileEnv = "TESTKIT_SLOT_VOLATILE"
 
 // whyMkdirFailed names the reason a slot cannot make its own directory, when the
 // reason is the one that is invisible from the error.

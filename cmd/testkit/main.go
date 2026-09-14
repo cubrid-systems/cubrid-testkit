@@ -34,6 +34,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
+	"github.com/cubrid-systems/cubrid-testkit/internal/runner/sqlsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runshell"
 )
 
@@ -136,14 +137,15 @@ func run(args []string) int {
 	reg.Register(legacy.New(cli.Active...))
 	reg.Register(shellsuite.NewUnitTest())
 
-	// The shell runner is complete but has never been compared against CTP on a
-	// real machine, and taking over the task that runs 3,452 cases on the strength
-	// of unit tests would be the wrong way round. It is opt-in until
-	// docs/evidence/regression-shell.md exists; then this gate comes off and the
-	// registration below becomes unconditional, which is the whole mechanism of
-	// the migration (ADR-004, ADR-013).
-	if os.Getenv("TESTKIT_NATIVE_SHELL") == "1" {
+	// Each family runs here only when it is asked for. Taking over the task that
+	// runs 3,452 cases -- or the one that runs 17,459 -- on the strength of unit
+	// tests would be the wrong way round; the gates come off family by family as
+	// the comparison against CTP is made (ADR-004, ADR-013, ADR-017).
+	if native("shell") {
 		reg.Register(shellsuite.NewShell())
+	}
+	if native("sql") {
+		reg.Register(sqlsuite.New())
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -174,12 +176,6 @@ func run(args []string) int {
 			Home:        home,
 			ConfigPath:  home.ConfigFor(task.Suite(), inv.ConfigPath),
 			Interactive: inv.Interactive,
-		}
-		// A missing file is not fatal here. CTP passed a null configuration to the
-		// unittest entry point, and the legacy path hands the path back to CTP,
-		// which reports its own absence in its own words.
-		if cfg, err := home.Load(req.ConfigPath); err == nil {
-			req.Config = cfg
 		}
 		if task == cli.WebConsole && inv.WebConsoleAction != "" {
 			req.Extra = []string{inv.WebConsoleAction}
@@ -507,4 +503,28 @@ func caseFragment(p string) string {
 		}
 	}
 	return p
+}
+
+// native says whether a family runs here rather than being handed to CTP.
+//
+// One switch, because this is one program: TESTKIT_NATIVE names the families,
+// comma-separated, and "all" is every one of them.
+//
+//	TESTKIT_NATIVE=shell,sql
+//
+// The older spelling still works -- TESTKIT_NATIVE_SHELL=1, TESTKIT_NATIVE_SQL=1
+// -- because it is what the shell category's documentation, the evidence
+// scripts and every operator's shell history say. Either turns the same
+// registration on; neither turns the other off.
+func native(family string) bool {
+	if os.Getenv("TESTKIT_NATIVE_"+strings.ToUpper(family)) == "1" {
+		return true
+	}
+	for _, f := range strings.Split(os.Getenv("TESTKIT_NATIVE"), ",") {
+		switch strings.ToLower(strings.TrimSpace(f)) {
+		case family, "all":
+			return true
+		}
+	}
+	return false
 }

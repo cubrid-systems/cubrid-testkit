@@ -1,7 +1,9 @@
 package contain
 
 import (
+	"bufio"
 	"context"
+	"io"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -203,6 +205,37 @@ func TestSlotsWriteIntoTheInstallWithoutSeeingEachOther(t *testing.T) {
 	}
 }
 
+// A volatile overlay is asked for, and only when it is asked for: the switch
+// changes the conditions the server runs under, so it must not leak into a run
+// that did not set it.
+func TestAnOverlayIsVolatileOnlyWhenAskedFor(t *testing.T) {
+	options := func(ns *Namespace, dir string) string {
+		// Field 5 of mountinfo is the mount point; the super options are last.
+		return run(t, ns, "awk '$5 == \""+dir+"\" {print $NF}' /proc/self/mountinfo")
+	}
+
+	plain, volatile := namespace(t), namespace(t)
+	install := t.TempDir()
+	if err := plain.Overlay(install, t.TempDir()); err != nil {
+		t.Fatalf("overlay: %v", err)
+	}
+	if got := options(plain, install); got == "" || strings.Contains(got, "volatile") {
+		t.Errorf("an overlay nobody asked to be volatile has options %q", got)
+	}
+
+	t.Setenv(SlotVolatileEnv, "1")
+	if err := volatile.Overlay(install, t.TempDir()); err != nil {
+		t.Fatalf("volatile overlay: %v", err)
+	}
+	if got := options(volatile, install); !strings.Contains(got, "volatile") {
+		t.Errorf("%s=1 and the overlay's options are %q", SlotVolatileEnv, got)
+	}
+	run(t, volatile, "echo written > "+install+"/conf && sync "+install+"/conf")
+	if got := run(t, volatile, "cat "+install+"/conf"); got != "written" {
+		t.Errorf("a write through a volatile overlay reads back as %q", got)
+	}
+}
+
 // POSIX shared memory is a file on a tmpfs, and a mount namespace inherits the
 // tmpfs it was cloned from -- so an IPC namespace, which separates System V
 // segments, leaves /dev/shm shared. cub_broker and cub_cas use both.
@@ -290,5 +323,72 @@ func TestAPermissionDeniedOnAnUnmappedOwnerSaysSo(t *testing.T) {
 	got := whyMkdirFailed("/var/lib/nothing-here", os.ErrPermission)
 	if !strings.Contains(got, "user namespace") || !strings.Contains(got, "TESTKIT_SLOT_ROOT") {
 		t.Errorf("the explanation should name the namespace and the knob, got %q", got)
+	}
+}
+
+// A process a runner talks to for the whole run -- sql's executor -- lives in
+// the slot, keeps its pipes, and goes when its context does. It has to be in
+// the slot's network namespace in particular: that is where the slot's broker
+// listens, on the same port every other slot's broker uses.
+func TestALongLivedProcessRunsInTheSlotAndKeepsItsPipes(t *testing.T) {
+	ns := namespace(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cmd := ns.Command(ctx, "", []string{"TESTKIT_PROBE=here"},
+		"bash", "-c", `readlink /proc/self/ns/net; echo "$TESTKIT_PROBE"; while read l; do echo "got $l"; done`)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	lines := bufio.NewScanner(stdout)
+	next := func() string {
+		t.Helper()
+		if !lines.Scan() {
+			t.Fatalf("the process said nothing more: %v", lines.Err())
+		}
+		return lines.Text()
+	}
+
+	mine, err := os.Readlink("/proc/self/ns/net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if theirs := next(); theirs == mine || !strings.HasPrefix(theirs, "net:") {
+		t.Errorf("the process is in network namespace %q and the runner in %q; it should be the slot's own", theirs, mine)
+	}
+	if got := next(); got != "here" {
+		t.Errorf("the environment did not reach the process: %q", got)
+	}
+	for _, say := range []string{"one", "two"} {
+		if _, err := io.WriteString(stdin, say+"\n"); err != nil {
+			t.Fatal(err)
+		}
+		if got := next(); got != "got "+say {
+			t.Errorf("wrote %q, read back %q", say, got)
+		}
+	}
+
+	cancel()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("cancelling the context did not end the process")
+	}
+	// A zombie has no command line, so this finds only a process that is still
+	// running. The killed one is a zombie until something reaps it: nsenter was
+	// its parent, so it is reparented to the runner's PID 1, which in a run is
+	// contain.Init and reaps it -- and under a bare `unshare -f` is the test
+	// binary, which does not, so the namespace takes Close's five seconds to go.
+	if out := run(t, ns, `pgrep -f 'while read l' || true`); out != "" {
+		t.Errorf("the process outlived its context inside the slot: pid %s", out)
 	}
 }

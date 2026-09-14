@@ -3,6 +3,7 @@ package shellsuite
 import (
 	"bufio"
 	"fmt"
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,7 +89,7 @@ func PruneRegistryScript(dir string) string {
 	// awk rather than sed: the path is data, and a case directory holds every
 	// character sed would treat as syntax.
 	return `f="${CUBRID_DATABASES:-}/databases.txt"; [ -n "${CUBRID_DATABASES:-}" ] && [ -f "$f" ] || exit 0
-awk -v d=` + shellQuote(dir) + ` '
+awk -v d=` + shQuote(dir) + ` '
   /^[[:space:]]*#/ { print; next }
   NF < 2          { print; next }
   $2 == d || index($2, d "/") == 1 { next }
@@ -96,4 +97,4 @@ awk -v d=` + shellQuote(dir) + ` '
 ' "$f" > "$f.tkprune" && mv "$f.tkprune" "$f"`
 }
 
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+func shQuote(s string) string { return exec.Quote(s) }

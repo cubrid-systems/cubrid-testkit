@@ -11,6 +11,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
+	"github.com/cubrid-systems/cubrid-testkit/internal/patch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/plan"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
@@ -51,7 +52,7 @@ type Worker struct {
 	Report  feedback.Feedback
 	Options CaseOptions
 	// Patches are the corpus changes this run carries. Nil is the ordinary case.
-	Patches *Patches
+	Patches *patch.Set
 	// Logs keeps what a case wrote, so a failure can be diagnosed without running
 	// the corpus again. Nil when case_logs is off, which is the default.
 	Logs *CaseLogs
@@ -186,7 +187,7 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		// "the case changed upstream", and would have called a patch that really
 		// did not apply a success and run the case unpatched while the run
 		// claimed it was patched.
-		res, perr := probeIn(ctx, w.Channel, ApplyScript(c.Dir, pf))
+		res, perr := probeIn(ctx, w.Channel, patch.ApplyScript(c.Dir, pf))
 		switch {
 		case perr != nil:
 			w.Board.Refused(c.Path, pf)
@@ -217,7 +218,7 @@ func (w *Worker) runOne(ctx context.Context, c Case) (items []string, console st
 		// configured, and "does the corpus come out as it went in" must not
 		// have "it depends" as its answer.
 		defer func() {
-			res, rerr := probeIn(context.Background(), w.Channel, RevertScript(c.Dir, pf))
+			res, rerr := probeIn(context.Background(), w.Channel, patch.RevertScript(c.Dir, pf))
 			why := ""
 			if rerr != nil {
 				why = rerr.Error()

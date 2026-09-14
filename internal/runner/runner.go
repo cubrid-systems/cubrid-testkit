@@ -17,9 +17,13 @@ type Request struct {
 	Task       cli.Task
 	Home       *conf.Home
 	ConfigPath string // already resolved, explicit or fallen back
-	// Config is the parsed file, or nil when there was none. unittest tolerates a
-	// missing file because CTP called GeneralLocalTest with a null argument.
-	Config      *conf.Config
+	// The file itself is not parsed here. The two families do not read the same
+	// shape -- shell's conf is flat and the sql family's has sections, because
+	// sql.conf carries what the runner writes into the engine's own files
+	// (conf/ini.go) -- so a Request that carried one parse would carry a parse
+	// one of them cannot use. Each runner opens the path in its own format, and
+	// a missing file is the runner's to report: unittest tolerates one, because
+	// CTP called GeneralLocalTest with a null configuration.
 	Interactive bool
 	Extra       []string // webconsole's start|stop, and nothing else so far
 }

@@ -14,6 +14,7 @@
 | [013](ADR-013-regression-equivalence.md) | How regression equivalence is proven | 정규화 후 diff 0. 코퍼스 = shell 전체 3,452, 스모크 = `_01_utility` 217. `_25_unstable` 별도 집계, HA·manually·Windows 제외 | 2026-09-02 |
 | [014](ADR-014-one-machine.md) | The runner's scope is one machine | 로컬이 기본, 원격도 '한 대'. 인스턴스 인벤토리·N대 deploy·기계 간 분배는 **축 O** 로 이관 (ADR-012 이 상속) | 2026-09-03 |
 | [015](ADR-015-beyond-axis.md) | Axis B — beyond | 축 T·O 는 *호환성을 지키는 재작성*이라 개선이 들어갈 자리가 없다. 세 번째 축을 두고 **입회 조건 4개**(무엇을 이기는지 명시 / parity 먼저 / 증거를 미리 선언 / 끌 수 있을 것). 등록부는 `concept/beyond-axis.md` | 2026-09-03 |
+| [016](ADR-016-sql-executor.md) | The sql executor | 케이스 실행(문장 전송 + 결과 텍스트)은 **인터페이스 뒤, 구현 둘**. `jdbc` = CQT 의 `SQLParser`·`ConsoleDAO` 를 그대로 쓰는 Java 프로세스(JDBC 모드 parity, 구성상 동일). `native` = Go CAS 클라이언트 + 모드별 포매터(CCI 모드 먼저, `ccqt` 대체). 문장 단위 텍스트를 주고받아 `jdbc` 가 `native` 의 오라클이 된다 | 2026-09-11 |
 
 ## 예약 (미결 — 트리거 대기)
 
@@ -27,8 +28,9 @@
 | 010 | 신/구 공존 기간의 유지보수 정책 | Phase 3 | ROADMAP §4 |
 | 011 | 인벤토리 모듈의 재작성 / 어댑터 분류 | Phase 4 | ROADMAP §5 |
 | 012 | **QA 운영 층**의 경계와 재구축 설계 (scheduler / mail / issue / queue / **플릿** — ADR-014 로 추가) | Phase 5 완료 후 또는 운영 필요 발생 시 | `migration-exclusions.md` §3 |
+| [017](ADR-017-sql-equivalence.md) | sql 동등성 증명 방법 — ADR-013 의 sql 판. **초안 (Proposed, 2026-09-11)**: 두 코퍼스 전체, 케이스별 판정 + **`.result` 바이트 동일** + `main.info`(시각 제외) + 집계, 자기 대조 noise floor — develop 에서 0/17,459 (판정·`.result` 모두), 앞선 버전 조합에서는 동률 정렬 1건 | 사용자 검토 | ADR-016, `evidence/sql-baseline.md` |
 
-> 013·014·015 는 아래 예약 번호보다 먼저 확정되었다. 예약은 *트리거 대기*일 뿐 순서가 아니다.
+> 013·014·015·016 은 아래 예약 번호보다 먼저 확정되었다. 예약은 *트리거 대기*일 뿐 순서가 아니다.
 
 ### ⚠️ 번호 충돌 해소 기록 (2026-09-02)
 

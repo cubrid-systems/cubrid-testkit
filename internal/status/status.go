@@ -721,6 +721,21 @@ func (b *Board) snapshot() view {
 	return v
 }
 
+// Open starts the page, and moves along when the default port is taken.
+//
+// Both suites want the same behaviour and had the same loop: a second run on
+// one machine should find a free port rather than fail, while an address the
+// operator pinned is theirs and is not second-guessed.
+func (b *Board) Open(addr string) (string, func(), error) {
+	where, stop, err := b.Serve(addr)
+	if err != nil && addr == DefaultAddr {
+		for try := 1; try <= 16 && err != nil; try++ {
+			where, stop, err = b.Serve(NearDefault(try))
+		}
+	}
+	return where, stop, err
+}
+
 // Serve starts the page and returns the address it is on and a way to stop it.
 //
 // The listener is opened before returning, so a port already in use is an error

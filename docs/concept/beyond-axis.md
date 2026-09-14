@@ -180,7 +180,8 @@ shipped 1523, and the configuration is never rewritten. That is not only less
 code than allocating blocks -- it is what keeps a slotted run's conf files and
 log lines byte-identical to a serial run's, which is the evidence this entry has
 to produce. `internal/slot`'s port and shared-memory arithmetic is no longer on
-the path; the IPC namespace covers the segments the same way.
+the path; the IPC namespace covers the segments the same way, and the package was
+deleted on 2026-09-13 rather than left as code nothing reaches.
 
 What it costs is the outside, and the cost is nameable: six of the 3,452 cases
 mention wget or curl and only one, `_06_issues/_25_2h/cbrd_26350`, fetches a URL

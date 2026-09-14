@@ -1,7 +1,8 @@
 # ROADMAP — CUBRID Test Kit
 
 - **날짜**: 2026-09-04 (E9 Tier 1 오라클 완비 — 정합성 검사 3종 + TSan/UBSan 베이스라인) / 2026-09-03 (§6a 부록 — fuzzing 우선순위 사다리 + E9 신설; 저녁: 순위 4 완료 · E9 state reset 게이트 통과) / 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
-- **현재 위치**: **Phase 2 완료 (2026-09-02)** — Phase 0 완료(2026-04-29) · Phase 1 게이트 통과 및 산출 완료 · Phase 2 설계 5종 완료. 다음은 **Phase 3 (shell 1차 대체)**, 착수 전 해소 항목은 `design/module-shell.md` §7
+- **현재 위치** *(2026-09-11)*: **Phase 3 진행 중** — shell native Runner 가 main 에 있고 `TESTKIT_NATIVE_SHELL` 뒤에 있다. 게이트(ADR-013 전체 코퍼스 비교)는 아직. **Phase 4 병행 착수** — sql·medium P0(측정·문서), 사용자 결정. 설계는 `design/module-sql.md`, 실행부는 ADR-016. 자원이 충돌하면 §8 의 규칙대로 shell 게이트가 먼저
+- **이전 위치**: Phase 2 완료 (2026-09-02) — Phase 0 완료(2026-04-29) · Phase 1 게이트 통과 및 산출 완료 · Phase 2 설계 5종 완료
 - **동시 트랙**: **§6a-E3 (SQLancer) 진행 중** — 사용자 결정으로 우선 승격 (ADR-EXT-003). 구현체는 별도 저장소 `cubrid-sqlancer`
 - **전략**: Strangler-fig 점진 대체 (1인 사이드 프로젝트, 6~12개월 호라이즌)
   + 확장 영역(외부 테스트 포맷 흡수, §6a)

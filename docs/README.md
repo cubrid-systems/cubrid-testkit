@@ -31,11 +31,21 @@ cubrid-testkit 는 CUBRID 의 기능 테스트 케이스를 실행하기 위한 
   - [module-shell](design/module-shell.md) — 1차 대체 대상, 35 클래스 매핑
   - [module-sql](design/module-sql.md) · [module-isolation](design/module-isolation.md) · [module-medium](design/module-medium.md)
 
+- **Category (as-built 운영 가이드)** — 돌리는 사람을 위한 문서. 설계가 아니라 지금 코드가 하는 일
+  - [category/shell](category/shell/README.md) — 단계·슬롯·메모리 ceiling·모든 키
+  - [category/sql](category/sql/README.md) — sql·medium: 단계와 실행부, 키와 스위치, 슬롯이 사 주는 것과 그 값, 실패 읽는 법
+- **Evidence (측정과 비교)** — 주장마다 근거. 숫자는 전부 실제 run 에서 나온다
+  - [regression-shell](evidence/regression-shell.md) · [parallel-shell](evidence/parallel-shell.md) — shell
+  - [sql-baseline](evidence/sql-baseline.md) · [sql-native](evidence/sql-native.md) · [regression-sql](evidence/regression-sql.md) — sql·medium (ADR-017 게이트 포함)
+  - [compare/](evidence/compare/README.md) — 정규화 후 비교하는 방법 (ADR-013)
+
 ## 디렉터리 구조
 
 ```
 cubrid-testkit/
-├── docs/        프로젝트 문서 (roadmap, ADR, 분석/설계 노트)
+├── docs/        프로젝트 문서 (roadmap, ADR, 분석/설계 노트, 운영 가이드, 증거)
 ├── cmd/testkit/ 진입점
-└── internal/    구현 (Phase 3+)
+├── internal/    구현
+├── patches/     코퍼스가 고쳐지기 전까지 run 이 들고 다니는 diff
+└── tools/       sizing.sh — 이 기계가 한 번에 얼마나 돌릴 수 있는지 재서 답한다
 ```

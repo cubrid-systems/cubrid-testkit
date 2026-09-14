@@ -144,8 +144,11 @@ being ignored.
 
 | | |
 |---|---|
-| runs natively | `unittest` · `shell` behind `TESTKIT_NATIVE_SHELL=1` |
-| dispatched to CTP | `sql` `medium` `kcc` `neis05` `neis08` `sql_by_cci` `rqg` `isolation` `ha_repl` `cdc_repl` `jdbc` `webconsole` |
+| runs natively | `unittest` · `shell` and `rqg` behind `TESTKIT_NATIVE=shell` · `sql` and `medium` behind `TESTKIT_NATIVE=sql` |
+| dispatched to CTP | `kcc` `neis05` `neis08` `sql_by_cci` `isolation` `ha_repl` `cdc_repl` `jdbc` `webconsole`, and any family whose gate is off |
+
+`TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of
+them. The older `TESTKIT_NATIVE_SHELL=1` and `TESTKIT_NATIVE_SQL=1` still work.
 
 Seven more names — `cci` `dots` `nbd` `sysbench` `tpcc` `tpcw` `ycsb` — are ones CTP accepted and
 silently did nothing about. They now say they are retired and move on to the next task: the same
@@ -176,6 +179,10 @@ one machine, a corpus that cleans itself up, per-case patches, and a progress pa
 **[`docs/category/shell/`](docs/category/shell/README.md) is the guide** — the module structure,
 every configuration key with what it costs, how the memory ceiling fails a run when it is sized
 wrong, how to run it on a host and in Docker, and what to set.
+
+**[`docs/category/sql/`](docs/category/sql/README.md) is the same guide for `sql` and `medium`** —
+the stages and the executor, every key and switch, what parallel buys and what it costs on the
+machine you have, and how to read a failure that is the corpus's order rather than the engine's.
 
 The short version:
 
@@ -284,7 +291,8 @@ internal/                cli · conf · registry · dispatch · runner (legacy, 
                          runshell · exec · result · feedback · topology ·
                          contain (namespaces per slot) · plan (case durations) ·
                          status (the progress page)
-tools/sizing.sh          how many slots and how big a ceiling, for this machine
+tools/sizing.sh          how many slots, which disk, and how big a ceiling, for this machine
+                         (`tools/sizing.sh sql <conf>` for the sql family)
 ext/cubrid-sqlancer/     submodule — a SQLancer provider for CUBRID
 docs/
   ROADMAP.md             phases, exit conditions, risks, the re-evaluation gate
@@ -310,6 +318,7 @@ docs/
 | how it is built | [`design/architecture.md`](docs/design/architecture.md) · [`design/contracts.md`](docs/design/contracts.md) |
 | how equivalence is decided, and run | [`adr/ADR-013`](docs/adr/ADR-013-regression-equivalence.md) · [`evidence/compare/`](docs/evidence/compare/README.md) |
 | how to run the shell suite | [`category/shell/`](docs/category/shell/README.md) |
+| how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
 | how a run is made parallel | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T3, B-T12, B-T13 |
 | where the run's hours go, and what to do next | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T14 |
 | what the old system could fix cheaply | [`evidence/ctp-improvements.md`](docs/evidence/ctp-improvements.md) |

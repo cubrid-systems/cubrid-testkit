@@ -5,7 +5,7 @@
 // Runner should never know which one it has -- that is what lets the same case
 // logic drive a local unittest and a case shipped over SSH.
 //
-// docs/design/contracts.md C3.
+// docs/project/design/contracts.md C3.
 package exec
 
 import (

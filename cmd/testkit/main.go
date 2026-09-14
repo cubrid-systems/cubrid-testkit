@@ -41,7 +41,7 @@ import (
 // version is stamped at build time: -ldflags "-X main.version=..."
 var version = "dev"
 
-// Exit codes are frozen (docs/concept/external-surface-freeze.md §6-1).
+// Exit codes are frozen (docs/project/concept/external-surface-freeze.md §6-1).
 const (
 	exitOK = 0
 	// exitPreflight is what bin/ctp.sh returned when JAVA_HOME was unset. It now
@@ -79,7 +79,7 @@ func run(args []string) int {
 	// shipped it as shell/init_path/run_shell.sh rather than as a ctp.sh task, and
 	// keeping that separation is what stops "run the corpus" and "hound one case"
 	// from growing into each other's options
-	// (docs/concept/external-surface-freeze.md §1-4).
+	// (docs/project/concept/external-surface-freeze.md §1-4).
 	if len(args) > 0 && args[0] == "run-shell" {
 		return runShell(args[1:])
 	}
@@ -229,7 +229,7 @@ in flight.
 
 --update-build, --next-build-url, --enable-report, --report-cron, --mailto,
 --mailcc and --issue are QA operations and are not implemented here
-(docs/concept/migration-exclusions.md).
+(docs/project/concept/migration-exclusions.md).
 `
 
 // runShell is the entry point for the looping single-case tool.
@@ -269,14 +269,14 @@ func runShell(args []string) int {
 	for name, v := range excluded {
 		if *v != "" {
 			fmt.Fprintf(os.Stderr, "run-shell: --%s is QA operations and is not implemented here "+
-				"(docs/concept/migration-exclusions.md)\n", name)
+				"(docs/project/concept/migration-exclusions.md)\n", name)
 			return exitPreflight
 		}
 	}
 	for name, v := range excludedFlags {
 		if *v {
 			fmt.Fprintf(os.Stderr, "run-shell: --%s is QA operations and is not implemented here "+
-				"(docs/concept/migration-exclusions.md)\n", name)
+				"(docs/project/concept/migration-exclusions.md)\n", name)
 			return exitPreflight
 		}
 	}
@@ -320,7 +320,7 @@ func runShell(args []string) int {
 
 	// CTP ended with System.exit(0) unconditionally, so a run that printed
 	// QUIT(NOK) still reported success and "run_shell.sh ... && ..." passed.
-	// Fixed in axis T as a clear bug (docs/concept/external-surface-freeze.md).
+	// Fixed in axis T as a clear bug (docs/project/concept/external-surface-freeze.md).
 	if res.Failed() {
 		return exitPreflight
 	}

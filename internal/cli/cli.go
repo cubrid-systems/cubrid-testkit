@@ -1,6 +1,6 @@
 // Package cli parses the command line ctp.sh has always accepted.
 //
-// The grammar is frozen at F1 (docs/concept/external-surface-freeze.md §1-1):
+// The grammar is frozen at F1 (docs/project/concept/external-surface-freeze.md §1-1):
 //
 //	ctp.sh <task>... [-c <conf>] [--interactive] [-h] [-v]
 //

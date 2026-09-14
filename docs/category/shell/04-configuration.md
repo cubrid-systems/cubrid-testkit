@@ -51,7 +51,7 @@ These behave as they always did.
 | `TESTKIT_CONTAIN=1` | put the run in namespaces of its own. **Required** by slots and by `scenario_ram_mb` |
 | `TESTKIT_CONTAIN_SH` | which shell to bind over `/bin/sh`. `bash` if it can be found |
 | `TESTKIT_SLOT_ROOT` | where each run makes its own directory for the per-slot overlays, removed when the slots close. `/var/tmp/testkit-slots` when unset |
-| `TESTKIT_SLOT_VOLATILE=1` | mount the per-slot overlays `volatile`: a sync on a slot's layer returns having done nothing. Off by default, because the syncs are part of the conditions CTP runs under. **For shell it reaches the corpus only through `scenario_disk` or the disk lane's overlay** (`lane_slow_*`): otherwise a case runs in place in the corpus, as under CTP, and its databases are not on any overlay — `_01_utility` on eight slots took 1,426 s without it and 1,401 s with it, with the same 139,000 flushes and the same verdicts (`evidence/parallel-shell.md` §5). sql's databases are, and there it took eight slots from 1,131 s to 338–394 s (`evidence/sql-native.md` §3). Needs Linux 5.10+; changes nothing on a tmpfs, whose syncs cost nothing already |
+| `TESTKIT_SLOT_VOLATILE=1` | mount the per-slot overlays `volatile`: a sync on a slot's layer returns having done nothing. Off by default, because the syncs are part of the conditions CTP runs under. **For shell it reaches the corpus only through `scenario_disk` or the disk lane's overlay** (`lane_slow_*`): otherwise a case runs in place in the corpus, as under CTP, and its databases are not on any overlay — `_01_utility` on eight slots took 1,426 s without it and 1,401 s with it, with the same 139,000 flushes and the same verdicts (`project/evidence/parallel-shell.md` §5). sql's databases are, and there it took eight slots from 1,131 s to 338–394 s (`project/evidence/sql-native.md` §3). Needs Linux 5.10+; changes nothing on a tmpfs, whose syncs cost nothing already |
 
 And CTP's failure snapshot, which is off the frozen surface and configurable:
 
@@ -122,7 +122,10 @@ fail a run rather than a way to speed one up.
 
 ### One machine, the whole corpus
 
-Sized for a 30 GB machine — run `tools/sizing.sh` before trusting these on another.
+Sized for a 30 GB machine — run `tools/sizing.sh` before trusting these on another. Sized means
+cores that are free, not cores that are counted: on a 30 GB, 16-core machine that other work was
+also using, sixteen slots ran no faster than eight, and `sizing.sh` had said so by measuring four
+to five cores' work at once ([`parallel-shell.md` §6](../../project/evidence/parallel-shell.md)).
 
 ```
 scenario=/path/to/testcases/shell

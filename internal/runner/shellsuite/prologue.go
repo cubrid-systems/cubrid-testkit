@@ -22,7 +22,7 @@ import (
 // `source ${init_path}/../../common/script/util_common.sh` only resolves because
 // init_path was exported here.
 //
-// docs/evidence/spec-corrections.md.
+// docs/project/evidence/spec-corrections.md.
 const prologue = `if [ "${CTP_HOME}" == "" ]; then
   if which ctp.sh >/dev/null 2>&1 ; then
     CTP_HOME=$(dirname $(readlink -f ` + "`which ctp.sh`" + `))/..

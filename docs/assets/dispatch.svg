@@ -75,10 +75,10 @@
 <rect x="600" y="308" width="256" height="120" rx="6" fill="#f9fafb" stroke="#9ca3af" stroke-width="1.2" stroke-dasharray="4 3"/>
 <text class="eye" x="616" y="328">LEGACY — CTP, AS A SUBPROCESS</text>
 <text class="name" x="616" y="348">argv and env, byte for byte</text>
-<text class="m" x="616" y="368">kcc · neis05 · neis08</text>
-<text class="m" x="616" y="384">sql_by_cci · isolation · jdbc</text>
-<text class="m" x="616" y="400">ha_repl · cdc_repl · webconsole</text>
-<text class="d" x="616" y="420">+ shell, rqg, sql, medium when off</text>
+<text class="m" x="616" y="368">kcc · neis05 · neis08 · jdbc</text>
+<text class="m" x="616" y="384">sql_by_cci · webconsole</text>
+<text class="m" x="616" y="400">ha_repl · cdc_repl</text>
+<text class="d" x="616" y="420">+ every family whose gate is off</text>
 
 <!-- output -->
 <rect x="24" y="476" width="568" height="76" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>

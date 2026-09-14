@@ -20,7 +20,9 @@ For engine developers and QA. Part of
 > **Where it is:** `unittest` runs natively. `sql` and `medium` run natively behind
 > `TESTKIT_NATIVE=sql` and passed [ADR-017](docs/project/evidence/regression-sql.md)'s gate at
 > upstream develop's head. `shell` and `rqg` run natively behind `TESTKIT_NATIVE=shell`, over the
-> whole corpus; the full-corpus comparison against CTP has not cleared yet. Every other task
+> whole corpus; the full-corpus comparison against CTP has not cleared yet. `isolation` runs natively
+> behind `TESTKIT_NATIVE=isolation`, with CTP's own `runone.sh` still executing every case; its
+> gate is proposed in [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md). Every other task
 > dispatches to CTP unchanged. See [Status](#status).
 
 ## Prerequisites
@@ -75,7 +77,8 @@ change rather than a negotiation.
 
 **A task is routed, not converted.** Legacy registers first and claims all fourteen tasks; a native
 runner registered after it takes over the ones it names. `unittest` always runs natively, `shell`
-and `rqg` when `TESTKIT_NATIVE` names `shell`, `sql` and `medium` when it names `sql`; the legacy
+and `rqg` when `TESTKIT_NATIVE` names `shell`, `sql` and `medium` when it names `sql`, `isolation`
+when it names `isolation`; the legacy
 path reproduces CTP's argv and environment byte for byte for everything else. There is no
 jar-compatibility layer: old modules keep their own jars, which keep being built, until their turn
 comes.
@@ -124,8 +127,8 @@ being ignored.
 
 | | |
 |---|---|
-| runs natively | `unittest` · `shell` and `rqg` behind `TESTKIT_NATIVE=shell` · `sql` and `medium` behind `TESTKIT_NATIVE=sql` |
-| dispatched to CTP | `kcc` `neis05` `neis08` `sql_by_cci` `isolation` `ha_repl` `cdc_repl` `jdbc` `webconsole`, and any family whose gate is off |
+| runs natively | `unittest` · `shell` and `rqg` behind `TESTKIT_NATIVE=shell` · `sql` and `medium` behind `TESTKIT_NATIVE=sql` · `isolation` behind `TESTKIT_NATIVE=isolation` |
+| dispatched to CTP | `kcc` `neis05` `neis08` `sql_by_cci` `ha_repl` `cdc_repl` `jdbc` `webconsole`, and any family whose gate is off |
 
 `TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of
 them. The older `TESTKIT_NATIVE_SHELL=1` and `TESTKIT_NATIVE_SQL=1` still work.
@@ -213,13 +216,20 @@ suffix is now just its version instead of `11.2.0.0000) (64bit release build for
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
 | **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` over the whole corpus at develop head, every failure attributed; `run-shell` complete, with six axis-T options; slots, a corpus that cleans itself, per-case patches and a progress page are in and measured. The full-corpus comparison against CTP has not cleared |
-| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation`, `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
+| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation` native over the whole corpus, its gate proposed (ADR-018); `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
 **What is proven, for sql and medium.** CTP and testkit over the whole of both corpora, serial, with
 the engine, the cases and CTP all at upstream develop's head: medium identical in every file, and a
 clean sql run byte-identical to a clean CTP run — 17,459 `.result` files and 2,762 record files
 ([`project/evidence/regression-sql.md`](docs/project/evidence/regression-sql.md)).
+
+**What is measured, for isolation.** CTP does not reproduce its own verdicts on this corpus: two
+whole CTP runs in the same order disagree on seven of 6,772. Against them, the native runner writes
+the same machine check, dispatch sets and snapshot, and every verdict it disagrees on belongs to a
+case that flips under CTP too — rerun alone, three times under each runner, none of the ten
+separates the two. On a 60-case sample every result file is byte-identical
+([`project/evidence/isolation-baseline.md`](docs/project/evidence/isolation-baseline.md)).
 
 **What is proven, for shell.** Equivalence here is not byte-identity, because some of what a run
 writes cannot match between two runs — paths, times, dates. So both sides are normalised, and then
@@ -260,7 +270,7 @@ and a shard comparison once blamed the runner for what the runner before it had 
 CONTEXT.md               the glossary — task ≠ suite ≠ module ≠ runner
 cmd/testkit/             the entry point
 internal/                cli · conf · registry · dispatch · runshell · exec · result · feedback ·
-                         topology · runner (legacy, shellsuite, sqlsuite) ·
+                         topology · runner (legacy, shellsuite, sqlsuite, isolationsuite) ·
                          contain (namespaces per slot) · plan (case durations) ·
                          patch (per-case patches) · coredump (a crashed case's stack) ·
                          status (the progress page)

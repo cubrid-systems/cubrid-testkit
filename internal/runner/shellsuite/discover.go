@@ -29,7 +29,7 @@ import (
 //
 //	awk -F "/" '{ if( $(NF-2)".sh"== $NF) print }'
 //
-// docs/evidence/spec-corrections.md 10.
+// docs/project/evidence/spec-corrections.md 10.
 func IsCase(p string) bool {
 	parts := strings.Split(p, "/")
 	if len(parts) < 3 {
@@ -94,7 +94,7 @@ func findAll(dir string) string {
 // across runs of CTP itself. We sort instead -- the set is the contract, the order
 // was never one, and a sorted list makes two runs comparable.
 //
-// docs/evidence/spec-corrections.md 11.
+// docs/project/evidence/spec-corrections.md 11.
 func Discover(ctx context.Context, ch exec.Channel, workspace string) ([]string, error) {
 	// find exits 1 when it could not read a directory, and still lists what it
 	// could read. That is not a reason to stop the run: CTP never read the

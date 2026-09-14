@@ -43,7 +43,7 @@ func FindHome() (*Home, error) {
 
 // ConfigFor returns the configuration path for a suite. An explicit -c wins;
 // otherwise it is $CTP_HOME/conf/<suite>.conf, which is part of the frozen
-// surface (docs/concept/external-surface-freeze.md §1-1).
+// surface (docs/project/concept/external-surface-freeze.md §1-1).
 func (h *Home) ConfigFor(suite, explicit string) string {
 	if explicit != "" {
 		return explicit

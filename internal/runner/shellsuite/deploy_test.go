@@ -329,7 +329,7 @@ func TestTheSweepCannotReachOutsideTheSlot(t *testing.T) {
 }
 
 // And the uncontained sweep is CTP's, which selects by $USER across the whole
-// machine. That is documented as item B in docs/evidence/ctp-improvements.md;
+// machine. That is documented as item B in docs/project/evidence/ctp-improvements.md;
 // what must not happen is a contained run quietly taking that path.
 func TestAContainedRunDoesNotUseTheMachineWideSelector(t *testing.T) {
 	contained := KillScript(true, true)

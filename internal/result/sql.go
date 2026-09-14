@@ -17,7 +17,7 @@ import (
 // The sql family's records: what CQT printed and wrote around each case, and
 // what run.sh added after it. The spec every byte here is held to is CQT's
 // source (CTP develop a1bec87), and it was checked by an independent emulator
-// against five real runs, byte for byte (docs/evidence/sql-baseline.md).
+// against five real runs, byte for byte (docs/project/evidence/sql-baseline.md).
 //
 // Where Java's collections leak into the bytes -- Hashtable iteration and a sort
 // whose comparator treats a null name as equal to everything -- they are

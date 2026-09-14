@@ -17,7 +17,7 @@ import (
 // CTP upgraded itself first -- deploy_ctp ran common/script/upgrade.sh against a
 // branch named in the config. Deciding when the test harness updates is an
 // operations question, not a test-execution one, and it is excluded on the axis
-// split (docs/concept/migration-exclusions.md).
+// split (docs/project/concept/migration-exclusions.md).
 //
 // CTP also installed the build, by calling run_cubrid_install -- a shell function
 // that exists only inside CTP's own deployed environment. The runner tests the
@@ -78,7 +78,7 @@ func paramList(props map[string]string) string {
 // the results look real. Under the config-key policy that is a wrong result
 // someone would trust, so brokercommon counts here.
 //
-// docs/concept/migration-exclusions.md 2a.
+// docs/project/concept/migration-exclusions.md 2a.
 func ConfigureScript(inst *topology.Instance) string {
 	var lines []string
 	empty := true

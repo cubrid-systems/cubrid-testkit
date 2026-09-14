@@ -13,7 +13,7 @@ as-built guide.
 | **[6. Keeping what failed](06-keeping-what-failed.md)** | what a failing case leaves behind, and what it should |
 
 The pre-implementation design — the old Java class mapping and the ADRs behind the rewrite — is
-[`../../design/module-shell.md`](../../design/module-shell.md).
+[`../../design/module-shell.md`](../../project/design/module-shell.md).
 
 ## In one picture
 
@@ -35,11 +35,12 @@ The pre-implementation design — the old Java class mapping and the ADRs behind
                         │                                reconfigured
                         v
               overlay upper layer
-              (tmpfs, if scenario_ram_mb)
+              (tmpfs or disk, per slot)
 ```
 
 The corpus is never written to. Every case's writes land in an overlay whose lower layer is the
-scenario as the repository has it, and whose upper layer is memory when `scenario_ram_mb` is set.
+scenario as the repository has it, and whose upper layer is memory when `scenario_ram_mb` is set
+or a directory of the slot's own on disk with `scenario_disk=on`.
 When a directory's last case finishes, its writes are dropped.
 
 ## The shortest possible run
@@ -77,7 +78,7 @@ testcase_retry_num=0
 parallel_slots=1
 EOF
 
-TESTKIT_CONTAIN=1 TESTKIT_NATIVE_SHELL=1 testkit shell -c /tmp/demo/shell.conf
+TESTKIT_CONTAIN=1 TESTKIT_NATIVE=shell testkit shell -c /tmp/demo/shell.conf
 ```
 
 ```

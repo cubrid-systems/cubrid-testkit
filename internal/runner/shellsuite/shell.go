@@ -72,7 +72,7 @@ func (s *Shell) Validate(req runner.Request) error {
 	// believing the result -- so it fails instead.
 	if cfg.Bool("testcase_update_yn", false) {
 		return quit("testcase_update_yn=yes asks for a case update, which this runner does not do " +
-			"(docs/concept/migration-exclusions.md). Update the corpus separately, then run with " +
+			"(docs/project/concept/migration-exclusions.md). Update the corpus separately, then run with " +
 			"testcase_update_yn=no")
 	}
 	return nil
@@ -116,7 +116,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 
 	if url := strings.TrimSpace(cfg.GetOr("cubrid_download_url", "")); url != "" {
 		fmt.Printf("[WARN] cubrid_download_url is set but installing builds is not this runner's job "+
-			"(docs/concept/migration-exclusions.md 1-4a). Testing the build that is installed; "+
+			"(docs/project/concept/migration-exclusions.md 1-4a). Testing the build that is installed; "+
 			"compare the build number below against %s\n", url)
 	}
 
@@ -867,7 +867,7 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 			patterns = append(patterns, from...)
 		}
 		// The two lines around the count are CTP's and are frozen
-		// (docs/concept/external-surface-freeze.md); the count is the total.
+		// (docs/project/concept/external-surface-freeze.md); the count is the total.
 		fmt.Println("****************************************")
 		fmt.Printf("# OF EXCLUDED = %d\n", len(patterns))
 		fmt.Println("****************************************")

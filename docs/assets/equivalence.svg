@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 476" width="880" height="476" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="equivalence-title equivalence-desc">
+<title id="equivalence-title">What "equivalent" means for one shard</title>
+<desc id="equivalence-desc">The same cases run on CTP and on testkit, and both result trees are kept. normalize.sh masks what may legitimately differ — path prefixes, elapsed times, dates, order, hosts and pids. compare.sh then holds the six files that carry verdicts to zero differences with no baseline applied, and classifies the other four through baseline.txt; any verdict-file difference, or any line no rule explains, is reported as NEW.</desc>
+<style>
+  .ttl{font-size:16px;font-weight:700;fill:#1f2937}
+  .sub{font-size:12px;fill:#6b7280}
+  .eye{font-size:8px;font-weight:700;fill:#6b7280;letter-spacing:1px}
+  .eye-b{font-size:8px;font-weight:700;fill:#2563eb;letter-spacing:1px}
+  .name{font-size:12px;font-weight:700;fill:#1f2937}
+  .name-r{font-size:12px;font-weight:700;fill:#c0392b}
+  .d{font-size:12px;fill:#6b7280}
+  .m{font-size:12px;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mb{font-size:12px;font-weight:700;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mm{font-size:12px;fill:#6b7280;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .note{font-size:12px;fill:#9ca3af}
+  .wire{fill:none;stroke:#6b7280;stroke-width:1.2}
+  .wire-r{fill:none;stroke:#c0392b;stroke-width:1.2}
+</style>
+<defs>
+  <marker id="equivalence-arrow" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6b7280"/></marker>
+  <marker id="equivalence-arrow-r" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#c0392b"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="476" fill="#ffffff"/>
+
+<text class="ttl" x="24" y="32">Equivalence, for one shard: run both, normalise, then diff</text>
+<text class="sub" x="24" y="52">The same cases on the same machine, CTP on one side and testkit on the other. Six files are held to zero; the rest are classified.</text>
+
+<!-- connectors first -->
+<path class="wire" d="M144,156 H152 Q160,156 160,148 V124 Q160,116 168,116 H176" marker-end="url(#equivalence-arrow)"/>
+<path class="wire" d="M144,180 H152 Q160,180 160,188 V212 Q160,220 168,220 H176" marker-end="url(#equivalence-arrow)"/>
+<path class="wire" d="M328,116 H336 Q344,116 344,124 V148 Q344,156 352,156 H360" marker-end="url(#equivalence-arrow)"/>
+<path class="wire" d="M328,220 H336 Q344,220 344,212 V188 Q344,180 352,180 H360" marker-end="url(#equivalence-arrow)"/>
+<path class="wire" d="M508,156 H520 Q528,156 528,148 V144 Q528,136 536,136 H548" marker-end="url(#equivalence-arrow)"/>
+<path class="wire" d="M508,180 H520 Q528,180 528,188 V280 Q528,288 536,288 H548" marker-end="url(#equivalence-arrow)"/>
+<path class="wire-r" d="M704,344 V376" marker-end="url(#equivalence-arrow-r)"/>
+<path class="wire-r" d="M856,144 H864 Q872,144 872,152 V396 Q872,404 864,404 H856" marker-end="url(#equivalence-arrow-r)"/>
+
+<!-- the cases -->
+<rect x="24" y="124" width="120" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="name" x="84" y="156" text-anchor="middle">the same cases</text>
+<text class="d" x="84" y="176" text-anchor="middle">one shard</text>
+<text class="d" x="84" y="192" text-anchor="middle">one machine</text>
+
+<!-- the two runners -->
+<rect x="176" y="80" width="152" height="72" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="name" x="192" y="104">CTP</text>
+<text class="m" x="192" y="124">ctp.sh shell</text>
+<text class="d" x="192" y="140">result tree kept</text>
+
+<rect x="176" y="184" width="152" height="72" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="name" x="192" y="208">testkit</text>
+<text class="m" x="192" y="228">testkit shell</text>
+<text class="d" x="192" y="244">result tree kept</text>
+
+<!-- normalise -->
+<rect x="360" y="104" width="148" height="128" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="mb" x="376" y="128">normalize.sh</text>
+<text class="d" x="376" y="148">masks what may differ</text>
+<text class="mm" x="376" y="172">path prefixes</text>
+<text class="mm" x="376" y="188">elapsed times</text>
+<text class="mm" x="376" y="204">dates · order</text>
+<text class="mm" x="376" y="220">hosts · pids</text>
+
+<!-- strict -->
+<rect x="548" y="80" width="308" height="128" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>
+<text class="eye-b" x="564" y="100">SIX FILES CARRY THE VERDICTS</text>
+<text class="m" x="564" y="120">dispatch_tc_ALL.txt</text><text class="m" x="728" y="120">test_status.data</text>
+<text class="m" x="564" y="136">dispatch_tc_FIN_*.txt</text><text class="m" x="728" y="136">current_task_id</text>
+<text class="m" x="564" y="152">check_*.log</text><text class="m" x="728" y="152">monitor_*.log</text>
+<text class="name" x="564" y="176">held to zero — the baseline is not applied</text>
+<text class="d" x="564" y="192">deviations.txt exempts whole lines, naming each</text>
+
+<!-- classified -->
+<rect x="548" y="232" width="308" height="112" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="564" y="252">THE OTHER FOUR ARE CLASSIFIED</text>
+<text class="m" x="564" y="272">feedback.log · test-shell.xml</text>
+<text class="m" x="564" y="288">test_local.log</text>
+<text class="m" x="564" y="304">main_snapshot.properties</text>
+<text class="d" x="564" y="328">baseline.txt names what has been seen before</text>
+
+<!-- the finding -->
+<rect x="548" y="376" width="308" height="56" rx="6" fill="#fdecea" stroke="#c0392b" stroke-width="1.4"/>
+<text class="name-r" x="564" y="400">NEW — the only thing on the page</text>
+<text class="d" x="564" y="420">whatever no rule explains is the finding</text>
+
+<text class="note" x="24" y="460">A baseline names a difference; it never judges it acceptable.  ADR-013 · docs/project/evidence/compare/</text>
+</svg>

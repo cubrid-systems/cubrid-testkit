@@ -463,7 +463,7 @@ func TestTheMonitorKeepsResolvingWhileTheCaseRuns(t *testing.T) {
 }
 
 // A sweep that does not free the case used to leave the worker blocked for good.
-// docs/evidence/regression-shell.md records the run where that happened.
+// docs/project/evidence/regression-shell.md records the run where that happened.
 func TestTheMonitorEndsACaseTheSweepDidNotFree(t *testing.T) {
 	ch := &guardedChannel{inner: exec.NewLocal("")}
 	w := &Worker{EnvID: "env1", Channel: ch, Sink: newSink(t), Report: feedback.Null{}, Local: true}

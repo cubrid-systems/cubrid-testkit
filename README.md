@@ -11,22 +11,23 @@ task at a time.
 
 Deciding *when* to run, telling people the result, and filing the issue that comes out of it are a
 different job. They are out of scope, listed with reasons in
-[`concept/migration-exclusions.md`](docs/concept/migration-exclusions.md), and get rebuilt later as
-a layer that consumes this system's output.
+[`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md), and get
+rebuilt later as a layer that consumes this system's output.
 
 For engine developers and QA. Part of
 [CUBRID Systems Research](https://github.com/cubrid-systems).
 
-> **Where it is:** Phase 3 is in progress. `unittest` runs natively, and `shell` runs end-to-end
-> and agrees with CTP on four real cases — behind an opt-in gate until the full corpus clears.
-> Every other task dispatches to CTP unchanged. A shell run can now use several slots on one
-> machine; see [`docs/category/shell/`](docs/category/shell/README.md) and [Status](#status).
+> **Where it is:** `unittest` runs natively. `sql` and `medium` run natively behind
+> `TESTKIT_NATIVE=sql` and passed [ADR-017](docs/project/evidence/regression-sql.md)'s gate at
+> upstream develop's head. `shell` and `rqg` run natively behind `TESTKIT_NATIVE=shell`, over the
+> whole corpus; the full-corpus comparison against CTP has not cleared yet. Every other task
+> dispatches to CTP unchanged. See [Status](#status).
 
 ## Prerequisites
 
 | | Why |
 |---|---|
-| **Go** | to build the binary. Version from `go.mod` |
+| **Go 1.25+** | to build the binary (`go.mod`) |
 | **A CTP checkout** | any task that has not been rewritten runs the original as a subprocess: `CTP_HOME`, and `JAVA_HOME` for that path |
 | **A CUBRID build** | the engine under test, with its own install and `CUBRID_DATABASES` |
 | **A testcases checkout** | the cases themselves, for the tasks that read a corpus |
@@ -57,35 +58,12 @@ The compatibility is not a promise made in prose; it is where the binary sits. T
 a QA machine keeps calling `bin/ctp.sh` and gets this runner, and nothing that reads the output can
 tell.
 
-**The shim is not in place yet.** `bin/ctp.sh` in `cubrid-testtools` is still the original, and it
-should stay that way until the corpus comparison clears — the gate is what earns the swap. Today you
-reach this runner by invoking it directly, which is what the comparison harness does when it runs
-both sides on the same shard. Everything below the shim is built and running; the diagram is the
-design ([`design/architecture.md`](docs/design/architecture.md)) with the top line marked as the
-part that is still ahead.
+![How testkit routes a task: a command typed today, or by bin/ctp.sh once its shim is in place, reaches one registry, which sends unittest, shell and rqg to shellsuite, sql and medium to sqlsuite — each family behind TESTKIT_NATIVE — and everything else to the original CTP as a subprocess; every path writes the same frozen output.](docs/assets/dispatch.svg)
 
-```
-        what a QA machine runs                what actually happens
-                                              (── shim: not yet ──)
-        ──────────────────────                ─────────────────────
-        $ ctp.sh shell -c shell.conf   ──┐
-        $ ctp.sh unittest -c u.conf    ──┤    a shim: exec testkit "$@"
-        $ ctp.sh sql medium -c s.conf  ──┘              │
-                                                        ▼
-                                              ┌───────────────────┐
-                                              │  one registry     │   task name → runner
-                                              └─────────┬─────────┘
-                                        rewritten ──────┴────── not yet
-                                            │                     │
-                                    ┌───────▼──────┐      ┌───────▼────────┐
-                                    │ native (Go)  │      │ CTP, as a      │
-                                    │ shell·unittest│      │ subprocess     │
-                                    └───────┬──────┘      └───────┬────────┘
-                                            └──────────┬──────────┘
-                                                       ▼
-                                        the same files, the same stdout markers,
-                                        the same exit codes — the frozen surface
-```
+**The shim is not in place yet** — the dashed box. `bin/ctp.sh` in `cubrid-testtools` is still the
+original, and it should stay that way until the corpus comparison clears — the gate is what earns
+the swap. Today you reach this runner by invoking it directly, which is what the comparison harness
+does when it runs both sides on the same shard. Everything below the shim is built and running.
 
 Three things follow, and they are the whole design.
 
@@ -95,19 +73,21 @@ nothing has to be migrated on a schedule. The command line is already frozen and
 `internal/cli` is that contract written down, which is what makes the eventual swap a one-line
 change rather than a negotiation.
 
-**A task is routed, not converted.** One registry turns a name into either a native runner or the
-legacy one, and the legacy path reproduces CTP's argv and environment byte for byte. `shell` and
-`unittest` run natively; the other twelve are handed to the original CTP.
+**A task is routed, not converted.** Legacy registers first and claims all fourteen tasks; a native
+runner registered after it takes over the ones it names. `unittest` always runs natively, `shell`
+and `rqg` when `TESTKIT_NATIVE` names `shell`, `sql` and `medium` when it names `sql`; the legacy
+path reproduces CTP's argv and environment byte for byte for everything else. There is no
+jar-compatibility layer: old modules keep their own jars, which keep being built, until their turn
+comes.
 
-**The output belongs to neither.** Both paths write through the same result layer, because the
+**The output belongs to neither.** Every path writes through the same result layer, because the
 surface is a property of the output rather than of whichever implementation ran
-([ADR-003](docs/adr/ADR-003-external-surface-freeze.md)). That is what lets a task move from one
-side to the other without anything downstream noticing — and what makes the equivalence gate
+([ADR-003](docs/project/adr/ADR-003-external-surface-freeze.md)). That is what lets a task move from
+one side to the other without anything downstream noticing — and what makes the equivalence gate
 meaningful, since it compares two runners' files rather than two runners' intentions.
 
-So the usage below is the usage `ctp.sh` has always had: same task names, same `-c`, same exit
-codes. `testkit` is what you type today; `ctp.sh` is what a machine will type, and the point of
-freezing the command line first is that the two are the same words.
+[`project/design/architecture.md`](docs/project/design/architecture.md) and
+[`project/design/contracts.md`](docs/project/design/contracts.md) are the specifications.
 
 ## Using it
 
@@ -118,7 +98,7 @@ testkit <task>... [-c <conf>] [--interactive] [-h] [-v]
 ```bash
 testkit shell -c shell.conf
 testkit sql medium -c ~/CTP/conf/sql.conf     # several tasks, in the order given
-TESTKIT_NATIVE_SHELL=1 testkit shell -c shell.conf
+TESTKIT_NATIVE=shell testkit shell -c shell.conf
 ```
 
 Task names are matched case-insensitively. A name that is not a task prints help and skips that
@@ -154,26 +134,27 @@ Seven more names — `cci` `dots` `nbd` `sysbench` `tpcc` `tpcw` `ycsb` — are 
 silently did nothing about. They now say they are retired and move on to the next task: the same
 outcome, without the silence.
 
-The runner runs on **one machine** ([ADR-014](docs/adr/ADR-014-one-machine.md)): local by default,
-and a remote machine over SSH is still one machine. RMI worker mode is retired and asking for it
-fails loudly rather than falling back.
+The runner runs on **one machine** ([ADR-014](docs/project/adr/ADR-014-one-machine.md)): local by
+default, and a remote machine over SSH is still one machine. RMI worker mode is retired and asking
+for it fails loudly rather than falling back.
 
 ### What a run leaves behind
 
 The result files are part of the frozen surface, so they are the same whichever runner produced
-them: `dispatch_tc_ALL.txt` and `dispatch_tc_FIN_local.txt` (the cases found and finished),
-`test_status.data` and `check_local.log` (the verdicts), `current_task_id`, `monitor_local.log`,
-`main_snapshot.properties`, `feedback.log`, `test-shell.xml`, `test_local.log`, plus `main.info`
-and `summary_info`.
+them. A shell run leaves ten:
+
+![A shell run in five stages — check the machine, find the cases, run each in a slot, judge its .result, write it down — and the ten frozen files they leave: six held to zero differences against CTP, four classified.](docs/assets/shell-run.svg)
+
+The sql family writes CQT's own records instead — `main.info`, `summary_info`, `summary.xml`, the
+JUnit report and a `.result` beside every case; [`category/sql/`](docs/category/sql/README.md) lists
+them.
 
 One file is this runner's own, and it is absent unless it has something to say: `patched.txt`, the
 cases that did not run as the corpus has them. See [`patches/README.md`](patches/README.md).
 
-![Animated: a shell run checks the machine, finds the cases, runs each one after a process reset, judges the result file, and writes the verdicts down. Four real cases: three OK and one NOK. Every stage leaves a file that is part of the frozen surface.](docs/assets/anim-shell-run.svg)
-
 ## The shell task in detail
 
-`shell` is the task this project has rewritten, and it is the one with options: parallel slots on
+`shell` is the task this project rewrote first, and it is the one with options: parallel slots on
 one machine, a corpus that cleans itself up, per-case patches, and a progress page.
 
 **[`docs/category/shell/`](docs/category/shell/README.md) is the guide** — the module structure,
@@ -189,7 +170,7 @@ The short version:
 ```bash
 CUBRID=/path/to/install tools/sizing.sh          # once, to size the run
 
-TESTKIT_CONTAIN=1 TESTKIT_NATIVE_SHELL=1 testkit shell -c shell.conf
+TESTKIT_CONTAIN=1 TESTKIT_NATIVE=shell testkit shell -c shell.conf
 ```
 
 No root and no container runtime: the namespaces and the overlay are both unprivileged. It also
@@ -199,26 +180,10 @@ runs inside Docker, which needs `--security-opt seccomp=unconfined` and
 Parallelism is off by default, and a slotted run writes the files a serial run writes — slots share
 an environment id on purpose, so the output does not say how many there were.
 
-
-## What it does
-
-![Architecture: frozen entry scripts call one Go binary, which routes each task either to a native runner or to the old CTP as a subprocess; both produce the same frozen output, and QA operations are excluded](docs/assets/architecture.svg)
-
-![Animated: one binary and one registry lookup. unittest goes to the native runner; shell goes to CTP as a subprocess while TESTKIT_NATIVE_SHELL is unset and to the native runner when it is set to 1. Both paths write the same frozen output, so from outside there is no way to tell which ran.](docs/assets/anim-dispatch.svg)
-
-One binary. Every entry script becomes a shim that hands its arguments over unchanged, and a single
-registry turns a task name into either a native runner or the legacy runner, which reproduces CTP's
-argv and environment byte for byte. Both paths write the same output, because the surface belongs to
-the output layer rather than to whichever implementation ran.
-
-There is no jar-compatibility layer: old modules keep their own jars, which keep being built, until
-their turn comes. [`design/architecture.md`](docs/design/architecture.md) and
-[`design/contracts.md`](docs/design/contracts.md) are the specifications.
-
 ## The frozen surface
 
-[`concept/external-surface-freeze.md`](docs/concept/external-surface-freeze.md) is normative, and
-everything in it carries a grade you can rely on:
+[`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) is
+normative, and everything in it carries a grade you can rely on:
 
 | | |
 |---|---|
@@ -235,9 +200,10 @@ and reaches the shell as 255; it will not be tidied into `1`.
 **The freeze preserves what CTP did, not what CTP got wrong.** Where a behaviour is plainly
 unintended and reproducing it would make someone trust something false, it is fixed and the decision
 recorded. Three so far: the requirements check now actually fails on a missing command — it used to
-match csh's wording and so reported `PASS` for everything absent; `dos2unix` is off the required
-list, because nothing in the corpus needs it; and a build with no commit suffix is now just its
-version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
+match csh's wording and so reported `PASS` for everything absent; `dos2unix` is off the checked
+list, because no answer file in the corpus has a CRLF — though CTP's `init.sh` still calls it, so a
+machine without it gets a stand-in (`internal/contain/dos2unix.go`); and a build with no commit
+suffix is now just its version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
 
 ## Status
 
@@ -246,65 +212,77 @@ version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
 | 0 — analysis | **done** | 39 documents on what CTP actually does |
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
-| **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` end-to-end and matching CTP's verdicts on four real cases; `run-shell` complete, with six axis-T options. The harness that compares a corpus is built; the gate is running it. Parallel slots, a corpus that cleans itself, per-case durations and a progress page are in and measured |
-| 4 — the rest | — | `sql` family, `isolation`, `ha_repl`, `cdc_repl`, `jdbc` |
+| **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` over the whole corpus at develop head, every failure attributed; `run-shell` complete, with six axis-T options; slots, a corpus that cleans itself, per-case patches and a progress page are in and measured. The full-corpus comparison against CTP has not cleared |
+| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation`, `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
-![Animated: CTP and testkit run on the same four cases on the same machine in the same minute. Both report three passed and one failed, the same case failing on both, and exit 0. Of the ten files a run leaves behind, six are byte-identical after normalisation, one is identical once the JVM's own properties are removed, and three differ by a named number of lines. Ten of those lines are still unexplained, and the largest difference turned out to be a defect in the new runner rather than a difference between the two.](docs/assets/anim-equivalence.svg)
+**What is proven, for sql and medium.** CTP and testkit over the whole of both corpora, serial, with
+the engine, the cases and CTP all at upstream develop's head: medium identical in every file, and a
+clean sql run byte-identical to a clean CTP run — 17,459 `.result` files and 2,762 record files
+([`project/evidence/regression-sql.md`](docs/project/evidence/regression-sql.md)).
 
-**What is proven.** CTP and testkit, run on the same four cases on the same machine in the same
-minute: both **3 passed, 1 failed**, the same case failing on both, the same summary counters, exit
-code 0. Of the ten files a run leaves behind, **six are byte-identical** after normalisation —
-including the two that carry the verdicts — one more is identical once the JVM's own system
-properties are removed, and the remaining three differ by a named number of lines
-([`evidence/regression-shell.md`](docs/evidence/regression-shell.md)).
+**What is proven, for shell.** Equivalence here is not byte-identity, because some of what a run
+writes cannot match between two runs — paths, times, dates. So both sides are normalised, and then
+held to different standards:
 
-Those counts were taken again on 2026-09-07 and most of them moved, because the largest difference
-turned out to be **this runner's own defect** — a failing case wrote its console output to the
-worker log twice — and `test_local.log` fell from 650 lines to 154 when it was fixed. Ten lines are
-still unexplained, and saying so is the point: the page previously had one unexplained difference
-and it was the wrong one.
+![Equivalence for one shard: the same cases run on CTP and on testkit, normalize.sh masks what may differ, the six files that carry verdicts are held to zero differences with no baseline, the other four are classified through baseline.txt, and whatever no rule explains is reported as NEW.](docs/assets/equivalence.svg)
 
-**The gate.** Equivalence is proven by comparing normalised output over the whole shell corpus —
-3,475 cases, with the 195 in `_25_unstable` counted separately because their own readme says they
-depend on machine load and elapsed time ([ADR-013](docs/adr/ADR-013-regression-equivalence.md)).
-`TESTKIT_NATIVE_SHELL` comes off when that clears. That is 64 shards and tens of hours on each
-runner, so it is run by [`evidence/compare/`](docs/evidence/compare/README.md) rather than by hand:
-a shard is the unit of resume, the six files that carry verdicts are held to zero differences with
-no baseline allowed, and everything else is classified — so that a difference nobody has seen
-before is the only thing on the page.
+The first comparison was four cases on 2026-09-02: both sides 3 passed and 1 failed, the same case
+failing on both, and the six verdict files byte-identical
+([`project/evidence/regression-shell.md`](docs/project/evidence/regression-shell.md)). On
+2026-09-14 the whole corpus ran at develop head — 3,216 cases judged, 3,184 passed, every one of the
+32 failures attributed — and one shard was compared on both `main` and the branch that brought the
+sql family: the two binaries were indistinguishable
+([`project/evidence/parallel-shell.md`](docs/project/evidence/parallel-shell.md) §6–7).
 
-![Animated: how the whole shell corpus is compared. 3,452 cases are cut into 64 shards, with _06_issues holding half of everything and split into sub-shards; every case lands in exactly one shard. One shard runs on CTP and on testkit, both result trees are kept, and a shard whose report already ends in COMPLETE is skipped, so the loop survives being killed. In the report the six files that carry verdicts must be identical with no baseline allowed, and the other four are classified: on the four-case calibration 154 differences became 143 known and 11 new, and ten of the eleven are one finding.](docs/assets/anim-compare.svg)
+**The gate.** `TESTKIT_NATIVE=shell` stops being opt-in when the comparison clears over the whole
+corpus ([ADR-013](docs/project/adr/ADR-013-regression-equivalence.md)). At `2a22a74c` that is 3,477
+cases in 64 shards, with the 201 in `_25_unstable` counted separately because their own readme says
+they depend on machine load and elapsed time — too many hours to run by hand, so
+[`project/evidence/compare/`](docs/project/evidence/compare/README.md) runs it:
+
+![How the whole corpus is compared: shards.sh cuts the corpus into shards, largest first; each shard runs on CTP and on testkit, with shard-clean.sh putting the tree back in between; compare.sh writes a report ending in COMPLETE clean or COMPLETE dirty, the unmatched lines go under NEW, and a completed shard is skipped on resume.](docs/assets/compare.svg)
+
+A shard is the unit of resume. Run in place, a case that leaves a database behind hands it to
+whichever runner goes second — and that one is always testkit — so where a shard's cases create
+databases, `shard-clean.sh` puts the tree back between the two runs.
 
 **Corrections are recorded where the mistake was made.** The CLI survey that justified the project
 covered one entry point out of fifteen; the freeze specification was wrong in eight further places;
-the corpus counts were 3,722 and 204 until the discovery rule was fixed; and the one difference the
-first comparison could not explain was blamed on the environment when it belonged to this runner
-([`evidence/spec-corrections.md`](docs/evidence/spec-corrections.md)).
+the corpus counts were 3,722 and 204 until the discovery rule was fixed; the one difference the
+first comparison could not explain was blamed on the environment when it belonged to this runner;
+and a shard comparison once blamed the runner for what the runner before it had left
+([`project/evidence/spec-corrections.md`](docs/project/evidence/spec-corrections.md)).
 
 ## Layout
 
 ```
 CONTEXT.md               the glossary — task ≠ suite ≠ module ≠ runner
 cmd/testkit/             the entry point
-internal/                cli · conf · registry · dispatch · runner (legacy, shellsuite) ·
-                         runshell · exec · result · feedback · topology ·
+internal/                cli · conf · registry · dispatch · runshell · exec · result · feedback ·
+                         topology · runner (legacy, shellsuite, sqlsuite) ·
                          contain (namespaces per slot) · plan (case durations) ·
+                         patch (per-case patches) · coredump (a crashed case's stack) ·
                          status (the progress page)
+patches/                 fixes carried for the corpus until upstream takes them
+exclusions/              cases this machine cannot run, each with the reason and what ends it
 tools/sizing.sh          how many slots, which disk, and how big a ceiling, for this machine
                          (`tools/sizing.sh sql <conf>` for the sql family)
 ext/cubrid-sqlancer/     submodule — a SQLancer provider for CUBRID
 docs/
-  ROADMAP.md             phases, exit conditions, risks, the re-evaluation gate
-  adr/                   decisions, numbered; README.md is the numbering authority
-  category/              one folder per test category: how to run it, and what to set
-  concept/               north star, the freeze, non-goals, exclusions
-  design/                architecture, contracts, one doc per module
-  analysis/              what CTP actually does, measured
-  evidence/              regression evidence, the normaliser, and the corrections
-    compare/             the harness that runs the corpus and classifies what differs
-  extensions/            testing axes CTP never had
-  survey/                the DBMS testing ecosystem, classified into eight axes
+  assets/                the diagrams on this page
+  category/              how to run each test category, and what to set
+    shell/  sql/         the as-built guides
+    extensions/          testing axes CTP never had
+  project/               why the rewrite exists and how it is built
+    ROADMAP.md           phases, exit conditions, risks, the re-evaluation gate
+    adr/                 decisions, numbered; README.md is the numbering authority
+    concept/             north star, the freeze, non-goals, exclusions
+    design/              architecture, contracts, one doc per module
+    analysis/            what CTP actually does, measured
+    evidence/            regression evidence, the normaliser, and the corrections
+      compare/           the harness that runs the corpus and classifies what differs
+    survey/              the DBMS testing ecosystem, classified into eight axes
 ```
 
 ## Where to start reading
@@ -312,19 +290,19 @@ docs/
 | If you want | Read |
 |---|---|
 | the vocabulary | [`CONTEXT.md`](CONTEXT.md) |
-| what this system is for | [`concept/north-star.md`](docs/concept/north-star.md) |
-| what may never change | [`concept/external-surface-freeze.md`](docs/concept/external-surface-freeze.md) |
-| what was left out, and why | [`concept/migration-exclusions.md`](docs/concept/migration-exclusions.md) |
-| how it is built | [`design/architecture.md`](docs/design/architecture.md) · [`design/contracts.md`](docs/design/contracts.md) |
-| how equivalence is decided, and run | [`adr/ADR-013`](docs/adr/ADR-013-regression-equivalence.md) · [`evidence/compare/`](docs/evidence/compare/README.md) |
 | how to run the shell suite | [`category/shell/`](docs/category/shell/README.md) |
 | how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
-| how a run is made parallel | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T3, B-T12, B-T13 |
-| where the run's hours go, and what to do next | [`concept/beyond-axis.md`](docs/concept/beyond-axis.md) B-T14 |
-| what the old system could fix cheaply | [`evidence/ctp-improvements.md`](docs/evidence/ctp-improvements.md) |
-| what happens next | [`ROADMAP.md`](docs/ROADMAP.md) · [`design/module-shell.md`](docs/design/module-shell.md) |
-| every decision so far | [`adr/README.md`](docs/adr/README.md) |
+| what this system is for | [`project/concept/north-star.md`](docs/project/concept/north-star.md) |
+| what may never change | [`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) |
+| what was left out, and why | [`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md) |
+| how it is built | [`project/design/architecture.md`](docs/project/design/architecture.md) · [`project/design/contracts.md`](docs/project/design/contracts.md) |
+| how equivalence is decided, and run | [`project/adr/ADR-013`](docs/project/adr/ADR-013-regression-equivalence.md) · [`project/evidence/compare/`](docs/project/evidence/compare/README.md) |
+| how a run is made parallel | [`project/concept/beyond-axis.md`](docs/project/concept/beyond-axis.md) B-T3, B-T12, B-T13 |
+| where the run's hours go, and what to do next | [`project/concept/beyond-axis.md`](docs/project/concept/beyond-axis.md) B-T14 |
+| what the old system could fix cheaply | [`project/evidence/ctp-improvements.md`](docs/project/evidence/ctp-improvements.md) |
+| what happens next | [`project/ROADMAP.md`](docs/project/ROADMAP.md) · [`project/design/module-shell.md`](docs/project/design/module-shell.md) |
+| every decision so far | [`project/adr/README.md`](docs/project/adr/README.md) |
 
-New documents are in English. The Phase 0–2 documents under `docs/` are in Korean and stay that
-way — a freeze specification is worth exactly what its sentences are worth, and re-writing six
+New documents are in English. The Phase 0–2 documents under `docs/project/` are in Korean and stay
+that way — a freeze specification is worth exactly what its sentences are worth, and re-writing six
 thousand lines of analysis buys nothing but a chance to introduce errors.

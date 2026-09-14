@@ -270,7 +270,7 @@ tools/sizing.sh          how many slots, which disk, and how big a ceiling, for 
                          (`tools/sizing.sh sql <conf>` for the sql family)
 ext/cubrid-sqlancer/     submodule — a SQLancer provider for CUBRID
 docs/
-  assets/                the diagrams on this page
+  assets/                the diagrams these pages use
   category/              how to run each test category, and what to set
     shell/  sql/         the as-built guides
     extensions/          testing axes CTP never had

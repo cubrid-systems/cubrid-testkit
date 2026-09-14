@@ -561,4 +561,4 @@ before 검사 · 워크로드 · after 검사 · 셧다운. 한 번의 긴 실�
 - libFuzzer: <https://llvm.org/docs/LibFuzzer.html>
 - libFuzzer `FuzzedDataProvider`: <https://llvm.org/docs/LibFuzzer.html#fuzzer-friendly-build-mode>
 - OSS-Fuzz: <https://google.github.io/oss-fuzz/>
-- 내부: `../E5-parser-fuzzing/requirements.md` · `../../ROADMAP.md` §6a 사다리 · `../../survey/dbms-testing-ecosystem.md` §7.4
+- 내부: `../E5-parser-fuzzing/requirements.md` · `../../../project/ROADMAP.md` §6a 사다리 · `../../../project/survey/dbms-testing-ecosystem.md` §7.4

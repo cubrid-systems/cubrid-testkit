@@ -144,6 +144,13 @@ Shrinking the buffers is what made 16+ slots possible at all: 24 × 768 MB of en
 
 ## 5. Volatile slot overlays (2026-09-11)
 
+> **The engine in this section is 11.3.5.1275-0e31336, not the 11.5 in the header.** The `regr`
+> sandbox held an install of its own and nobody checked it; every run below says
+> `Build Number: 11.3.5.1275` in its own output. The wall clocks and the I/O compare a switch
+> against itself and are sound. **The verdict columns are not** — 61 of 217 failing is that
+> engine against a corpus written for 11.5, not a property of `volatile`. §6 is the same
+> measurement at develop head.
+
 `TESTKIT_SLOT_VOLATILE=1` took eight sql slots from 1,131 s to 338–394 s, by making the log flush
 every commit waits on a no-op (`sql-native.md` §3). The same switch on shell, in the `regr` sandbox:
 `_01_utility`, eight slots, the slot root on `/data`, no `scenario_ram_mb`, run twice.
@@ -184,3 +191,85 @@ corpus on disk is unchanged. The same cases, slots and disk, two more runs:
 - **Verdicts.** No new failure. One case, `_15_backupdb/itrack_10002`, fails in the three slow runs
   and passes in the fast one; it fails at its client-server multi-threaded backups (`-C -t 2`,
   steps 55–59). Why it passes when the run is faster is not established.
+
+---
+
+## 6. The whole corpus at develop head (2026-09-14)
+
+§5 left one thing unmeasured: `scenario_disk` and `volatile` over the **whole** shell corpus rather
+than `_01_utility`. This is that run, and the first time everything under it is at upstream's head.
+
+| | |
+|---|---|
+| engine | `11.5.0.2569-dcfe798` — built here from `cubrid/cubrid` develop head |
+| corpus | `cubrid-testcases-private-ex` `2a22a74c` — develop head |
+| CTP | `shell/init_path` byte-identical to the upstream checkout |
+| `cubrid.conf` | the four lines in [the configuration](../category/shell/04-configuration.md): 20M/20M/64M/4M |
+| run | 8 slots, `scenario_disk=on`, `TESTKIT_SLOT_VOLATILE=1`, 47 patches applied |
+
+| | |
+|---|---:|
+| judged | **3,216** (261 excluded: `_25_unstable`, the daily list, this machine's two) |
+| **passed / failed** | **3,184 / 32** |
+| wall | **9,722 s** (162 min) |
+| writes to sdb | 560 GB |
+| flushes | **20,935** |
+| disk busy | 61% |
+| dirty peak | 3,595 MB — against a 20% hard throttle at roughly 3.9 GB |
+| lowest available memory | 5,197 MB |
+| lowest `/data` free | 19.7 GB |
+
+**`patched.txt` from a full run, which §4c wanted.** 47 of the 49 shipped patches matched a case and
+applied; the two that did not are cases no longer in the corpus.
+
+### 16 slots buys nothing on this machine
+
+The same corpus, same everything, at 16 slots, stopped after 1,137 cases:
+
+| slots | cases/min at the same point in the corpus | dirty peak | lowest available |
+|---|---:|---:|---:|
+| 8 | ~35 | 2.1 GB | 16.8 GB |
+| 16 | ~34, falling to 28 | 3.2 GB | 13.2 GB |
+
+`tools/sizing.sh` had already said why: this machine delivers **4–5 cores' work at once** of the 16
+it counts, because other work runs on it. Doubling the slots doubles the waiting. The dirty-page
+limit is the other wall — at 16 slots the run sits against `dirty_ratio`, where a write blocks and
+the sync avoidance stops paying. So the answer to "does volatile let us raise the slot count" is
+**yes in principle and no here**: the tmpfs ceiling is gone, but the kernel's writeback throttle and
+the CPU arrive first.
+
+### The 32 failures
+
+Re-run alone, one slot, no volatile, they split three ways:
+
+| | cases | |
+|---|---:|---|
+| reproduce alone | 7 | counters, page counts and statistics: `cbrd_20145_1` (`Num_page_locks_acquired` 27 vs 25), `cbrd_20149_xasl`, `cbrd_24644`, `bug_bts_11649`, `bug_bts_8934_3`, `bug_bts_9411_5`, `CUBRID_LANG_EUCKR`. Engine and answers are both at develop head, so this is upstream's to settle |
+| unstable on their own | 1 | `cbrd_25080` failed 4 of 5 runs **alone**: the optimizer picks `temp(order by)` over the index's order, a cost decision, and costs come from the sampled statistics `CBRD-26959` introduced |
+| not reproduced in a small tree | 1 | `cbrd_23732` passes alone and at 8 slots in a 9-case tree; it fails only in the full run |
+| the machine's own | 2 | `cbrd_24911`, `cbrd_26501` drive CUBRID Manager, which this machine cannot build. Now on `exclusions/no-cubrid-manager.txt` |
+| timing and state | the rest | empty variables in comparisons, an `expect` pager interaction, a `sleep` loop's log |
+
+**A wrong turn worth recording.** The first read blamed the 16-slot load, because the failures
+appeared there first. The 8-slot run failed on the same cases. Load was not the cause, and the
+cheap check that settled it — the same case alone, five times — should have come first.
+
+### Where the corpus spends its sleep
+
+`sleep` written in the case scripts, for the 3,486 cases a full run judges:
+
+| | |
+|---|---:|
+| total written | **21,449 s (6.0 h)** in 2,521 calls |
+| cases with any | 704 (20%) |
+| in `_06_issues` | 16,351 s — **76%** |
+| top 5 cases | 38% |
+| top 25 | 57% |
+| **top 100** | **81%** |
+
+Two cases sleep an hour each (`bug_bts_14506`, `bug_bts_14441`) against a 720 s timeout, so they are
+killed mid-sleep and hold a slot for the whole of it. A static count is a floor — a `sleep` in a loop
+is counted once — and CTP's own `init_path` sleeps in 13 more places that every case pays.
+
+Six hours of sleep over 8 slots is 45 minutes before a single query runs, which is what puts a
+30-minute full corpus out of reach on this machine. **The lever is 100 cases**, not a setting.

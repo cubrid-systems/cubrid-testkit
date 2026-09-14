@@ -15,7 +15,7 @@
 # Two shapes are on this list, both measured in a 24-slot full run:
 #
 #   - the case drives the manager itself (cub_manager, cm.conf, cm_httpd.conf, or
-#     an HTTPS call to the CMS port 443). 16 cases.
+#     an HTTPS call to the CMS port 443). 18 cases.
 #   - the case does not, but its expected output records what `cubrid service`
 #     prints on a full install. Without the manager that command says
 #     "cubrid manager server is not installed." where the answer says
@@ -24,6 +24,13 @@
 #
 # Delete this file from testcase_exclude_from_file the moment a build with the
 # manager exists here; every one of these is expected to pass with it.
+#
+# The corpus keeps adding them. _38_fig/cbrd_24911 and _40_guava/cbrd_26501 both
+# call `cubrid manager start` and both were added after the first version of this
+# list; they turned up as 2 of the 32 failures in a full run at develop head
+# (engine 11.5.0.2569-dcfe798, corpus 2a22a74c, 2026-09-14). A new family here is
+# a reason to re-read the failures against this list rather than to assume it is
+# still complete.
 #
 # How this list was built, and how it was got wrong once.
 #
@@ -63,5 +70,7 @@ shell/_06_issues/_26_2h/cbrd_26777
 shell/_11_codecoverage/system_parameter/index_scan_oid_buffer_size
 shell/_35_cherry/issue_21654_server_side_loaddb/loaddb_CS/_06_issues/_12_1h/bug_bts_7878
 shell/_35_cherry/issue_21654_server_side_loaddb/loaddb_CS/_06_issues/_14_1h/bug_bts_11676
+shell/_38_fig/cbrd_24911
 shell/_39_fig_cake/cbrd_25295
 shell/_39_fig_cake/cbrd_25693
+shell/_40_guava/cbrd_26501

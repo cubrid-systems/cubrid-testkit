@@ -273,3 +273,41 @@ is counted once — and CTP's own `init_path` sleeps in 13 more places that ever
 
 Six hours of sleep over 8 slots is 45 minutes before a single query runs, which is what puts a
 30-minute full corpus out of reach on this machine. **The lever is 100 cases**, not a setting.
+
+---
+
+## 7. What the shard comparison measures, and what it measured instead (2026-09-14)
+
+Re-running ADR-013 on `impl_sql` produced a dirty report and, next to `main` on the same shard, a
+difference that looked like a regression:
+
+| `_02_sqlx_init`, 8 cases | `main` | `impl_sql` |
+|---|---|---|
+| verdicts | every case agrees | **1 disagrees** (`_06_media_failures_supported/itrack_10001`) |
+| `feedback.log`, new lines | 6-11 | **510** |
+
+It was not one. `shard.sh` runs the two runners **over the same tree, in place**, CTP first and
+testkit second, so a case that leaves a database behind hands it to testkit — and contamination and
+a difference between the runners produce the same report. The 510 lines say so in their own words:
+`Could not connect to master server` (98), `cubrid broker stop: fail` (36),
+`Database "qadb" is unknown` (13) on testkit's side, against
+`Volume "…mydb_vinf" already exists` on CTP's.
+
+[`shard-clean.sh`](compare/shard-clean.sh) is `shard.sh` with the scenario restored from a tar
+between the two runs, and the registry emptied with it. Same branch, same shard, same order:
+
+| `_02_sqlx_init`, 8 cases | `impl_sql`, in place | `impl_sql`, restored |
+|---|---|---|
+| verdicts | 1 disagrees | **every case agrees** |
+| `feedback.log`, new lines | 510 | **6 / 0 / 6 / 11** |
+
+What is left is the same on both binaries and therefore older than this branch: one line in
+`check_local.log` (testkit checks for `expect` and CTP does not) and `GetParameter.exp` noise.
+
+**The lesson is about the harness, not the branch.** An in-place comparison cannot tell a runner's
+behaviour from what the previous runner left, and it always blames the second one. Use
+`shard-clean.sh` where the shard's cases create databases; `shard.sh` remains right for a corpus
+whose cases clean up after themselves, and cheaper.
+
+**Still not clean, and not claimed to be.** Both binaries report `COMPLETE dirty` on this shard for
+the two older differences above, and one shard is not the corpus.

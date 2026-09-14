@@ -138,13 +138,22 @@ func OpenSlots(n int, mount func(i int, s *Slot) error) ([]*Slot, func(), error)
 			// asserts anything about ownership.
 			"TAR_OPTIONS=--no-same-owner",
 		}
-		// And a linker that keeps the libraries the command line names, where
-		// the machine's would drop them. Measured per run rather than assumed,
-		// and absent on a toolchain that needs no correction -- see GccShim.
-		if bin, gerr := GccShim(filepath.Join(tmp, "bin")); gerr != nil {
-			closeAll()
-			return nil, nil, gerr
-		} else if bin != "" {
+		// And the two places this machine can differ from the one the verdicts
+		// are compared against: a linker that drops the libraries the command
+		// line names, and a missing dos2unix. Both are measured per run rather
+		// than assumed, and each writes nothing on a machine that needs no
+		// correction -- see GccShim and Dos2UnixShim.
+		bin := filepath.Join(tmp, "bin")
+		var shimmed bool
+		for _, shim := range []func(string) (string, error){GccShim, Dos2UnixShim} {
+			got, serr := shim(bin)
+			if serr != nil {
+				closeAll()
+				return nil, nil, serr
+			}
+			shimmed = shimmed || got != ""
+		}
+		if shimmed {
 			s.Env = append(s.Env, "PATH="+bin+":"+os.Getenv("PATH"))
 		}
 	}

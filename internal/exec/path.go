@@ -12,9 +12,17 @@ import (
 // a configuration file, a case, or an environment variable is interpolated into
 // one, and a space alone turns one `rm -rf` into two.
 //
-// The idiom for a single quote inside single quotes is '\'' -- close, escape,
-// reopen. Writing ''' instead closes and immediately reopens, which is an empty
-// string: a'b comes out as ab, and a delete aimed at one path lands on another.
+// The idiom for a single quote inside single quotes is close, escape, reopen:
+//
+//	foo'bar  ->  'foo'\''bar'
+//
+// Closing and immediately reopening instead -- three quotes in a row, with no
+// backslash -- is an empty string, so a'b comes out as ab and a delete aimed at
+// one path lands on another.
+//
+// The examples are in an indented block because gofmt rewrites a pair of
+// straight quotes in running text into a typographic one, which is exactly the
+// character this comment is about.
 func Quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

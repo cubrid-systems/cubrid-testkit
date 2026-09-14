@@ -35,18 +35,7 @@
 A slot is one case at a time in namespaces of its own. This is what makes several slots cost nothing
 to configure: every slot believes it is the only CUBRID on the machine.
 
-```
-   the machine                       slot 0                    slot 1
-   ───────────                       ──────                    ──────
-   $CUBRID  (real install)  ──┐   overlay: writes go up     overlay: writes go up
-                              ├──►  lower = the install       lower = the install
-   scenario (repository)    ──┤     upper = tmpfs or disk     upper = tmpfs or disk
-                              │
-   $CUBRID_DATABASES        ──┘   port 1523  (own netns)    port 1523  (own netns)
-                                  PID 1 = its own init      PID 1 = its own init
-                                  its own IPC, /dev/shm     its own IPC, /dev/shm
-                                  /tmp is the machine's     /tmp is the machine's
-```
+![What a slot is: the machine's install, scenario and registry are lower layers no slot writes; each slot has an overlay with its own upper layer, its own network namespace keeping port 1523, its own PID and IPC namespaces, and shares the machine's /tmp.](../../assets/slot.svg)
 
 Four namespaces per slot:
 

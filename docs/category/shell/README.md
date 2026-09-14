@@ -13,30 +13,11 @@ as-built guide.
 | **[6. Keeping what failed](06-keeping-what-failed.md)** | what a failing case leaves behind, and what it should |
 
 The pre-implementation design — the old Java class mapping and the ADRs behind the rewrite — is
-[`../../design/module-shell.md`](../../project/design/module-shell.md).
+[`../../project/design/module-shell.md`](../../project/design/module-shell.md).
 
 ## In one picture
 
-```
-     conf ──────────────┐
-                        v
-                  ┌───────────┐
-   scenario ─────►│  testkit  │──────► result files      dispatch_tc_ALL.txt
-   (read-only)    │   shell   │        (frozen: same     test_status.data
-                  └─────┬─────┘         bytes CTP wrote) feedback.log · …
-                        │
-        ┌───────────────┼───────────────┐
-        v               v               v
-    ┌────────┐     ┌────────┐      ┌────────┐            each slot has its own
-    │ slot 0 │     │ slot 1 │  …   │ slot N │            PID · IPC · mount · net
-    └────┬───┘     └────┬───┘      └────┬───┘            namespace, so every one
-         │              │               │                keeps the shipped port
-         └──────────────┴───────────────┘                1523 and nothing is
-                        │                                reconfigured
-                        v
-              overlay upper layer
-              (tmpfs or disk, per slot)
-```
+![The shell category in one picture: testkit shell reads shell.conf and a read-only corpus and writes the frozen result files; N slots, each in its own PID, IPC, mount and network namespaces on the shipped port 1523, write into an overlay upper layer that is tmpfs or disk and is thrown away.](../../assets/shell-overview.svg)
 
 The corpus is never written to. Every case's writes land in an overlay whose lower layer is the
 scenario as the repository has it, and whose upper layer is memory when `scenario_ram_mb` is set

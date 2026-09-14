@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 520" width="880" height="520" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="sql-overview-title sql-overview-desc">
+<title id="sql-overview-title">The sql category in one picture</title>
+<desc id="sql-overview-desc">testkit sql medium reads a sectioned configuration and a corpus of cases and answers, and writes CQT's records byte for byte: main.info, summary.xml, summary_info, the JUnit report and a .result beside every case. It runs N slots, each with its own server, broker and one JVM running CQT's executor for the whole run, and a directory of cases is claimed whole by one slot. Every slot's $CUBRID is an overlay on one database prepared once, so nothing is copied and databases.txt is not rewritten.</desc>
+<style>
+  .ttl{font-size:16px;font-weight:700;fill:#1f2937}
+  .sub{font-size:12px;fill:#6b7280}
+  .eye{font-size:8px;font-weight:700;fill:#6b7280;letter-spacing:1px}
+  .eye-b{font-size:8px;font-weight:700;fill:#2563eb;letter-spacing:1px}
+  .name{font-size:12px;font-weight:700;fill:#1f2937}
+  .dots{font-size:16px;font-weight:700;fill:#9ca3af}
+  .d{font-size:12px;fill:#6b7280}
+  .m{font-size:12px;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mb{font-size:12px;fill:#2563eb;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .note{font-size:12px;fill:#9ca3af}
+  .wire{fill:none;stroke:#6b7280;stroke-width:1.2}
+  .wire-d{fill:none;stroke:#9ca3af;stroke-width:1.2;stroke-dasharray:4 3}
+</style>
+<defs>
+  <marker id="sql-overview-arrow" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6b7280"/></marker>
+  <marker id="sql-overview-arrow-soft" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9ca3af"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="520" fill="#ffffff"/>
+
+<text class="ttl" x="24" y="32">The sql category in one picture</text>
+<text class="sub" x="24" y="52">CQT still executes every case. testkit decides which answer it is judged against, and writes CQT's records.</text>
+
+<!-- connectors -->
+<path class="wire" d="M184,104 H216 Q224,104 224,112 V120 Q224,128 232,128 H264" marker-end="url(#sql-overview-arrow)"/>
+<path class="wire" d="M184,176 H216 Q224,176 224,168 Q224,160 232,160 H264" marker-end="url(#sql-overview-arrow)"/>
+<path class="wire" d="M440,144 H520" marker-end="url(#sql-overview-arrow)"/>
+<path class="wire" d="M328,184 V212 Q328,220 320,220 H192 Q184,220 184,228 V256" marker-end="url(#sql-overview-arrow)"/>
+<path class="wire" d="M352,184 V256" marker-end="url(#sql-overview-arrow)"/>
+<path class="wire" d="M376,184 V212 Q376,220 384,220 H584 Q592,220 592,228 V256" marker-end="url(#sql-overview-arrow)"/>
+<path class="wire-d" d="M184,392 V344" marker-end="url(#sql-overview-arrow-soft)"/>
+<path class="wire-d" d="M352,392 V344" marker-end="url(#sql-overview-arrow-soft)"/>
+<path class="wire-d" d="M592,392 V344" marker-end="url(#sql-overview-arrow-soft)"/>
+
+<!-- inputs -->
+<rect x="24" y="80" width="160" height="48" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="40" y="96">CONFIGURATION</text>
+<text class="m" x="40" y="116">sql.conf</text>
+
+<rect x="24" y="144" width="160" height="64" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="40" y="160">THE CORPUS</text>
+<text class="name" x="40" y="180">cases and answers</text>
+<text class="m" x="40" y="196">sql/ · medium/</text>
+
+<!-- the runner -->
+<rect x="264" y="104" width="176" height="80" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>
+<text class="eye-b" x="352" y="124" text-anchor="middle">TESTKIT</text>
+<text class="mb" x="352" y="148" text-anchor="middle">testkit sql medium</text>
+<text class="d" x="352" y="168" text-anchor="middle">judges and records</text>
+
+<!-- what it writes -->
+<rect x="520" y="88" width="336" height="112" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="536" y="108">RESULT ROOT — CQT'S BYTES, EXACTLY</text>
+<text class="m" x="536" y="132">$CTP_HOME/sql/result/…/schedule_…</text>
+<text class="m" x="536" y="148">main.info · summary.xml · summary_info</text>
+<text class="name" x="536" y="172">the JUnit report, and a .result beside every case</text>
+<text class="d" x="536" y="188">what CQT wrote, byte for byte</text>
+
+<!-- slots -->
+<rect x="112" y="256" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="128" y="276">SLOT 0</text>
+<text class="name" x="128" y="296">a JVM for the run</text>
+<text class="d" x="128" y="316">CQT's own executor</text>
+<text class="m" x="128" y="332">server · broker</text>
+
+<rect x="280" y="256" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="296" y="276">SLOT 1</text>
+<text class="name" x="296" y="296">a JVM for the run</text>
+<text class="d" x="296" y="316">CQT's own executor</text>
+<text class="m" x="296" y="332">server · broker</text>
+
+<text class="dots" x="472" y="304" text-anchor="middle">…</text>
+
+<rect x="520" y="256" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="536" y="276">SLOT N</text>
+<text class="name" x="536" y="296">a JVM for the run</text>
+<text class="d" x="536" y="316">CQT's own executor</text>
+<text class="m" x="536" y="332">server · broker</text>
+
+<text class="d" x="688" y="284">a directory of cases</text>
+<text class="d" x="688" y="300">is claimed whole by</text>
+<text class="d" x="688" y="316">one slot</text>
+
+<!-- the database every slot stands on -->
+<rect x="112" y="392" width="552" height="88" rx="6" fill="#f9fafb" stroke="#9ca3af" stroke-width="1"/>
+<text class="eye" x="128" y="412">PREPARED ONCE — THE LOWER LAYER OF EVERY SLOT</text>
+<text class="name" x="128" y="432">one database, behind an overlay per slot</text>
+<text class="d" x="128" y="452">copied never, at the same path everywhere — databases.txt is not rewritten</text>
+<text class="d" x="128" y="468">a slot's writes go to its own upper layer and are thrown away</text>
+
+<text class="note" x="24" y="504">Each slot's JVM is CQT without its loop, handed one case at a time on fd 3.</text>
+</svg>

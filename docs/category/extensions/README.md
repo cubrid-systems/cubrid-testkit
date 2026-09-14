@@ -85,7 +85,7 @@ extensions/E{N}-{name}/
 
 ## 출처
 
-- `../survey/dbms-testing-ecosystem.md` — 8축 분류, 도구·연구 catalog, §6a-E2~E7 + E9 후보 도출 근거
-- `../ROADMAP.md` §6a — 카탈로그 / Phase 정합 / Open Questions / ADR-EXT 자리표시자
-- `../ROADMAP.md` §6a 부록 — **fuzzing 우선순위 사다리** (착수 순서의 단일 출처)
-- `../analysis/{module}/` — strangler-fig 대상 모듈의 Phase 0 산출물 (참고)
+- `../../project/survey/dbms-testing-ecosystem.md` — 8축 분류, 도구·연구 catalog, §6a-E2~E7 + E9 후보 도출 근거
+- `../../project/ROADMAP.md` §6a — 카탈로그 / Phase 정합 / Open Questions / ADR-EXT 자리표시자
+- `../../project/ROADMAP.md` §6a 부록 — **fuzzing 우선순위 사다리** (착수 순서의 단일 출처)
+- `../../project/analysis/{module}/` — strangler-fig 대상 모듈의 Phase 0 산출물 (참고)

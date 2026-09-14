@@ -296,13 +296,16 @@ a difference between the runners produce the same report. The 510 lines say so i
 [`shard-clean.sh`](compare/shard-clean.sh) is `shard.sh` with the scenario restored from a tar
 between the two runs, and the registry emptied with it. Same branch, same shard, same order:
 
-| `_02_sqlx_init`, 8 cases | `impl_sql`, in place | `impl_sql`, restored |
+| `_02_sqlx_init`, 8 cases | in place | restored |
 |---|---|---|
-| verdicts | 1 disagrees | **every case agrees** |
-| `feedback.log`, new lines | 510 | **6 / 0 / 6 / 11** |
+| `impl_sql` verdicts | 1 disagrees | **every case agrees** |
+| `impl_sql` `feedback.log`, new lines | 510 | **6 / 0 / 6 / 11** |
+| `main` verdicts | every case agrees | every case agrees |
+| `main` `feedback.log`, new lines | 6-11 | **6 / 0 / 6 / 11** |
 
-What is left is the same on both binaries and therefore older than this branch: one line in
-`check_local.log` (testkit checks for `expect` and CTP does not) and `GetParameter.exp` noise.
+Restored, the two binaries are **indistinguishable** — the same verdicts and the same four counts.
+What is left is on both and therefore older than this branch: one line in `check_local.log`
+(testkit checks for `expect` and CTP does not) and `GetParameter.exp` noise.
 
 **The lesson is about the harness, not the branch.** An in-place comparison cannot tell a runner's
 behaviour from what the previous runner left, and it always blames the second one. Use

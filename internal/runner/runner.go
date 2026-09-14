@@ -2,7 +2,7 @@
 //
 // A Runner owns one or more tasks. Replacing a task means moving it from one
 // Runner to another; nothing else in the system has to know it happened. See
-// docs/design/contracts.md C1.
+// docs/project/design/contracts.md C1.
 package runner
 
 import (

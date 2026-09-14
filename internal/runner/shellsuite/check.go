@@ -118,7 +118,7 @@ func (c *CheckRequirement) Check(ctx context.Context) bool {
 // could not catch the one thing it was most likely to find. It was watched
 // happening: check_local.log said "Check command 'dos2unix' ...... PASS" on a
 // machine without dos2unix, and the run then failed four times on
-// "dos2unix: command not found" (docs/evidence/regression-shell.md).
+// "dos2unix: command not found" (docs/project/evidence/regression-shell.md).
 //
 // The verdict is computed on the far side rather than from the channel's exit
 // code, because the exit code is not available: the SSH channel closes its frame

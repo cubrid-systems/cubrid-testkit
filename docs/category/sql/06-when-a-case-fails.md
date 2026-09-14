@@ -118,5 +118,5 @@ Two things are known not to be fixable in the corpus, and are written down rathe
   own two runs disagree about `cbrd_25542`, and a serial run here disagrees about `cbrd_25708_eq_in`.
 
 When a failure looks like either, compare it with a second run before reading it as a regression.
-[`evidence/regression-sql.md`](../../evidence/regression-sql.md) is the same comparison done
+[`project/evidence/regression-sql.md`](../../project/evidence/regression-sql.md) is the same comparison done
 carefully, twice per side.

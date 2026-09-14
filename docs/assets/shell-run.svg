@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 396" width="880" height="396" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="shell-run-title shell-run-desc">
+<title id="shell-run-title">What a shell run does, and the files it leaves</title>
+<desc id="shell-run-desc">A shell run goes through five stages: check the machine, find the cases, run each case in a slot after a reset and an optional patch, judge it from its .result file where any line containing NOK fails it, and write everything down, exiting 0 even when cases fail. Ten frozen files come out of those stages; six of them — check_local.log, current_task_id, dispatch_tc_ALL.txt, monitor_local.log, test_status.data and dispatch_tc_FIN_local.txt — are held to zero differences against CTP, and the other four are classified.</desc>
+<style>
+  .ttl{font-size:16px;font-weight:700;fill:#1f2937}
+  .sub{font-size:12px;fill:#6b7280}
+  .eye{font-size:8px;font-weight:700;fill:#6b7280;letter-spacing:1px}
+  .name{font-size:12px;font-weight:700;fill:#1f2937}
+  .d{font-size:12px;fill:#6b7280}
+  .m{font-size:12px;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mb{font-size:12px;fill:#1e40af;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .note{font-size:12px;fill:#9ca3af}
+  .wire{fill:none;stroke:#6b7280;stroke-width:1.2}
+  .strict{fill:#eff6ff;stroke:#2563eb;stroke-width:1}
+  .loose{fill:#ffffff;stroke:#d1d5db;stroke-width:1}
+</style>
+<defs>
+  <marker id="shell-run-arrow" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6b7280"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="396" fill="#ffffff"/>
+
+<text class="ttl" x="24" y="32">A shell run: check, find, run, judge, write down</text>
+<text class="sub" x="24" y="52">One machine, N slots pulling from one queue. Every stage leaves files that are part of the frozen surface.</text>
+
+<!-- connectors between stages -->
+<path class="wire" d="M168,124 H196" marker-end="url(#shell-run-arrow)"/>
+<path class="wire" d="M340,124 H368" marker-end="url(#shell-run-arrow)"/>
+<path class="wire" d="M512,124 H540" marker-end="url(#shell-run-arrow)"/>
+<path class="wire" d="M684,124 H712" marker-end="url(#shell-run-arrow)"/>
+
+<!-- stages -->
+<rect x="24" y="80" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="40" y="100">1 · CHECK</text>
+<text class="name" x="40" y="120">check the machine</text>
+<text class="d" x="40" y="140">vars · commands · dirs</text>
+<text class="d" x="40" y="156">once, before any case</text>
+
+<rect x="196" y="80" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="212" y="100">2 · FIND</text>
+<text class="name" x="212" y="120">find the cases</text>
+<text class="d" x="212" y="140">name/cases/name.sh</text>
+<text class="d" x="212" y="156">minus the exclusions</text>
+
+<rect x="368" y="80" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="384" y="100">3 · RUN</text>
+<text class="name" x="384" y="120">each case, in a slot</text>
+<text class="d" x="384" y="140">reset → patch → run</text>
+<text class="d" x="384" y="156">namespaces of its own</text>
+
+<rect x="540" y="80" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="556" y="100">4 · JUDGE</text>
+<text class="name" x="556" y="120">read its .result</text>
+<text class="d" x="556" y="140">a line with NOK fails</text>
+<text class="d" x="556" y="156">a blank result is NOK</text>
+
+<rect x="712" y="80" width="144" height="88" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="728" y="100">5 · RECORD</text>
+<text class="name" x="728" y="120">write it down</text>
+<text class="d" x="728" y="140">exit 0, even with NOK</text>
+<text class="d" x="728" y="156">a failure is a result</text>
+
+<!-- files, under the stage that writes them -->
+<text class="eye" x="24" y="204">FILES EACH STAGE LEAVES</text>
+
+<rect class="strict" x="24" y="216" width="128" height="24" rx="4"/><text class="mb" x="32" y="232">check_local.log</text>
+<rect class="strict" x="24" y="248" width="128" height="24" rx="4"/><text class="mb" x="32" y="264">current_task_id</text>
+<rect class="loose" x="24" y="280" width="192" height="24" rx="4"/><text class="m" x="32" y="296">main_snapshot.properties</text>
+
+<rect class="strict" x="196" y="216" width="156" height="24" rx="4"/><text class="mb" x="204" y="232">dispatch_tc_ALL.txt</text>
+
+<rect class="loose" x="368" y="216" width="120" height="24" rx="4"/><text class="m" x="376" y="232">test_local.log</text>
+<rect class="strict" x="368" y="248" width="140" height="24" rx="4"/><text class="mb" x="376" y="264">monitor_local.log</text>
+
+<rect class="strict" x="540" y="216" width="132" height="24" rx="4"/><text class="mb" x="548" y="232">test_status.data</text>
+<rect class="strict" x="540" y="248" width="200" height="24" rx="4"/><text class="mb" x="548" y="264">dispatch_tc_FIN_local.txt</text>
+<rect class="loose" x="540" y="280" width="104" height="24" rx="4"/><text class="m" x="548" y="296">feedback.log</text>
+
+<rect class="loose" x="712" y="216" width="120" height="24" rx="4"/><text class="m" x="720" y="232">test-shell.xml</text>
+
+<!-- legend -->
+<line x1="24" y1="324" x2="856" y2="324" stroke="#e5e7eb" stroke-width="1"/>
+<rect class="strict" x="24" y="336" width="28" height="16" rx="3"/>
+<text class="d" x="60" y="348">held to zero differences against CTP — the six that carry the verdicts</text>
+<rect class="loose" x="512" y="336" width="28" height="16" rx="3"/>
+<text class="d" x="548" y="348">the other four, classified</text>
+
+<text class="note" x="24" y="380">Names shown for a local run; a remote environment's id replaces "local".  docs/project/design/module-shell.md</text>
+</svg>

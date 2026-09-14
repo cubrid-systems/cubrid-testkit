@@ -14,7 +14,7 @@
 // worker (ADR-014), so the ordering is not enforced at all: it falls out of
 // handing the list out in order and only then looking at the retries.
 //
-// docs/design/module-shell.md 3-3, 4a.
+// docs/project/design/module-shell.md 3-3, 4a.
 package dispatch
 
 import (

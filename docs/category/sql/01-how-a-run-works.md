@@ -37,7 +37,7 @@ A case is executed by CQT — the Java that CTP has always used — and nothing 
 is the loop around it: discovery, the exclusion file, which answer a case is judged against, the
 comparison, and every file the run writes.
 
-That split is [ADR-016](../../adr/ADR-016-sql-executor.md). It exists because a `.sql` case is not a
+That split is [ADR-016](../../project/adr/ADR-016-sql-executor.md). It exists because a `.sql` case is not a
 script that produces text; it is text produced by a parser, a connection, a renderer and a set of
 rules about errors and hints that only CQT's own code gets exactly right. A rewrite of those would be
 a second implementation to keep byte-identical forever.
@@ -93,7 +93,7 @@ $CTP_HOME/sql/result/y2026/m9/schedule_linux_sql_64bit_<ddHHmmss><rnd>_<build>/
 Two orders in those files are Java's collections rather than anyone's choice — the children of a
 `summary_info` and the cases in the JUnit report follow JDK 8 `Hashtable` iteration over paths that
 carry the run's timestamp — and they are reproduced, because a comparison with CTP is a comparison of
-bytes. [`sql/records.sh`](../../evidence/sql/records.sh) checks that against real CTP runs.
+bytes. [`sql/records.sh`](../../project/evidence/sql/records.sh) checks that against real CTP runs.
 
 The runner's own output goes to standard error, never to standard output: what CTP prints there is
 frozen and compared.

@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 600" width="880" height="600" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="dispatch-title dispatch-desc">
+<title id="dispatch-title">How testkit routes a task</title>
+<desc id="dispatch-desc">A command typed today, or by bin/ctp.sh once its shim is in place, reaches one registry. The registry sends each task to a native Go runner — shellsuite for unittest always and for shell and rqg when TESTKIT_NATIVE names shell, sqlsuite for sql and medium when it names sql — or to the original CTP as a subprocess. Every path writes the same frozen files, markers and exit codes, which a later operations layer, out of scope here, only reads.</desc>
+<style>
+  .ttl{font-size:16px;font-weight:700;fill:#1f2937}
+  .sub{font-size:12px;fill:#6b7280}
+  .eye{font-size:8px;font-weight:700;fill:#6b7280;letter-spacing:1px}
+  .eye-g{font-size:8px;font-weight:700;fill:#1a7f37;letter-spacing:1px}
+  .eye-b{font-size:8px;font-weight:700;fill:#2563eb;letter-spacing:1px}
+  .name{font-size:12px;font-weight:700;fill:#1f2937}
+  .d{font-size:12px;fill:#6b7280}
+  .dk{font-size:12px;fill:#1f2937}
+  .m{font-size:12px;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mb{font-size:12px;fill:#2563eb;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mm{font-size:12px;fill:#6b7280;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .note{font-size:12px;fill:#9ca3af}
+  .wire{fill:none;stroke:#6b7280;stroke-width:1.2}
+  .wire-d{fill:none;stroke:#9ca3af;stroke-width:1.2;stroke-dasharray:4 3}
+</style>
+<defs>
+  <marker id="dispatch-arrow" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6b7280"/></marker>
+  <marker id="dispatch-arrow-soft" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9ca3af"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="600" fill="#ffffff"/>
+
+<text class="ttl" x="24" y="32">One binary, one registry — and the output does not say which runner ran</text>
+<text class="sub" x="24" y="52">A task name is routed, not converted. Legacy claims every task; a native runner registered after it takes over the ones it names.</text>
+
+<!-- connectors first, so boxes sit on top -->
+<path class="wire" d="M220,148 V164 Q220,172 228,172 H396 Q404,172 404,180 V196" marker-end="url(#dispatch-arrow)"/>
+<path class="wire-d" d="M660,148 V164 Q660,172 652,172 H484 Q476,172 476,180 V196" marker-end="url(#dispatch-arrow-soft)"/>
+
+<path class="wire" d="M404,260 V276 Q404,284 396,284 H160 Q152,284 152,292 V308" marker-end="url(#dispatch-arrow)"/>
+<path class="wire" d="M440,260 V308" marker-end="url(#dispatch-arrow)"/>
+<path class="wire" d="M476,260 V276 Q476,284 484,284 H720 Q728,284 728,292 V308" marker-end="url(#dispatch-arrow)"/>
+
+<path class="wire" d="M152,428 V476" marker-end="url(#dispatch-arrow)"/>
+<path class="wire" d="M440,428 V476" marker-end="url(#dispatch-arrow)"/>
+<path class="wire" d="M728,428 V444 Q728,452 720,452 H568 Q560,452 560,460 V476" marker-end="url(#dispatch-arrow)"/>
+
+<path class="wire-d" d="M592,512 H632" marker-end="url(#dispatch-arrow-soft)"/>
+
+<!-- entry -->
+<rect x="24" y="76" width="392" height="72" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="40" y="96">WHAT YOU TYPE TODAY</text>
+<text class="mb" x="40" y="120">$ testkit shell -c shell.conf</text>
+<text class="d" x="40" y="136">the binary, called directly</text>
+
+<rect x="464" y="76" width="392" height="72" rx="6" fill="#f9fafb" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4 3"/>
+<text class="eye" x="480" y="96">WHAT A QA MACHINE WILL TYPE — NOT IN PLACE YET</text>
+<text class="mm" x="480" y="120">$ bin/ctp.sh shell -c shell.conf</text>
+<text class="d" x="480" y="136">a shim that runs exec testkit "$@"</text>
+
+<!-- registry -->
+<rect x="320" y="196" width="240" height="64" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>
+<text class="eye-b" x="440" y="212" text-anchor="middle">REGISTRY</text>
+<text class="name" x="440" y="232" text-anchor="middle">task name → runner</text>
+<text class="d" x="440" y="248" text-anchor="middle">a later claim replaces an earlier one</text>
+
+<!-- runners -->
+<rect x="24" y="308" width="256" height="120" rx="6" fill="#f0fdf4" stroke="#1a7f37" stroke-width="1.2"/>
+<text class="eye-g" x="40" y="328">NATIVE — GO, IN THIS PROCESS</text>
+<text class="name" x="40" y="348">shellsuite</text>
+<text class="m" x="40" y="368">unittest</text><text class="d" x="116" y="368">always</text>
+<text class="m" x="40" y="384">shell · rqg</text>
+<text class="mm" x="40" y="400">TESTKIT_NATIVE=shell</text>
+
+<rect x="312" y="308" width="256" height="120" rx="6" fill="#f0fdf4" stroke="#1a7f37" stroke-width="1.2"/>
+<text class="eye-g" x="328" y="328">NATIVE — CQT EXECUTES, GO JUDGES</text>
+<text class="name" x="328" y="348">sqlsuite</text>
+<text class="m" x="328" y="368">sql · medium</text>
+<text class="d" x="328" y="384">one JVM per slot, for the whole run</text>
+<text class="mm" x="328" y="400">TESTKIT_NATIVE=sql</text>
+
+<rect x="600" y="308" width="256" height="120" rx="6" fill="#f9fafb" stroke="#9ca3af" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text class="eye" x="616" y="328">LEGACY — CTP, AS A SUBPROCESS</text>
+<text class="name" x="616" y="348">argv and env, byte for byte</text>
+<text class="m" x="616" y="368">kcc · neis05 · neis08</text>
+<text class="m" x="616" y="384">sql_by_cci · isolation · jdbc</text>
+<text class="m" x="616" y="400">ha_repl · cdc_repl · webconsole</text>
+<text class="d" x="616" y="420">+ shell, rqg, sql, medium when off</text>
+
+<!-- output -->
+<rect x="24" y="476" width="568" height="76" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>
+<text class="eye-b" x="40" y="496">FROZEN OUTPUT — THE SURFACE BELONGS TO THIS LAYER, NOT TO A RUNNER</text>
+<text class="name" x="40" y="516">the same files, stdout markers and exit codes, whichever runner ran</text>
+<text class="m" x="40" y="536">main.info · summary_info · test_status.data · dispatch_tc_*.txt</text>
+
+<rect x="632" y="476" width="224" height="76" rx="6" fill="#fafafa" stroke="#d1d5db" stroke-width="1" stroke-dasharray="3 3"/>
+<text class="eye" x="648" y="496">OUT OF SCOPE — QA OPERATIONS</text>
+<text class="dk" x="648" y="516">scheduling · mail · issue filing</text>
+<text class="d" x="648" y="536">a later layer that reads this output</text>
+
+<text class="note" x="24" y="584">cmd/testkit/main.go registers legacy for all fourteen tasks, then unittest, then each family TESTKIT_NATIVE names.</text>
+</svg>

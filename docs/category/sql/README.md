@@ -13,27 +13,13 @@ rewrote. These documents are the as-built guide.
 | **[6. When a case fails](06-when-a-case-fails.md)** | reading a verdict, and the failures that are not the engine's |
 
 The pre-implementation design — the CQT class mapping, the ADRs, and what was measured on the way —
-is [`../../design/module-sql.md`](../../design/module-sql.md); the evidence is
-[`../../evidence/sql-native.md`](../../evidence/sql-native.md) and
-[`../../evidence/regression-sql.md`](../../evidence/regression-sql.md).
+is [`../../project/design/module-sql.md`](../../project/design/module-sql.md); the evidence is
+[`../../project/evidence/sql-native.md`](../../project/evidence/sql-native.md) and
+[`../../project/evidence/regression-sql.md`](../../project/evidence/regression-sql.md).
 
 ## In one picture
 
-```
-   conf (sections) ─────┐
-                        v
-                  ┌───────────┐
-   corpus ───────►│  testkit  │──────► $CTP_HOME/sql/result/y2026/m9/schedule_…
-   (cases and     │ sql·medium│        main.info · summary.xml · summary_info
-    answers)      └─────┬─────┘        the JUnit report · a .result beside
-                        │              every case — CQT's bytes, exactly
-        ┌───────────────┼───────────────┐
-        v               v               v
-    ┌────────┐     ┌────────┐      ┌────────┐        one database, prepared once,
-    │ slot 0 │     │ slot 1 │  …   │ slot N │        under an overlay per slot, and
-    │  JVM   │     │  JVM   │      │  JVM   │        a JVM that lives for the run
-    └────────┘     └────────┘      └────────┘        and runs CQT's own executor
-```
+![The sql category in one picture: testkit sql medium reads a sectioned conf and a corpus of cases and answers and writes CQT's records byte for byte; N slots, each a server, a broker and one JVM running CQT's executor, stand on one database prepared once behind an overlay per slot.](../../assets/sql-overview.svg)
 
 A slot is a set of namespaces with its own server and broker, and `$CUBRID` behind an overlay whose
 lower layer is the one database the setup prepared. Every slot keeps the shipped port, so nothing is

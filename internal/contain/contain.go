@@ -7,7 +7,7 @@
 // exactly this run's work, and inside an IPC namespace so is `ipcs`. A filter
 // that can be wrong becomes a property of where the process is.
 //
-// docs/concept/beyond-axis.md B-T2.
+// docs/project/concept/beyond-axis.md B-T2.
 package contain
 
 import (

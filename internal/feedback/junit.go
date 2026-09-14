@@ -17,7 +17,7 @@ import (
 // IndentingXMLStreamWriter and matching that library's whitespace exactly would
 // be reproducing an accident.
 //
-// docs/concept/external-surface-freeze.md.
+// docs/project/concept/external-surface-freeze.md.
 type junit struct {
 	f        *os.File
 	w        *bufio.Writer

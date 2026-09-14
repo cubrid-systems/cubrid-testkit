@@ -44,11 +44,11 @@ EOF
 CUBRID=$CUBRID tools/sizing.sh
 
 # 5. run
-TESTKIT_CONTAIN=1 TESTKIT_NATIVE_SHELL=1 bin/testkit shell -c shell.conf
+TESTKIT_CONTAIN=1 TESTKIT_NATIVE=shell bin/testkit shell -c shell.conf
 ```
 
 `TESTKIT_CONTAIN=1` is what gives each slot its namespaces; without it slots refuse to start rather
-than colliding silently. `TESTKIT_NATIVE_SHELL=1` is the opt-in gate that says *run `shell` here*
+than colliding silently. `TESTKIT_NATIVE=shell` is the opt-in gate that says *run `shell` here*
 rather than handing it to CTP.
 
 ### One case, in a loop
@@ -73,7 +73,7 @@ docker run --rm \
   -e CUBRID_DATABASES=/home/CUBRID/databases \
   -e CTP_HOME=/home/CTP \
   -e TESTKIT_CONTAIN=1 \
-  -e TESTKIT_NATIVE_SHELL=1 \
+  -e TESTKIT_NATIVE=shell \
   -e TESTKIT_SLOT_ROOT=/home/slots/run \
   <image> testkit shell -c /home/shell.conf
 ```

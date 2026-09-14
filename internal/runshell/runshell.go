@@ -8,7 +8,7 @@
 //
 // CTP shipped it as shell/init_path/run_shell.sh, a launcher for RunShellMain.
 // Of its fourteen options, six are test execution and are here; seven are QA
-// operations and are not (docs/concept/external-surface-freeze.md §1-4); one is
+// operations and are not (docs/project/concept/external-surface-freeze.md §1-4); one is
 // dead in CTP itself.
 package runshell
 
@@ -129,7 +129,7 @@ const relScript = "$CUBRID/bin/cubrid_rel 2>/dev/null"
 // Worth knowing: CTP had two build-id parsers and they disagreed. This one is
 // right; CommonUtils.getBuildId cut at the next "-", ")" or "." after the
 // version and ran away when a build had no commit suffix
-// (docs/evidence/spec-corrections.md). The fix applied there made the other one
+// (docs/project/evidence/spec-corrections.md). The fix applied there made the other one
 // agree with this, rather than inventing a third rule.
 func ReadMeta(ctx context.Context, ch exec.Channel) (Meta, error) {
 	res, err := ch.Run(ctx, relScript)

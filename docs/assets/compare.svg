@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 468" width="880" height="468" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="compare-title compare-desc">
+<title id="compare-title">How the whole shell corpus is compared</title>
+<desc id="compare-desc">shards.sh cuts the read-only shell corpus into shards, largest first. For each shard, CTP runs, the tree can be put back by shard-clean.sh so CTP's leftovers cannot reach the second runner, and testkit runs; both result trees go to compare.sh, which normalises and diffs them and writes report.txt ending in COMPLETE clean with exit 0 or COMPLETE dirty with exit 1. The unmatched lines are printed in full under NEW, and a shard whose report already ends in COMPLETE is skipped when the loop resumes.</desc>
+<style>
+  .ttl{font-size:16px;font-weight:700;fill:#1f2937}
+  .sub{font-size:12px;fill:#6b7280}
+  .eye{font-size:8px;font-weight:700;fill:#6b7280;letter-spacing:1px}
+  .name{font-size:12px;font-weight:700;fill:#1f2937}
+  .name-r{font-size:12px;font-weight:700;fill:#c0392b}
+  .d{font-size:12px;fill:#6b7280}
+  .m{font-size:12px;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mb{font-size:12px;font-weight:700;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mg{font-size:12px;fill:#1a7f37;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mr{font-size:12px;fill:#c0392b;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .note{font-size:12px;fill:#9ca3af}
+  .wire{fill:none;stroke:#6b7280;stroke-width:1.2}
+  .wire-d{fill:none;stroke:#9ca3af;stroke-width:1.2;stroke-dasharray:4 3}
+  .wire-r{fill:none;stroke:#c0392b;stroke-width:1.2}
+</style>
+<defs>
+  <marker id="compare-arrow" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6b7280"/></marker>
+  <marker id="compare-arrow-soft" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9ca3af"/></marker>
+  <marker id="compare-arrow-r" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#c0392b"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="468" fill="#ffffff"/>
+
+<text class="ttl" x="24" y="32">The whole corpus: a loop over shards, and a report whose only product is NEW</text>
+<text class="sub" x="24" y="52">A shard is the unit of work and of resume. Differences seen before are named; what is left is the finding.</text>
+
+<!-- zone: one shard (drawn before connectors and boxes) -->
+<rect x="384" y="72" width="472" height="100" rx="8" fill="#f9fafb" stroke="#e5e7eb" stroke-width="1"/>
+<text class="eye" x="400" y="88">ONE SHARD — shard.sh</text>
+
+<!-- connectors -->
+<path class="wire" d="M152,128 H176" marker-end="url(#compare-arrow)"/>
+<path class="wire" d="M352,128 H400" marker-end="url(#compare-arrow)"/>
+<path class="wire" d="M520,128 H544" marker-end="url(#compare-arrow)"/>
+<path class="wire" d="M680,128 H704" marker-end="url(#compare-arrow)"/>
+<path class="wire" d="M460,160 V192 Q460,200 468,200 H604 Q612,200 612,208 V248" marker-end="url(#compare-arrow)"/>
+<path class="wire" d="M772,160 V192 Q772,200 764,200 H668 Q660,200 660,208 V248" marker-end="url(#compare-arrow)"/>
+<path class="wire" d="M536,284 H480" marker-end="url(#compare-arrow)"/>
+<path class="wire-r" d="M372,320 V360" marker-end="url(#compare-arrow-r)"/>
+<path class="wire-d" d="M340,248 V208 Q340,200 332,200 H272 Q264,200 264,192 V160" marker-end="url(#compare-arrow-soft)"/>
+<rect x="348" y="212" width="228" height="16" fill="#ffffff"/>
+<text class="d" x="352" y="224">a COMPLETE report is skipped on resume</text>
+
+<!-- corpus and shards -->
+<rect x="24" y="96" width="128" height="64" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="name" x="40" y="124">the shell corpus</text>
+<text class="d" x="40" y="144">read-only</text>
+
+<rect x="176" y="96" width="176" height="64" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="mb" x="192" y="124">shards.sh</text>
+<text class="d" x="192" y="144">largest shard first</text>
+
+<!-- the shard -->
+<rect x="400" y="96" width="120" height="64" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="name" x="416" y="124">CTP</text>
+<text class="m" x="416" y="144">ctp.sh shell</text>
+
+<rect x="544" y="96" width="136" height="64" rx="6" fill="#ffffff" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4 3"/>
+<text class="name" x="560" y="124">put the tree back</text>
+<text class="m" x="560" y="144">shard-clean.sh</text>
+
+<rect x="704" y="96" width="136" height="64" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="name" x="720" y="124">testkit</text>
+<text class="m" x="720" y="144">testkit shell</text>
+
+<!-- compare, report, finding -->
+<rect x="536" y="248" width="200" height="72" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>
+<text class="mb" x="552" y="272">compare.sh</text>
+<text class="d" x="552" y="292">normalise, then comm</text>
+<text class="d" x="552" y="308">verdict files held to zero</text>
+
+<rect x="264" y="248" width="216" height="72" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="mb" x="280" y="272">report.txt</text>
+<text class="mg" x="280" y="292">COMPLETE clean · exit 0</text>
+<text class="mr" x="280" y="308">COMPLETE dirty · exit 1</text>
+
+<rect x="264" y="360" width="216" height="56" rx="6" fill="#fdecea" stroke="#c0392b" stroke-width="1.4"/>
+<text class="name-r" x="280" y="384">NEW</text>
+<text class="d" x="280" y="404">the unmatched lines, in full</text>
+
+<text class="note" x="24" y="452">Both result trees stay beside the report, so a finding is re-read without running anything again.  ADR-013 · docs/project/evidence/compare/</text>
+</svg>

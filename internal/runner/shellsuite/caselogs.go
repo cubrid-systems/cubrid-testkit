@@ -72,7 +72,7 @@ func NewCaseLogs(resultDir, scenario, mode string, budgetMB int) (*CaseLogs, err
 		return nil, fmt.Errorf("case_logs needs a result directory")
 	}
 	// Beside current_runtime_logs and not inside it: that tree is the frozen
-	// surface (ADR docs/concept/external-surface-freeze.md) and a directory
+	// surface (ADR docs/project/concept/external-surface-freeze.md) and a directory
 	// nobody expects there is a change to it.
 	return &CaseLogs{
 		dir:      filepath.Join(filepath.Dir(resultDir), "case-logs"),

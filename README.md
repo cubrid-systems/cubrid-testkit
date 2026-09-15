@@ -20,7 +20,10 @@ For engine developers and QA. Part of
 > **Where it is:** `unittest` runs natively. `sql` and `medium` run natively behind
 > `TESTKIT_NATIVE=sql` and passed [ADR-017](docs/project/evidence/regression-sql.md)'s gate at
 > upstream develop's head. `shell` and `rqg` run natively behind `TESTKIT_NATIVE=shell`, over the
-> whole corpus; the full-corpus comparison against CTP has not cleared yet. Every other task
+> whole corpus; the full-corpus comparison against CTP has not cleared yet. `isolation` runs natively
+> behind `TESTKIT_NATIVE=isolation`, with CTP's own `runone.sh` still executing every case, four
+> slots at once by default; its gate, [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md),
+> found no runner difference with one slot or with four. Every other task
 > dispatches to CTP unchanged. See [Status](#status).
 
 ## Prerequisites
@@ -58,7 +61,7 @@ The compatibility is not a promise made in prose; it is where the binary sits. T
 a QA machine keeps calling `bin/ctp.sh` and gets this runner, and nothing that reads the output can
 tell.
 
-![How testkit routes a task: a command typed today, or by bin/ctp.sh once its shim is in place, reaches one registry, which sends unittest, shell and rqg to shellsuite, sql and medium to sqlsuite — each family behind TESTKIT_NATIVE — and everything else to the original CTP as a subprocess; every path writes the same frozen output.](docs/assets/dispatch.svg)
+![How testkit routes a task: a command typed today, or by bin/ctp.sh once its shim is in place, reaches one registry, which sends unittest, shell and rqg to shellsuite, sql and medium to sqlsuite, isolation to isolationsuite — each family behind TESTKIT_NATIVE — and everything else to the original CTP as a subprocess; every path writes the same frozen output.](docs/assets/dispatch.svg)
 
 **The shim is not in place yet** — the dashed box. `bin/ctp.sh` in `cubrid-testtools` is still the
 original, and it should stay that way until the corpus comparison clears — the gate is what earns
@@ -75,7 +78,8 @@ change rather than a negotiation.
 
 **A task is routed, not converted.** Legacy registers first and claims all fourteen tasks; a native
 runner registered after it takes over the ones it names. `unittest` always runs natively, `shell`
-and `rqg` when `TESTKIT_NATIVE` names `shell`, `sql` and `medium` when it names `sql`; the legacy
+and `rqg` when `TESTKIT_NATIVE` names `shell`, `sql` and `medium` when it names `sql`, `isolation`
+when it names `isolation`; the legacy
 path reproduces CTP's argv and environment byte for byte for everything else. There is no
 jar-compatibility layer: old modules keep their own jars, which keep being built, until their turn
 comes.
@@ -124,8 +128,8 @@ being ignored.
 
 | | |
 |---|---|
-| runs natively | `unittest` · `shell` and `rqg` behind `TESTKIT_NATIVE=shell` · `sql` and `medium` behind `TESTKIT_NATIVE=sql` |
-| dispatched to CTP | `kcc` `neis05` `neis08` `sql_by_cci` `isolation` `ha_repl` `cdc_repl` `jdbc` `webconsole`, and any family whose gate is off |
+| runs natively | `unittest` · `shell` and `rqg` behind `TESTKIT_NATIVE=shell` · `sql` and `medium` behind `TESTKIT_NATIVE=sql` · `isolation` behind `TESTKIT_NATIVE=isolation` |
+| dispatched to CTP | `kcc` `neis05` `neis08` `sql_by_cci` `ha_repl` `cdc_repl` `jdbc` `webconsole`, and any family whose gate is off |
 
 `TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of
 them. The older `TESTKIT_NATIVE_SHELL=1` and `TESTKIT_NATIVE_SQL=1` still work.
@@ -164,6 +168,10 @@ wrong, how to run it on a host and in Docker, and what to set.
 **[`docs/category/sql/`](docs/category/sql/README.md) is the same guide for `sql` and `medium`** —
 the stages and the executor, every key and switch, what parallel buys and what it costs on the
 machine you have, and how to read a failure that is the corpus's order rather than the engine's.
+
+**[`docs/category/isolation/`](docs/category/isolation/README.md) is the guide for `isolation`** — the
+stages and what `runone.sh` does with a case, the `.ctl` language as `qactl` reads it, every key, and
+the cases CTP cannot reproduce either.
 
 The short version:
 
@@ -213,13 +221,21 @@ suffix is now just its version instead of `11.2.0.0000) (64bit release build for
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
 | **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` over the whole corpus at develop head, every failure attributed; `run-shell` complete, with six axis-T options; slots, a corpus that cleans itself, per-case patches and a progress page are in and measured. The full-corpus comparison against CTP has not cleared |
-| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation`, `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
+| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation` native over the whole corpus, ADR-018's gate met, four slots by default; `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
 **What is proven, for sql and medium.** CTP and testkit over the whole of both corpora, serial, with
 the engine, the cases and CTP all at upstream develop's head: medium identical in every file, and a
 clean sql run byte-identical to a clean CTP run — 17,459 `.result` files and 2,762 record files
 ([`project/evidence/regression-sql.md`](docs/project/evidence/regression-sql.md)).
+
+**What is measured, for isolation.** CTP does not reproduce its own verdicts on this corpus: two
+whole CTP runs in the same order disagree on seven of 6,772. Against them, the native runner writes
+the same machine check, dispatch sets and snapshot, and every verdict it disagrees on belongs to a
+case that flips under CTP too — rerun alone, three times under each runner, none of the ten
+separates the two. On a 60-case sample every result file is byte-identical. Four slots take the
+corpus from 12,301 s to 2,978 s, by the same rules with no runner difference
+([`project/evidence/isolation-baseline.md`](docs/project/evidence/isolation-baseline.md)).
 
 **What is proven, for shell.** Equivalence here is not byte-identity, because some of what a run
 writes cannot match between two runs — paths, times, dates. So both sides are normalised, and then
@@ -260,7 +276,7 @@ and a shard comparison once blamed the runner for what the runner before it had 
 CONTEXT.md               the glossary — task ≠ suite ≠ module ≠ runner
 cmd/testkit/             the entry point
 internal/                cli · conf · registry · dispatch · runshell · exec · result · feedback ·
-                         topology · runner (legacy, shellsuite, sqlsuite) ·
+                         topology · runner (legacy, shellsuite, sqlsuite, isolationsuite) ·
                          contain (namespaces per slot) · plan (case durations) ·
                          patch (per-case patches) · coredump (a crashed case's stack) ·
                          status (the progress page)
@@ -273,6 +289,7 @@ docs/
   assets/                the diagrams these pages use
   category/              how to run each test category, and what to set
     shell/  sql/         the as-built guides
+    isolation/           the same, for isolation
     extensions/          testing axes CTP never had
   project/               why the rewrite exists and how it is built
     ROADMAP.md           phases, exit conditions, risks, the re-evaluation gate
@@ -292,6 +309,7 @@ docs/
 | the vocabulary | [`CONTEXT.md`](CONTEXT.md) |
 | how to run the shell suite | [`category/shell/`](docs/category/shell/README.md) |
 | how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
+| how to run isolation | [`category/isolation/`](docs/category/isolation/README.md) |
 | what this system is for | [`project/concept/north-star.md`](docs/project/concept/north-star.md) |
 | what may never change | [`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) |
 | what was left out, and why | [`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md) |

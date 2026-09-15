@@ -206,7 +206,7 @@ env.instance<N>.<role>.<property>  → instance<N> 오버라이드 (default 를 
 |---|---|---|
 | sql / medium | `<...>/cases/<name>.<ext>` + `<...>/answers/<name>.answer` — **자매 디렉터리** | `case-formats.md` §2·§3 |
 | **shell** | `<name>/cases/<name>.sh` — 스크립트 이름 = **두 단계 위 디렉터리 이름**. `answers/` 는 케이스가 쓰는 관례일 뿐 **러너는 읽지 않는다** (2026-09-02 정정) | `Dispatch.getAllTestCaseScripts` · `evidence/spec-corrections.md` |
-| **isolation** | `_NN_<isolation_level>/<topic>/<...>/` 안에 `.ctl` 과 `.answer` 가 **같은 디렉터리에 co-located**. `cases/`·`answers/` 자매 디렉터리 **없음** | `case-formats.md`:22,152 · `isolation/io-contract.md` §3-1 |
+| **isolation** | `_NN_<isolation_level>/<topic>/<...>/<name>.ctl` + **`answer/<name>.answer*`** — answer 는 케이스 옆의 `answer/` 에. `cases/` 세그먼트 **없음**. run 은 `result/<name>.result`·`result/<name>.log`·`<name>.result` 를 쓴다. *(2026-09-15 정정 — 이 행은 "`.ctl` 과 `.answer` 가 같은 디렉터리에 co-located" 였다. `runone.sh` 가 answer 를 찾는 곳을 읽지 않은 서술이었다)* | `runone.sh:35,41,298` · `evidence/spec-corrections.md` §8 |
 
 `cases/` 세그먼트 필수 규칙은 **shell 모듈의 `Test.java` 한정**이다 (`lastIndexOf("cases")` 로 경로 분리 — `shell/io-contract.md` §3-1). isolation 에 적용하면 안 된다.
 
@@ -517,9 +517,15 @@ onStopEnvEvent(envId)
 ### 7-1. `runone.sh` 호출 시그니처 (isolation)
 
 ```
-sh runone.sh [-n] -r <retry+1> <tc> <timeout_sec> <db_name> 2>&1
+sh runone.sh [-n] -r <retry+1> <tc> <timeout_sec> <client> 2>&1
 ```
 `-n` = `backup_core_file_yn=false`. `<tc>` 가 `/` 로 시작 안 하면 `$HOME/<tc>` prefix.
+
+> **Corrected 2026-09-15.** 마지막 인자는 `<db_name>` 이 아니라 **클라이언트 프로그램**이다. `cubrid_testdb_name`(기본
+> `cubrid`)이 `DB_TEST_MAP` 으로 `qacsql` 이 되어 넘어가고, DB 는 `runone.sh` 가 `ctldb` 로 고정한다
+> (`Context.java:258-269`, `Constants.java:40-45`, `runone.sh:122`). 스크립트 앞에는 러너가
+> `export ctlpath=${CTP_HOME}/isolation/ctltool` 과 `PATH` 를 붙인다 (`IsolationScriptInput.java:35-36`) —
+> 기계가 주는 변수가 아니다. `evidence/spec-corrections.md` §8.
 
 ### 7-2. `init_path/init.sh` 케이스 prologue (shell)
 

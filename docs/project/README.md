@@ -40,6 +40,7 @@
 
 - [category/shell](../category/shell/README.md) — 단계·슬롯·메모리 ceiling·모든 키
 - [category/sql](../category/sql/README.md) — sql·medium: 단계와 실행부, 키와 스위치, 슬롯이 사 주는 것과 그 값, 실패 읽는 법
+- [category/isolation](../category/isolation/README.md) — isolation: 단계와 `runone.sh`, `qactl` 이 읽는 `.ctl` 언어, 키, CTP 도 재현하지 못하는 케이스
 - [category/extensions](../category/extensions/) — §6a 확장 영역 E1~E10 (incubating)
 
 ## 디렉터리 구조
@@ -47,7 +48,7 @@
 ```
 docs/
 ├── assets/      README 의 그림
-├── category/    돌리는 방법 — shell/ · sql/ · extensions/
+├── category/    돌리는 방법 — shell/ · sql/ · isolation/ · extensions/
 └── project/     이 폴더 — 왜, 무엇을 얼리고, 어떻게 만들고, 무엇으로 증명하는가
     ├── ROADMAP.md
     ├── adr/  concept/  design/  analysis/  survey/

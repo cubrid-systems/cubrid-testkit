@@ -18,8 +18,8 @@ For engine developers and QA. Part of
 [CUBRID Systems Research](https://github.com/cubrid-systems).
 
 > **Where it is:** `unittest` runs natively. `sql` and `medium` run natively behind
-> `TESTKIT_NATIVE=sql` and passed [ADR-017](docs/project/evidence/regression-sql.md)'s gate at
-> upstream develop's head. `shell` and `rqg` run natively behind `TESTKIT_NATIVE=shell`, over the
+> `TESTKIT_NATIVE=sql` and passed [ADR-017](docs/project/adr/ADR-017-sql-equivalence.md)'s gate at
+> upstream develop's head ([evidence](docs/project/evidence/regression-sql.md)). `shell` and `rqg` run natively behind `TESTKIT_NATIVE=shell`, over the
 > whole corpus; the full-corpus comparison against CTP has not cleared yet. `isolation` runs natively
 > behind `TESTKIT_NATIVE=isolation`, with CTP's own `runone.sh` still executing every case, four
 > slots at once by default; its gate, [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md),
@@ -117,8 +117,8 @@ testkit run-shell --loop --maxloop 200 _01_utility/_38_csql/csql1
 testkit run-shell -h
 ```
 
-`--loop`, `--maxloop`, `--maxtime`, `--extend-script` and `--prompt-continue` are the axis-T options
-of CTP's `run_shell.sh`; the testcase argument may name the case directory, its `cases/`
+`--loop`, `--maxloop`, `--maxtime`, `--extend-script`, `--prompt-continue` and `-h` are the six
+axis-T options of CTP's `run_shell.sh`; the testcase argument may name the case directory, its `cases/`
 subdirectory, or a file in either, and defaults to the working directory. Touching a file named
 `STOP` in the case directory ends the loop after the attempt in flight. The seven QA-operations
 options — `--update-build`, `--enable-report`, `--mailto` and the rest — say so by name instead of
@@ -132,7 +132,8 @@ being ignored.
 | dispatched to CTP | `kcc` `neis05` `neis08` `sql_by_cci` `ha_repl` `cdc_repl` `jdbc` `webconsole`, and any family whose gate is off |
 
 `TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of
-them. The older `TESTKIT_NATIVE_SHELL=1` and `TESTKIT_NATIVE_SQL=1` still work.
+them. `TESTKIT_NATIVE_<FAMILY>=1` — `TESTKIT_NATIVE_SHELL=1`, `TESTKIT_NATIVE_SQL=1`,
+`TESTKIT_NATIVE_ISOLATION=1` — does the same for one family.
 
 Seven more names — `cci` `dots` `nbd` `sysbench` `tpcc` `tpcw` `ycsb` — are ones CTP accepted and
 silently did nothing about. They now say they are retired and move on to the next task: the same
@@ -185,8 +186,10 @@ No root and no container runtime: the namespaces and the overlay are both unpriv
 runs inside Docker, which needs `--security-opt seccomp=unconfined` and
 `--security-opt systempaths=unconfined` but not `--privileged`.
 
-Parallelism is off by default, and a slotted run writes the files a serial run writes — slots share
-an environment id on purpose, so the output does not say how many there were.
+For `shell` and `sql` parallelism is off by default; `isolation` runs four slots unless
+`parallel_slots` says otherwise. A slotted shell or isolation run writes the record files a serial
+run writes — slots share an environment id on purpose — and only the console, with an
+`[ENV START]` for each slot, shows how many there were.
 
 ## The frozen surface
 
@@ -217,11 +220,11 @@ suffix is now just its version instead of `11.2.0.0000) (64bit release build for
 
 | Phase | | |
 |---|---|---|
-| 0 — analysis | **done** | 39 documents on what CTP actually does |
+| 0 — analysis | **done** | 38 documents on what CTP actually does |
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
 | **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` over the whole corpus at develop head, every failure attributed; `run-shell` complete, with six axis-T options; slots, a corpus that cleans itself, per-case patches and a progress page are in and measured. The full-corpus comparison against CTP has not cleared |
-| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation` native over the whole corpus, ADR-018's gate met, four slots by default; `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
+| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation` native over the whole corpus, ADR-018's gate met, four slots by default; the other eight tasks still CTP's |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
 **What is proven, for sql and medium.** CTP and testkit over the whole of both corpora, serial, with
@@ -233,8 +236,12 @@ clean sql run byte-identical to a clean CTP run — 17,459 `.result` files and 2
 whole CTP runs in the same order disagree on seven of 6,772. Against them, the native runner writes
 the same machine check, dispatch sets and snapshot, and every verdict it disagrees on belongs to a
 case that flips under CTP too — rerun alone, three times under each runner, none of the ten
-separates the two. On a 60-case sample every result file is byte-identical. Four slots take the
-corpus from 12,301 s to 2,978 s, by the same rules with no runner difference
+separates the two. On a 60-case sample every result file is byte-identical. Four slots run the
+corpus in 2,978 s against 11,095 s for CTP alone, by the same rules with no runner difference.
+Most of a case's time is `qactl`'s, and two fixed 100 ms sleeps in it are 22% of the case time; a
+prototype that stops sleeping for a client that has already exited took the corpus to 2,520 s,
+again with no runner difference — a change that belongs upstream in `cubrid-testtools`, since
+testkit runs CTP's executor unchanged
 ([`project/evidence/isolation-baseline.md`](docs/project/evidence/isolation-baseline.md)).
 
 **What is proven, for shell.** Equivalence here is not byte-identity, because some of what a run
@@ -267,7 +274,8 @@ databases, `shard-clean.sh` puts the tree back between the two runs.
 covered one entry point out of fifteen; the freeze specification was wrong in eight further places;
 the corpus counts were 3,722 and 204 until the discovery rule was fixed; the one difference the
 first comparison could not explain was blamed on the environment when it belonged to this runner;
-and a shard comparison once blamed the runner for what the runner before it had left
+a shard comparison once blamed the runner for what the runner before it had left; and measuring
+sql, medium and isolation under CTP before rewriting them found 27 more
 ([`project/evidence/spec-corrections.md`](docs/project/evidence/spec-corrections.md)).
 
 ## Layout
@@ -318,9 +326,11 @@ docs/
 | how a run is made parallel | [`project/concept/beyond-axis.md`](docs/project/concept/beyond-axis.md) B-T3, B-T12, B-T13 |
 | where the run's hours go, and what to do next | [`project/concept/beyond-axis.md`](docs/project/concept/beyond-axis.md) B-T14 |
 | what the old system could fix cheaply | [`project/evidence/ctp-improvements.md`](docs/project/evidence/ctp-improvements.md) |
-| what happens next | [`project/ROADMAP.md`](docs/project/ROADMAP.md) · [`project/design/module-shell.md`](docs/project/design/module-shell.md) |
+| what happens next | [`project/ROADMAP.md`](docs/project/ROADMAP.md) · [`project/design/module-shell.md`](docs/project/design/module-shell.md) · [`project/design/module-isolation.md`](docs/project/design/module-isolation.md) |
 | every decision so far | [`project/adr/README.md`](docs/project/adr/README.md) |
 
-New documents are in English. The Phase 0–2 documents under `docs/project/` are in Korean and stay
-that way — a freeze specification is worth exactly what its sentences are worth, and re-writing six
-thousand lines of analysis buys nothing but a chance to introduce errors.
+The guides for shell, sql and isolation, the evidence, and the later ADRs are in English. The
+analysis, the concept and design documents, the roadmap, the extension notes under
+`docs/category/extensions/` and the first ADRs are in Korean and stay that way — a freeze
+specification is worth exactly what its sentences are worth, and re-writing six thousand lines of
+analysis buys nothing but a chance to introduce errors.

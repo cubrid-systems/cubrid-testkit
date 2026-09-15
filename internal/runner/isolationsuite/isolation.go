@@ -254,8 +254,16 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 		corpus = filepath.Join(os.Getenv("HOME"), corpus)
 	}
 	onDisk := cfg.Bool("scenario_disk", false)
+	guards := guardsFor(os.Getenv("HOME"), os.Getenv("CUBRID"))
+	if guards.cubridLog != "" {
+		fmt.Fprintf(os.Stderr, "[INFO] %s is not the log of the install under test, and runone.sh empties it "+
+			"before every case; each slot sees an empty directory there instead\n", guards.cubridLog)
+	}
 	slots, closeSlots, err := contain.OpenSlots(n, func(i int, s *contain.Slot) error {
 		if err := s.NS.Overlay(ctltool, filepath.Join(s.Dir, "ctltool")); err != nil {
+			return err
+		}
+		if err := guards.mount(s); err != nil {
 			return err
 		}
 		if onDisk {
@@ -303,8 +311,11 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, 0)
 	opts := optionsOf(cfg)
+	board, stopBoard := openBoard(cfg, cases, slots, onDisk, filepath.Join(sink.Dir(), "feedback.log"), buildID)
+	defer stopBoard()
 	for i, s := range slots {
-		w := &worker{slot: s.Label, envID: envID, ch: s.Channel(), queue: queue, sink: sink, report: report, opts: opts}
+		w := &worker{slot: s.Label, envID: envID, ch: s.Channel(), queue: queue, sink: sink, report: report,
+			opts: opts, board: board}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -316,6 +327,16 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 
 	report.TaskStop()
 	fmt.Println("TEST COMPLETE")
+	// Before the slots go, because their directories go with them.
+	for _, s := range slots {
+		kept, err := keepBackups(filepath.Join(s.Dir, "error_backup"), guards.errorBackup, s.Label)
+		for _, k := range kept {
+			fmt.Fprintf(os.Stderr, "[INFO] %s: core backup kept at %s\n", s.Label, k)
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %s: %v\n", s.Label, err)
+		}
+	}
 	closeSlots()
 
 	// CTP packs the run directory at the end, whatever the verdicts were. Failing

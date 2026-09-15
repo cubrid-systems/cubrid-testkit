@@ -60,7 +60,7 @@ The compatibility is not a promise made in prose; it is where the binary sits. T
 a QA machine keeps calling `bin/ctp.sh` and gets this runner, and nothing that reads the output can
 tell.
 
-![How testkit routes a task: a command typed today, or by bin/ctp.sh once its shim is in place, reaches one registry, which sends unittest, shell and rqg to shellsuite, sql and medium to sqlsuite — each family behind TESTKIT_NATIVE — and everything else to the original CTP as a subprocess; every path writes the same frozen output.](docs/assets/dispatch.svg)
+![How testkit routes a task: a command typed today, or by bin/ctp.sh once its shim is in place, reaches one registry, which sends unittest, shell and rqg to shellsuite, sql and medium to sqlsuite, isolation to isolationsuite — each family behind TESTKIT_NATIVE — and everything else to the original CTP as a subprocess; every path writes the same frozen output.](docs/assets/dispatch.svg)
 
 **The shim is not in place yet** — the dashed box. `bin/ctp.sh` in `cubrid-testtools` is still the
 original, and it should stay that way until the corpus comparison clears — the gate is what earns

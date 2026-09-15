@@ -81,8 +81,10 @@ the slot, and what the script writes is thrown away with it.
 4. **The speed ceiling stays the script's.** `clean.sh`'s round trips and `prepare.sh`'s database creation are paid as
    CTP pays them. Parallel slots are the improvement available without changing the executor; changing what happens
    between cases is a separate decision with its own evidence.
-5. **`$HOME` is still shared.** The core path writes `~/error_backup` and truncates `~/CUBRID/log`. The slot does not
-   cover them yet (`module-isolation.md` §6).
+5. **`$HOME` is reached into twice, and a slot guards both.** The core path writes `~/error_backup`, and every case
+   empties `~/CUBRID/log`. Each slot gets an `~/error_backup` of its own, copied into the machine's when the slot
+   closes, and an empty `~/CUBRID/log` when that is not the install under test's (`module-isolation.md` §2-4). `$HOME`
+   itself is not replaced: the profile, the scripts' `cd` and a scenario under `$HOME` all depend on it.
 
 ## Alternatives considered
 

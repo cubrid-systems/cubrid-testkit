@@ -11,6 +11,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
+	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
 )
 
@@ -28,6 +29,8 @@ type worker struct {
 	sink   *result.Sink
 	report feedback.Feedback
 	opts   options
+	// board is the status page, or nil; every method on it tolerates nil.
+	board *status.Board
 }
 
 // envIdentify is what feedback records a case against: the env and the title
@@ -56,6 +59,8 @@ func (w *worker) one(ctx context.Context, ticket dispatch.Ticket) {
 	tc := ticket.Case
 	start := time.Now()
 	w.report.CaseStart(tc, w.envIdentify())
+	w.board.Begin(w.slot, tc)
+	w.board.Live(tc, liveResult(tc))
 
 	// One block per case: with more than one slot the worker log has more than one
 	// writer, and a case's trace must not be cut into by another's.
@@ -77,6 +82,8 @@ func (w *worker) one(ctx context.Context, ticket dispatch.Ticket) {
 	if !v.ok {
 		diff = w.diff(ctx, tc)
 	}
+	w.board.Live(tc, "")
+	w.board.End(w.slot, tc, v.ok)
 	w.report.CaseStop(feedback.CaseStop{
 		Case:       tc,
 		EnvID:      w.envIdentify(),

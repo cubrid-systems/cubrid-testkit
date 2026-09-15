@@ -168,6 +168,10 @@ wrong, how to run it on a host and in Docker, and what to set.
 the stages and the executor, every key and switch, what parallel buys and what it costs on the
 machine you have, and how to read a failure that is the corpus's order rather than the engine's.
 
+**[`docs/category/isolation/`](docs/category/isolation/README.md) is the guide for `isolation`** — the
+stages and what `runone.sh` does with a case, the `.ctl` language as `qactl` reads it, every key, and
+the cases CTP cannot reproduce either.
+
 The short version:
 
 ```bash
@@ -283,6 +287,7 @@ docs/
   assets/                the diagrams these pages use
   category/              how to run each test category, and what to set
     shell/  sql/         the as-built guides
+    isolation/           the same, for isolation
     extensions/          testing axes CTP never had
   project/               why the rewrite exists and how it is built
     ROADMAP.md           phases, exit conditions, risks, the re-evaluation gate
@@ -302,6 +307,7 @@ docs/
 | the vocabulary | [`CONTEXT.md`](CONTEXT.md) |
 | how to run the shell suite | [`category/shell/`](docs/category/shell/README.md) |
 | how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
+| how to run isolation | [`category/isolation/`](docs/category/isolation/README.md) |
 | what this system is for | [`project/concept/north-star.md`](docs/project/concept/north-star.md) |
 | what may never change | [`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) |
 | what was left out, and why | [`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md) |

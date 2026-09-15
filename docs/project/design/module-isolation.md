@@ -137,7 +137,7 @@ sh runone.sh [-n] -r <testcase_retry_num+1> <case.ctl> <testcase_timeout_in_secs
 | `$CUBRID/databases/ctldb`, `$CUBRID/log`, `inquire_on_exit=3` 추가 | 슬롯의 `$CUBRID` 오버레이 |
 | `make clean qactl qacsql`, cwd 의 `.test.log`·`runone.log`·`timeout.log`·`csql.err`·`deleteuser.sql` … | 슬롯마다 ctltool 디렉터리 — `$CTP_HOME/isolation/ctltool` 오버레이 |
 | 케이스 트리의 `result/<name>.{result,log}`, `<name>.result` | 코퍼스 오버레이 (`scenario_disk` / `scenario_ram_mb`) |
-| `~/error_backup`, `~/CUBRID/log` | **아직 없음** — §6 |
+| `~/error_backup`, `~/CUBRID/log` | 슬롯마다 자기 `~/error_backup` — 끝나면 슬롯이 남긴 것을 기계의 `~/error_backup` 으로 복사, 이름이 겹치면 슬롯 이름을 붙인다. 테스트 대상 설치가 `~/CUBRID` 가 아니면 슬롯에는 빈 `~/CUBRID/log` *(2026-09-15)* |
 
 ### 2-5. 기록 (동결 출력)
 
@@ -219,7 +219,7 @@ evidence: `evidence/isolation-baseline.md` (P0) → `evidence/regression-isolati
 
 | 항목 | 어디로 |
 |---|---|
-| `~/error_backup` · `~/CUBRID/log` — 슬롯이 `$HOME` 을 공유한다. 코어가 난 케이스만 쓰고, 이 기계엔 `~/CUBRID` 가 없다 | P1 — 슬롯마다 `HOME` 을 오버레이할지, 코어 경로만 옮길지 |
+| ~~`~/error_backup` · `~/CUBRID/log` — 슬롯이 `$HOME` 을 공유한다~~ | **닫힘 (2026-09-15)** — `HOME` 을 통째로 바꾸지 않았다: 프로파일·`cd`·scenario 의 상대 경로가 모두 `$HOME` 이다. 두 경로만 슬롯마다 bind 한다 (§2-4) |
 | 락 대기·`sleep` 케이스의 부하 민감도 — `load average` 16 인 기계에서 CTP 자신이 흔들리는가 | P0 noise floor |
 | `hostname -i` (코어 보고), `$HOSTNAME` (`clean.sh` 의 `tranlist` 필터) 가 네트워크 namespace 안에서 | P1 — 코어 경로와 함께 확인 |
 | ADR-008 (`.ctl` grammar) · ADR-009 (정규화 정형화) | 실행부를 그대로 쓰는 동안 필요 없다. 실행부를 Go 로 옮길 때 — P2 이후 |

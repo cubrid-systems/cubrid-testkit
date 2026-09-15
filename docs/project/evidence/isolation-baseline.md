@@ -194,8 +194,9 @@ the native runner, one run at a time:
 | `_06_features/cbrd_22705_online_index_parallel/dml_online_index/insert_odku_online_index_04` | OK OK OK | OK OK OK | OK NOK OK |
 
 **No case separates the runners.** Five flip from run to run under each runner on its own — the position of one
-client's `rows affected` among the other's, a unique-constraint error landing on a different statement, a wait that
-runs out at 30 s. The other five pass every time alone, under both, and failed only inside a whole run: what they
+client's `rows affected` among the other's, a unique-constraint error landing on a different statement, and in
+`delete_select_03` — which sleeps 30 s by its own `MC: sleep 30;` before the part it tests — where C1's
+`2000 rows affected` lands among C2's lines. The other five pass every time alone, under both, and failed only inside a whole run: what they
 depend on is what the corpus left in `ctldb` before them, or the load around them, and not the runner. The three cases
 that failed in both CTP runs and passed in the native one are in both groups: `delete_select_06` and
 `insert_select_02_1` fail alone under both runners, and `db_index_key_03` passes alone under both.

@@ -33,16 +33,17 @@ export PATH=$CTP_HOME/bin:$CTP_HOME/common/script:$CUBRID/bin:$JAVA_HOME/bin:$PA
 TESTKIT_NATIVE=isolation TESTKIT_CONTAIN=1 testkit isolation -c isolation.conf
 ```
 
-A conf that runs the corpus as CTP's daily runs do, with four slots and the page:
+A conf that runs the corpus as CTP's daily runs do, with the page:
 
 ```
 scenario=/path/to/cubrid-testcases/isolation
 testcase_timeout_in_secs=300
 testcase_retry_num=4
 testcase_exclude_from_file=/path/to/cubrid-testcases/isolation/config/daily_regression_test_excluded_list_linux.conf
-parallel_slots=4
 status_http=on
 ```
+
+It says nothing about slots, so the run takes the default ([below](#slots)).
 
 The run exits 0 whether or not cases failed, as CTP's does. A machine check that fails, a build that cannot be read,
 or a configuration the runner refuses exits 255. A scenario directory that is not there prints `[ERROR]` and exits 0 —
@@ -57,8 +58,15 @@ shows the raw result `runone.sh` is writing.
 
 ## Slots
 
-`parallel_slots` runs that many cases at once, each slot with its own install overlay, its own `ctldb` and its own
-build of ctltool, which it makes at its first case. Measured on this machine
+**Slots are the default.** A run whose conf does not set `parallel_slots` takes four, fewer on a machine with fewer
+CPUs or less memory than four need, and says on standard error what it chose and why:
+
+```
+[INFO] parallel_slots is not set: 4 slots, the default
+```
+
+`parallel_slots=1` runs serially, as CTP does; any other value is used as written. Each slot has its own install
+overlay, its own `ctldb` and its own build of ctltool, which it makes at its first case. Measured on this machine
 ([`isolation-baseline.md`](../../project/evidence/isolation-baseline.md)):
 
 | | one slot | four slots |

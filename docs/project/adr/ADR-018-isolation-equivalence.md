@@ -1,7 +1,8 @@
 # ADR-018: How isolation equivalence is proven
 
 - **Date:** 2026-09-15
-- **Status:** Proposed — for review. The numbers below are measured; the rule is the proposal
+- **Status:** Accepted (2026-09-15) — with the decision to make parallel slots isolation's default, which
+  `design/module-isolation.md` §0 had left until this gate was met. It is met with one slot and with four
 - **Related:** ADR-013 (shell), ADR-017 (sql), ADR-007 (the executor), `design/module-isolation.md` §2-6,
   `evidence/isolation-baseline.md` §4
 

@@ -1,7 +1,7 @@
 # ROADMAP — CUBRID Test Kit
 
 - **날짜**: 2026-09-04 (E9 Tier 1 오라클 완비 — 정합성 검사 3종 + TSan/UBSan 베이스라인) / 2026-09-03 (§6a 부록 — fuzzing 우선순위 사다리 + E9 신설; 저녁: 순위 4 완료 · E9 state reset 게이트 통과) / 2026-09-02 (Phase 1 진입 반영) / 2026-05-06 (§6a 확장 영역 추가) / 2026-04-28 (초안)
-- **현재 위치** *(2026-09-15)*: **Phase 3 진행 중** — shell·rqg native Runner 가 main 에 있고 `TESTKIT_NATIVE=shell` 뒤에 있다. develop head 에서 전체 코퍼스를 돌렸고 실패는 전부 원인이 붙었지만, 게이트(ADR-013 전체 코퍼스 비교)는 아직. **Phase 4 진행 중** — sql·medium 은 native 이고 ADR-017 게이트 통과(2026-09-12). **isolation P0 착수** (2026-09-15, 사용자 결정) — 설계는 `design/module-isolation.md`, 실행부는 ADR-007(초안). 자원이 충돌하면 §8 의 규칙대로 shell 게이트가 먼저
+- **현재 위치** *(2026-09-15)*: **Phase 3 진행 중** — shell·rqg native Runner 가 main 에 있고 `TESTKIT_NATIVE=shell` 뒤에 있다. develop head 에서 전체 코퍼스를 돌렸고 실패는 전부 원인이 붙었지만, 게이트(ADR-013 전체 코퍼스 비교)는 아직. **Phase 4 진행 중** — sql·medium 은 native 이고 ADR-017 게이트 통과(2026-09-12). **isolation native** (2026-09-15, 사용자 결정) — 설계 `design/module-isolation.md`, 실행부 ADR-007, 게이트 ADR-018 (슬롯 1개·4개 모두 러너 차이 0), 병렬 슬롯이 기본값, 가이드 `category/isolation/`. 자원이 충돌하면 §8 의 규칙대로 shell 게이트가 먼저
 - **2026-09-11 의 위치**: Phase 3 진행 중 — shell native Runner 가 `TESTKIT_NATIVE_SHELL` 뒤에. Phase 4 병행 착수 — sql·medium P0(측정·문서), 설계는 `design/module-sql.md`, 실행부는 ADR-016
 - **이전 위치**: Phase 2 완료 (2026-09-02) — Phase 0 완료(2026-04-29) · Phase 1 게이트 통과 및 산출 완료 · Phase 2 설계 5종 완료
 - **동시 트랙**: **§6a-E3 (SQLancer) 진행 중** — 사용자 결정으로 우선 승격 (ADR-EXT-003). 구현체는 별도 저장소 `cubrid-sqlancer`

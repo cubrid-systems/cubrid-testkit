@@ -73,6 +73,19 @@ sorted:
 own `[ENV START]` and `[ENV STOP]`, and writes its own setup and `Stop service` into the worker log — as shell's slots
 do, and for the same reason, one EnvID so that a parallel run writes the files a serial one writes.
 
+What four slots hold (`tk-sample-p4-mem`, `probe-mem.sh`: the same run again, 58 OK, with the resident memory of
+every process run from `tk/` sampled once a second): **2,813 MB at the peak** — four `cub_server` 2,378 MB (595 MB
+each, with the shipped `data_buffer_size=512M` and `log_buffer_size=256M`), four `cub_pl` 226 MB, eight `qacsql`
+116 MB, four `qactl` 51 MB, four `cub_master` 40 MB. Beside the server a slot is about 110 MB. The sample is light: a
+sql slot's server reached 1.38 GB over its corpus with the same buffers (`sql-native.md` §3), and the default slot
+count is sized at that — 1.5 GB a slot, after 2 GB for the rest of the machine, no more slots than CPUs, four at most
+unless `parallel_slots` says otherwise.
+
+**The default** (`tk-sample-default`, `run-default.sh`: `sample-tk.conf`, which does not set `parallel_slots`, on this
+machine's 16 CPUs and 19.5 GB available): standard error says `parallel_slots is not set: 4 slots, the default`, four
+`[ENV START]` lines, 58 OK in 32 s. Against `sample-1` every verdict file, `feedback.log` record and 58 of 58 normalized
+results are the same; the console markers differ by the three extra `[ENV START]` and three extra `[ENV STOP]` lines.
+
 Two runs came before it, and each failure is a fact about CTP rather than about the runner. `tk-sample-1` failed 58 of
 58 on `timeout3.sh: Permission denied`: the scripts are committed without an execute bit, and CTP sets it in its
 update step (`spec-corrections.md` §8). `tk-sample-2` wrote one blank line per case too many into the worker log:

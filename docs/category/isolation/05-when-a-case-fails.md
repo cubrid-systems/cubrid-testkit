@@ -40,13 +40,12 @@ Every case's trace carries two lines that look alarming and are not:
 
 ## Cases that fail everywhere
 
-At upstream develop's head (engine `f1ae86ff7`, cases `6ab786aa9`), eight cases failed every attempt in two CTP runs and
-in this runner's ([`isolation-baseline.md`](../../project/evidence/isolation-baseline.md) §4):
+At upstream develop's head (engine `f1ae86ff7`, cases `6ab786aa9`), seven cases failed every attempt in two CTP runs and
+in both of this runner's, one slot and four ([`isolation-baseline.md`](../../project/evidence/isolation-baseline.md) §4):
 
 - `_01_ReadCommitted/cbrd_21506/unique_index/insert_update_04`
 - `_01_ReadCommitted/function/counter_function/delete_delete_rownum_01`
 - `_01_ReadCommitted/partition_table/range/dml_ddl/reorganization_select_01`
-- `_02_RepeatableRead/primary_key_column/basic_sql/delete_select_14`
 - `_05_ReadCommitted_RepeatableRead/index_column/common_index/basic_sql/insert_delete_05`
 - `_06_features/cbrd_22705_online_index_parallel/normal_index/insert_update_04`
 - `_06_features/cbrd_22705_online_index_parallel/unique_index/insert_update_04`
@@ -57,16 +56,32 @@ the runner's.
 
 ## Cases that CTP does not reproduce
 
-Ten more changed verdict between runs, under CTP as well as here. Rerun alone three times under each runner, five
-flipped under each, and five passed every time alone while having failed inside a whole run:
+Fifteen more changed verdict between runs, under CTP as well as here. Each was rerun alone, three times under each
+runner:
 
-| flips from run to run | passes alone, fails in a whole run |
-|---|---|
-| `groupby/delete_select_06` | `_01_ReadCommitted/catalog/db_index_04` |
-| `aggregate/insert_select_02_1` | `_02_RepeatableRead/catalog/db_index_key_03` |
-| `basic_sql/select_insert_01` | `_02_RepeatableRead/catalog/db_index_key_05` |
-| `unique_with_key/insert_update_03` | `aggregate/max/insert_select_01_2` |
-| `aggregate/delete_select_03` | `dml_online_index/insert_odku_online_index_04` |
+**Flips from run to run**, alone as much as in a whole run:
+
+- `_01_ReadCommitted/index_column/common_index/groupby/delete_select_06`
+- `_02_RepeatableRead/no_index_column/aggregate/insert_select_02_1`
+- `_02_RepeatableRead/no_index_column/basic_sql/select_insert_01`
+- `_02_RepeatableRead/partition_table/range/with_index/unique_with_key/insert_update_03`
+- `_02_RepeatableRead/primary_key_column/basic_sql/delete_select_14` — fails far more often than it passes
+- `_04_RepeatableRead_ReadCommitted/no_index_column/aggregate/delete_select_03`
+
+**Passes alone every time, and failed inside a run:**
+
+- `_01_ReadCommitted/catalog/db_index_04`
+- `_02_RepeatableRead/catalog/db_index_key_03`
+- `_02_RepeatableRead/catalog/db_index_key_05`
+- `_04_RepeatableRead_ReadCommitted/index_column/common_index/aggregate/max/insert_select_01_2`
+- `_06_features/cbrd_22705_online_index_parallel/dml_online_index/insert_odku_online_index_04`
+
+**Passes everywhere but with four slots**, where each slot's `ctldb` has seen a different sequence of cases:
+
+- `_04_RepeatableRead_ReadCommitted/dml_ddl/createindex_02`
+- `_05_ReadCommitted_RepeatableRead/dml_ddl/createindex_01`
+- `_06_features/cbrd_22705_online_index_parallel/dml_ddl/createindex_02`
+- `_06_features/cbrd_22705_online_index_parallel/create_ddl/show_001`
 
 A failure among these is not evidence about the change under test until it fails alone as well.
 

@@ -64,8 +64,11 @@ build of ctltool, which it makes at its first case. Measured on this machine
 | | one slot | four slots |
 |---|---:|---:|
 | 60-case sample | 76 s | 38 s, the same verdicts and results |
+| the whole corpus, 6,772 cases | 12,301 s | 2,978 s |
 
-The whole corpus, 6,772 cases, takes 12,301 s on one slot; CTP alone took 11,095 s.
+CTP alone took 11,095 s over the whole corpus. With four slots four cases failed that pass everywhere else, each a
+listing whose rows came back in a different order after a different sequence of cases in the slot's `ctldb`; alone they
+pass under both runners ([when a case fails](05-when-a-case-fails.md#cases-that-ctp-does-not-reproduce)).
 
 What decides the gain is what cases wait on. Most of an isolation case is waiting — for a lock, for a `sleep`, for the
 controller — so slots add little CPU. Two things set the ceiling instead:

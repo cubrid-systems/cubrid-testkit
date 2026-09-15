@@ -29,7 +29,7 @@
 | 011 | 인벤토리 모듈의 재작성 / 어댑터 분류 | Phase 4 | ROADMAP §5 |
 | 012 | **QA 운영 층**의 경계와 재구축 설계 (scheduler / mail / issue / queue / **플릿** — ADR-014 로 추가) | Phase 5 완료 후 또는 운영 필요 발생 시 | `migration-exclusions.md` §3 |
 | [017](ADR-017-sql-equivalence.md) | sql 동등성 증명 방법 — ADR-013 의 sql 판. **초안 (Proposed, 2026-09-11)**: 두 코퍼스 전체, 케이스별 판정 + **`.result` 바이트 동일** + `main.info`(시각 제외) + 집계, 자기 대조 noise floor — develop 에서 0/17,459 (판정·`.result` 모두), 앞선 버전 조합에서는 동률 정렬 1건 | 사용자 검토 | ADR-016, `evidence/sql-baseline.md` |
-| [018](ADR-018-isolation-equivalence.md) | isolation 동등성 증명 방법 — ADR-013 의 isolation 판. **초안 (Proposed, 2026-09-15)**: CTP 는 같은 순서의 전체 run 두 번에서 판정 7개를 옮기므로 판정 diff 0 대신 — 러너 파일(check·디스패치 집합·스냅숏 키·쓴 파일 집합)은 엄격, **CTP 가 재현하는 판정은 같아야 하고**, 어긋나면 케이스 단독 3회씩 재실행해 두 러너가 갈릴 때만 러너 차이. 불안정 케이스는 제외하지 않고 보고. 현재 데이터: 러너 차이 0, 불안정 10, 늘 실패 8 | 사용자 검토 | `evidence/isolation-baseline.md` §4 |
+| [018](ADR-018-isolation-equivalence.md) | isolation 동등성 증명 방법 — ADR-013 의 isolation 판. **초안 (Proposed, 2026-09-15)**: CTP 는 같은 순서의 전체 run 두 번에서 판정 7개를 옮기므로 판정 diff 0 대신 — 러너 파일(check·디스패치 집합·스냅숏 키·쓴 파일 집합)은 엄격, **CTP 가 재현하는 판정은 같아야 하고**, 어긋나면 케이스 단독 3회씩 재실행해 두 러너가 갈릴 때만 러너 차이. 불안정 케이스는 제외하지 않고 보고. 현재 데이터: 슬롯 1개·4개 모두 러너 차이 0, 네 run 에 걸쳐 불안정 15, 늘 실패 7 | 사용자 검토 | `evidence/isolation-baseline.md` §4 |
 
 > 013·014·015·016 은 아래 예약 번호보다 먼저 확정되었다. 예약은 *트리거 대기*일 뿐 순서가 아니다.
 

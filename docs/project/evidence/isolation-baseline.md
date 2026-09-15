@@ -226,8 +226,9 @@ users' load.
 | `tk-full-1`, one slot | 12,301 s | 12,289 | 11 |
 | `tk-full-p4`, four slots | **2,978 s** | 11,894 | 14 |
 
-4.1 times faster, and 3.7 times faster than CTP alone. The run directory's check, dispatch sets and snapshot are the same
-as the one-slot run's. Against the verdicts, ADR-018's rules:
+4.1 times faster than `tk-full-1`, which shared the machine with `full-2`, and 3.7 times faster than CTP alone — the
+fairer serial figure ([below](#serial-and-parallel-case-by-case)). The run directory's check, dispatch sets and
+snapshot are the same as the one-slot run's. Against the verdicts, ADR-018's rules:
 
 - **Four cases that both CTP runs passed fail**, every attempt: `_04_RepeatableRead_ReadCommitted/dml_ddl/createindex_02`,
   `_05_ReadCommitted_RepeatableRead/dml_ddl/createindex_01`, and in `_06_features/cbrd_22705_online_index_parallel`
@@ -246,6 +247,74 @@ again over a restored corpus, started at 04:55 alongside the native runner's who
 runs on separate copies, which is a load this machine carries without effort, but the order is recorded because the
 cases wait on locks and on `sleep`.
 
+### Serial and parallel, case by case
+
+What four slots gain, and why. Every number here is read from the runs' `feedback.log` — the summary's elapsed time
+and each case's own milliseconds — by `perf.py`; the console logs are not read.
+
+| run | wall | cases a minute | case seconds | case seconds / wall | NOK |
+|---|---:|---:|---:|---:|---:|
+| `full-1` CTP, alone | 11,095 s (3 h 5 m) | 36.6 | 11,092 | 1.00 | 13 |
+| `full-2` CTP, beside `tk-full-1` | 12,423 s | 32.7 | 12,420 | 1.00 | 16 |
+| `tk-full-1` native, one slot, beside `full-2` | 12,301 s (3 h 25 m) | 33.0 | 12,289 | 1.00 | 11 |
+| `tk-full-p4` native, four slots | **2,978 s (49.6 m)** | **136.5** | 11,894 | **4.00** | 14 |
+
+**The serial figure is `full-1`'s.** The two runs that shared the machine lost their time in the shortest cases and
+nowhere else. Against `full-1`, the cases under a second took +1,249 s in `tk-full-1` and +1,278 s in `full-2` — about
+0.23 s each over 5,467 cases — while the cases of a second or more took the same or slightly less, by 3.3% at most.
+Four slots against `full-1` is **3.7 times**; against `tk-full-1` it would read 4.1, and the difference is the
+neighbour, not the slots.
+
+**Four slots barely slow the cases down.** The slots were busy 4.00 times the wall time, and the cases took 11,894 s
+together against 12,289 s in one slot. Case by case, over the 6,755 cases that passed in both runs, four slots' time
+over one slot's is 1.00 at the median, 0.98 at the 10th percentile, 1.04 at the 90th and 2.27 at the 99th:
+
+| a case's time in one slot | cases | one slot | four slots | change |
+|---|---:|---:|---:|---:|
+| under 1 s | 5,459 | 3,629 s | 3,832 s | +5.6% |
+| 1–3 s | 689 | 1,319 s | 1,358 s | +3.0% |
+| 3–10 s | 379 | 2,032 s | 2,069 s | +1.8% |
+| 10–30 s | 187 | 2,233 s | 2,227 s | −0.3% |
+| 30 s or more | 41 | 2,720 s | 2,119 s | −22% |
+
+Two things are in those rows and are not the cost of running four at once:
+
+- **The setup, once a slot.** A slot's first case also creates `ctldb` and builds ctltool. It took 10.4 s in one slot
+  (`changing_owner_01`) and 11.9–13.1 s for each of four slots doing it at the same moment. Those four first cases are
+  the largest per-case slowdowns of the four-slot run.
+- **One unstable case.** `_05_ReadCommitted_RepeatableRead/partition_table/range/with_index/unique_with_key/insert_insert_01`
+  took 0.7 s in `full-1`, 902.8 s in `tk-full-1` and 301.4 s in `tk-full-p4` — steps of the 300 s timeout, an attempt
+  at a time. CTP is no steadier with it: it and its `_02_RepeatableRead` twin took 0.7 s each in `full-1` and about
+  602 s each in `full-2`. It is the whole −22% of the last row and the whole 0.69 of `_05_ReadCommitted_RepeatableRead`
+  below. Without it four slots' cases take 272 s (+2.5%) longer than one slot's.
+
+| directory | cases | one slot | four slots | four / one |
+|---|---:|---:|---:|---:|
+| `_01_ReadCommitted` | 2,835 | 4,832 s | 5,088 s | 1.05 |
+| `_02_RepeatableRead` | 1,372 | 2,231 s | 2,250 s | 1.01 |
+| `_04_RepeatableRead_ReadCommitted` | 1,257 | 2,598 s | 2,513 s | 0.97 |
+| `_05_ReadCommitted_RepeatableRead` | 850 | 1,927 s | 1,327 s | 0.69 |
+| `_06_features` | 454 | 693 s | 708 s | 1.02 |
+| `_07_serializable` | 4 | 7 s | 7 s | 1.03 |
+
+**Why it scales:** an isolation case is mostly waiting — on a lock, on a `sleep`, on the controller — and in a serial
+run every wait holds the whole queue. In `tk-full-1` the median case is 0.70 s and the mean 1.81 s; the slowest 1% of
+cases (67) are 28.3% of the case time, the slowest 5% (338) 49.2%, the slowest 10% 61.0% and the slowest 25% 73.2%. With
+four slots the other three keep going while one waits. What four slots cost is the short cases' few percent, the
+memory (2,813 MB at the peak of the sample, §2), and the four failures a slot's own `ctldb` history exposes (above).
+
+**The sample understates it.** Sixty cases are too few to spread the setup over:
+
+| run | wall | faster | case seconds | first case of each slot |
+|---|---:|---:|---:|---|
+| `tk-sample-3`, one slot | 76 s | — | 75 | 12.0 s |
+| `tk-sample-p4`, four slots | 38 s | 2.0× | 132 | 16.9, 17.5, 18.1, 18.1 s |
+| `tk-sample-default`, four by default | 32 s | 2.4× | 111 | 11.8, 12.2, 12.8, 12.9 s |
+
+Four setups at once are 70.6 of `tk-sample-p4`'s 132 case seconds and 49.8 of `tk-sample-default`'s 111; the 6 s between
+the two four-slot runs is almost all setup, which took 17–18 s a slot in the first and 12–13 s in the second. Over the
+corpus the four setups are 50.6 of 11,894 case seconds.
+
 ## 5. Read from the source while doing this
 
 The analysis documents were wrong or silent in nineteen places; they are in `spec-corrections.md` §8. The three that
@@ -261,6 +330,7 @@ change the design:
 cd /data/cub_sys/projects/regr-iso
 ./run-ctp.sh /data/cub_sys/projects/regr-iso/sample.conf sample-1
 ./run-ctp.sh /data/cub_sys/projects/regr-iso/isolation.conf full-1
+python3 perf.py runs/perf.txt    # serial against parallel, from the runs' feedback.log
 ```
 
 Before a run: restore `scenario/` from `cubrid-testcases/isolation` (the previous run's `result/` directories are in

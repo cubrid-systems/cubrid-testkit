@@ -106,9 +106,10 @@ never read.
 Measured over three whole-corpus runs and reruns alone ([`isolation-baseline.md`](../../project/evidence/isolation-baseline.md)
 §4):
 
-- **The order of rows a query does not order.** Three catalog cases fail inside a whole run and pass alone; their
-  diffs are the same rows in a different order. `ORDER BY` makes them one case instead of two.
+- **The order of rows a query does not order.** Six cases fail inside a run and pass alone, their diffs the same
+  catalog rows in a different order — three of them only with four slots, where each slot's `ctldb` has seen a
+  different sequence of cases. `ORDER BY` makes each of them one case instead of two.
 - **What earlier cases left.** Between cases `runone.sh` drops users, triggers, serials, stored procedures, views and
   tables, and nothing else — `ctldb` itself lives for the whole run and is recreated only after a crash.
-- **Timing that nothing waits for.** Five cases flip from run to run — which client's `rows affected` lands first, which
+- **Timing that nothing waits for.** Six cases flip from run to run — which client's `rows affected` lands first, which
   statement meets a unique-constraint violation — under CTP as much as under this runner.

@@ -232,7 +232,8 @@ clean sql run byte-identical to a clean CTP run — 17,459 `.result` files and 2
 whole CTP runs in the same order disagree on seven of 6,772. Against them, the native runner writes
 the same machine check, dispatch sets and snapshot, and every verdict it disagrees on belongs to a
 case that flips under CTP too — rerun alone, three times under each runner, none of the ten
-separates the two. On a 60-case sample every result file is byte-identical
+separates the two. On a 60-case sample every result file is byte-identical. Four slots take the
+corpus from 12,301 s to 2,978 s, by the same rules with no runner difference
 ([`project/evidence/isolation-baseline.md`](docs/project/evidence/isolation-baseline.md)).
 
 **What is proven, for shell.** Equivalence here is not byte-identity, because some of what a run

@@ -203,6 +203,31 @@ that failed in both CTP runs and passed in the native one are in both groups: `d
 
 Wall time says the same: a rerun that met its flips took 173–208 s, one that did not 80–88 s, under either runner.
 
+### Four slots
+
+`tk-full-p4`: the native runner over the whole corpus again, `parallel_slots=4`, alone on the machine but for other
+users' load.
+
+| run | wall | case seconds | NOK |
+|---|---:|---:|---:|
+| `tk-full-1`, one slot | 12,301 s | 12,289 | 11 |
+| `tk-full-p4`, four slots | **2,978 s** | 11,894 | 14 |
+
+4.1 times faster, and 3.7 times faster than CTP alone. The run directory's check, dispatch sets and snapshot are the same
+as the one-slot run's. Against the verdicts, ADR-018's rules:
+
+- **Four cases that both CTP runs passed fail**, every attempt: `_04_RepeatableRead_ReadCommitted/dml_ddl/createindex_02`,
+  `_05_ReadCommitted_RepeatableRead/dml_ddl/createindex_01`, and in `_06_features/cbrd_22705_online_index_parallel`
+  `dml_ddl/createindex_02` and `create_ddl/show_001`. Three of the diffs are catalog rows in a different order, the
+  fourth a `1 row affected` in a different place. Each slot's `ctldb` has seen a different sequence of cases.
+- **Rerun alone** (`mini2/`), three times under each runner: all four pass every time, under both.
+- **`_02_RepeatableRead/primary_key_column/basic_sql/delete_select_14`**, which failed in all three earlier runs,
+  passes. Alone it fails three of three under CTP and two of three under the native runner — unstable, not always
+  failing.
+
+No runner difference with four slots either. Across the four whole runs **seven cases fail in every one**, and fifteen
+are unstable: the ten above, `delete_select_14`, and the four a slot's history exposes.
+
 Whether a failure is the engine's or the run's own instability is what a second run decides. `full-2` is the same run
 again over a restored corpus, started at 04:55 alongside the native runner's whole-corpus run `tk-full-1` — two serial
 runs on separate copies, which is a load this machine carries without effort, but the order is recorded because the

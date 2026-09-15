@@ -25,6 +25,7 @@ The whole corpus at upstream develop (6,790 cases, 18 excluded, 6,772 run), on t
 | CTP, alone | 13 |
 | CTP again, same order, alongside the native run | 16 |
 | native, one slot | 11 |
+| native, four slots | 14 |
 
 - The two CTP runs dispatched the cases in the same order and **disagree on 7 verdicts**.
 - Across the three runs, **10 cases** moved. Rerun alone, three times under each runner: five flip from run to run under
@@ -65,11 +66,17 @@ Applied to the runs above: rule 1 holds. Rule 2 finds three disagreements on rep
 the native one. Rule 3 separates none of them: the first two fail alone under both runners, the third passes alone under
 both. **No runner difference; ten unstable cases; eight cases that fail in every run.**
 
+With four slots (rule 5), in 2,978 s against 12,301 s: rule 1 holds. Four cases both CTP runs pass fail — catalog rows
+in a different order, a `rows affected` in a different place, where each slot's `ctldb` has seen different cases —
+and every one passes alone three times under both runners. `delete_select_14`, which failed in every other run,
+passes, and alone fails five times of six. **No runner difference again; across the four runs, fifteen unstable cases
+and seven that fail in every run.**
+
 ## Consequences
 
 1. **The gate is about the runner, and it can pass.** A case that flips on timing is not a reason to keep CTP's loop, and
    under this rule it is not counted as one.
-2. **The unstable ten and the stable eight are upstream's to know about.** They fail on a machine running the same
+2. **The unstable fifteen and the stable seven are upstream's to know about.** They fail on a machine running the same
    engine and the same cases under CTP itself.
 3. **Noise is measured before anything is judged**, as ADR-013 requires — here as two whole CTP runs, because one CTP run
    is not a reference for this corpus.

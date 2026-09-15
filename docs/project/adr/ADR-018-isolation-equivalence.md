@@ -35,8 +35,10 @@ The whole corpus at upstream develop (6,790 cases, 18 excluded, 6,772 run), on t
 - Normalized results (`result/<name>.log`) differ for 9 of 6,772 cases: the 7 whose verdicts moved, and two cases that
   passed in both runs by matching different answers they both have (`.answer` and `.answer1`).
 
-The cases wait on locks and on `sleep`, and `qactl` gives a wait 30 seconds before moving on. A verdict that depends on
-which client prints first is not a property of the runner, and a diff-zero rule on verdicts is a grade CTP itself fails.
+The cases wait on locks and on `sleep` — `delete_select_03` sleeps 30 seconds by its own script — and `qactl` gives a
+blocked client 100 seconds and then 300 more before it calls the wait failed (`qactl.c:91-92`). A verdict that depends
+on which client prints first is not a property of the runner, and a diff-zero rule on verdicts is a grade CTP itself
+fails.
 
 ## Decision
 

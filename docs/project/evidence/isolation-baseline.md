@@ -315,6 +315,159 @@ Four setups at once are 70.6 of `tk-sample-p4`'s 132 case seconds and 49.8 of `t
 the two four-slot runs is almost all setup, which took 17–18 s a slot in the first and 12–13 s in the second. Over the
 corpus the four setups are 50.6 of 11,894 case seconds.
 
+### Where an attempt's time goes
+
+`design/module-isolation.md` §3 left one candidate to be measured before it was decided: `clean.sh`, which opens
+`csql` seventeen times after every attempt, against restoring `ctldb` from a snapshot. Measured on the sandbox's build,
+`f1ae86ff7`; upstream develop has moved since, and every comparison below is between steps of that one build.
+
+**From the whole runs' own logs** (`overhead.py`). `runone.sh` runs under `set -x`, so the worker log carries one
+`+ elapse=N` an attempt — the milliseconds `timeout3.sh` ran `qactl`. A case's time in `feedback.log` less those is
+everything else `runone.sh` does:
+
+| run | attempts | case seconds | `qactl` | the rest | the rest an attempt, median |
+|---|---:|---:|---:|---:|---:|
+| `full-1` CTP | 6,843 | 11,092 | 10,019 s (90.3%) | 1,073 s (9.7%) | 147 ms |
+| `tk-full-1` one slot | 6,833 | 12,289 | 11,198 s (91.1%) | 1,091 s (8.9%) | 150 ms |
+| `tk-full-p4` four slots | 6,844 | 11,894 | 10,635 s (89.4%) | 1,259 s (10.6%) | 147 ms |
+
+With four slots the rest has a tail — 770 ms at the 99th percentile against 205 ms in `full-1` — and the same median.
+
+**Step by step** (`tk-time-sample`, `steps.py`). `tk-time/CTP` is `tk/CTP` with `PS4='+ ${EPOCHREALTIME} '` before the
+`set -x` of `runone.sh` and of `clean.sh`, so every traced line carries its time. The sample, one slot: 58 OK in 74 s.
+Over the 57 first attempts that did not run `prepare.sh`:
+
+| step | median | share |
+|---|---:|---:|
+| `qactl` | 456.0 ms | 86.8% |
+| `clean.sh` | 115.5 ms | 10.6% |
+| `cp` and the sed steps | 11.2 ms | 1.0% |
+| the setup check's `cubrid server status` | 4.9 ms | 0.5% |
+| the core check's `find` and `grep FATAL` | 2.9 ms | 0.3% |
+| `runone.sh` up to its first step | 2.7 ms | 0.3% |
+| the runner and the shell's start | 1.9 ms | 0.2% |
+| `removeCoreAndLog`'s two `find`s | 1.7 ms | 0.2% |
+| `pkill sleep`, `diff`, the `.sql` check | 2.6 ms | 0.2% |
+
+`clean.sh` opens `csql` seventeen times on every attempt, and those are 87.9 ms of its 115.5: 6.5 ms for each query that
+lists what to drop, 4.2 ms for each script that drops it.
+
+**What would replace it** (`harness/`). A corpus of one case, `bench_01.ctl`, whose checker `bench_01.sh` runs inside a
+testkit slot with `ctldb` up — a namespace made by hand for the same measurement lost its `cub_master` and was dropped.
+"A case's objects" are three tables with an index, a foreign key and hash partitions, a view, a serial, a trigger and a
+user; after `clean.sh` and after the one-session drops, `db_class` holds no user class.
+
+| | median |
+|---|---:|
+| `csql`, one connection and one query | 4.3 ms |
+| `clean.sh` on a clean `ctldb` | 106.6 ms |
+| `clean.sh` after a case's objects | 136.0 ms |
+| the same drops in one `csql` session | 25.5 ms |
+| `cubrid server stop` and `start` | 3,021.9 ms |
+| snapshot restore: stop, copy the 249 MB of volumes back, start | 3,082.7 ms |
+
+Over `full-1`'s 6,843 attempts `clean.sh` is 790 s, 7.1% of the case time. One session would save at most 616 s (5.6%)
+— at most, because it was given the names `clean.sh` has to look up. A snapshot restore costs **+20,307 s (+183%)**, and
+it would also take away what a case now inherits from the cases before it, which is what the four failures only a slot
+exposes depend on. **`clean.sh` stays.**
+
+**Where `qactl`'s time goes** (`floor.py`). The fastest attempts grow with the number of clients:
+
+| clients | attempts in `full-1` | min | 10th percentile | median |
+|---:|---:|---:|---:|---:|
+| 1 | 38 | 273 ms | 273 ms | 284 ms |
+| 2 | 3,694 | 387 ms | 418 ms | 450 ms |
+| 3 | 2,755 | 512 ms | 541 ms | 568 ms |
+| 4 | 262 | 662 ms | 689 ms | 751 ms |
+
+`tk-full-1` is the same to within 20 ms. `strace -f --seccomp-bpf` of `qactl` inside the harness (`strace_qactl.py`) says
+why:
+
+| case | clients | wall | `sleepms(100)` | `sleepms(10)` | other |
+|---|---:|---:|---:|---:|---|
+| `insert_select_01` | 1 | 282 ms | 2 × = 200 ms | 6 × = 60 ms | |
+| `invisible_index_02` | 2 | 457 ms | 3 × = 300 ms | 12 × = 121 ms | |
+| `altertable_01` | 3 | 1,566 ms | 4 × = 400 ms | 12 × = 121 ms | the case's own `MC: sleep 1;` |
+
+Two fixed sleeps of 100 ms, both in `qactl.c`:
+
+- **one before it connects** (line 3034), commented as room for a server that recovery tests may have killed;
+- **one for each client as it quits** (line 1131, `kill_aclient`). Every case ends with a `quit;` for each client. The
+  client exits, its pipe reaches end of file, and `check_master_pipe_input` calls `kill_aclient` — which sleeps 100 ms
+  before it reaps a client whose `SIGCHLD` has already arrived. The next `quit;` waits behind it: in `altertable_01`,
+  whose case quits C3, C2, C1, the three exit at 1,262, 1,364 and 1,465 ms and `qactl` at 1,566.
+
+The 10 ms sleeps are the polls of the `wait until` loops, and only round a wait up. Over `full-1`'s attempts the two
+fixed sleeps come to **2,417 s, 21.8% of the case time** — three times `clean.sh` — and to about 605 of `tk-full-p4`'s
+2,978 wall seconds.
+
+### `qactl` without the wait for a client that has exited
+
+`tk-fast/CTP` is `tk/CTP` with one change, in `kill_aclient`: it calls `waitpid(pid, WNOHANG)` first, and only a client
+that has not exited gets the 100 ms and the rest of the original path — the `SIGKILL` and a second wait. A client that
+ran `quit;` is reaped at once. The sleep before connecting is left as it is. It is a prototype in the sandbox, not a
+change to CTP, and it runs under the native runner like any CTP tree.
+
+**The sample** (`tk-fast-sample`, one slot): 58 OK. Against `sample-1`, CTP's own run, by `compare-sample.sh`: every
+verdict file, `feedback.log` record and console marker is the same, all 58 normalized results are byte-identical, and no
+result mentions `forcefully killing`.
+
+| | `tk-sample-3`, unchanged | `tk-fast-sample` |
+|---|---:|---:|
+| case seconds | 75.5 | 64.7 (−14%) |
+| `qactl` seconds | 55.6 | 42.9 (−23%) |
+| `qactl` an attempt, 2 clients (45 cases), median | 446 ms | 267 ms |
+| 3 clients (10 cases) | 564 ms | 266 ms |
+| 5 clients (3 cases) | 934 ms | 545 ms |
+
+**The whole corpus** (`tk-fast-full-p4`, four slots; `fast_compare.py`), against `tk-full-p4` — the same runner and slots
+with `tk/CTP`:
+
+| | `tk-full-p4` | `tk-fast-full-p4` |
+|---|---:|---:|
+| wall | 2,977 s | **2,520 s (−15.4%)** |
+| case seconds | 11,894 | 10,063 (−15.4%) |
+| `qactl` | 10,635 s | 8,827 s (−17.0%) |
+| the rest of `runone.sh` | 1,259 s | 1,235 s |
+| NOK | 14 | 11 |
+
+| clients | attempts | fastest `qactl` attempt | median |
+|---:|---:|---:|---:|
+| 1 | 38 | 272 → 172 ms | 285 → 193 ms |
+| 2 | 3,710 | 381 → 191 ms | 454 → 270 ms |
+| 3 | 2,738 | 513 → 209 ms | 569 → 287 ms |
+| 4 | 268 | 651 → 262 ms | 742 → 372 ms |
+
+About 100 ms a client, as the traces said. 2,520 s is 4.4 times faster than CTP alone.
+
+Against the four earlier whole runs, by ADR-018's rules:
+
+- **Nine of the eleven failures failed before:** six that failed in all four, three that failed in some.
+- **`_05_ReadCommitted_RepeatableRead/index_column/common_index/basic_sql/insert_delete_05`**, which failed in all four,
+  passes: unstable, not always failing.
+- **`_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_5`** passed in all four and fails all five attempts
+  here, each with two rows too many — `'aa'` and `'cc'`, 11 rows where the answer has 9. The case sends C6 a `select`
+  that sleeps 5 s (line 79), and nothing waits for it to take its snapshot before C2 and C3 commit those rows
+  (lines 82–83). The race is not new: `full-1`, `full-2` and `tk-full-p4` each lost it on their first attempt, with
+  the same diff and nothing else, and passed on the second. **Alone** (`mini3/`, `rerun-mini3.sh`), three times under
+  `tk/CTP` and three under `tk-fast/CTP`, alternating: OK at the first attempt all six times.
+- **`_05_ReadCommitted_RepeatableRead/dml_ddl/createindex_02`** passed in all four and fails all five attempts here on a
+  catalog listing whose `idx1` and `idx_id` rows are in other places — the sibling of the four failures a slot's own
+  `ctldb` history exposes. **Alone** (`mini4/`), three times under each tree, alternating: OK at the first attempt all
+  six times.
+- **Results:** 6,755 of 6,772 `result/<name>.log` are byte-identical to `full-2`'s, CTP's. The 17 that differ are 15
+  verdict disagreements and two cases that passed under both by matching different answers of their own —
+  `_02_RepeatableRead/no_index_column/basic_sql/select_update_09` (`.answer1` here, `.answer` under CTP and
+  `tk-full-p4`) and `_01_ReadCommitted/partition_table/range/with_index/primary_key/update_delete_06` (`.answer` here,
+  `.answer1` under both) — as `tk-full-1` did against `full-2`.
+
+**No runner difference.** Neither new failure separates the two trees alone, and every other disagreement is on a case
+that flipped before. Across the five whole runs **six cases fail in every one** and eighteen in some: the fifteen of
+the four earlier runs, `insert_delete_05`, `insert_select_05_5` and `createindex_02`.
+
+The reruns emptied `tk/scenario`'s result files after `fast_compare.py` had read them; the diffs and matched answers
+above are read from the worker log, which keeps a failed attempt's `diff` output and the trace of the answer that matched.
+
 ## 5. Read from the source while doing this
 
 The analysis documents were wrong or silent in nineteen places; they are in `spec-corrections.md` §8. The three that
@@ -331,7 +484,17 @@ cd /data/cub_sys/projects/regr-iso
 ./run-ctp.sh /data/cub_sys/projects/regr-iso/sample.conf sample-1
 ./run-ctp.sh /data/cub_sys/projects/regr-iso/isolation.conf full-1
 python3 perf.py runs/perf.txt    # serial against parallel, from the runs' feedback.log
+python3 overhead.py runs/overhead.txt                                          # qactl and the rest, from the worker logs
+./run-time.sh "$PWD/sample-tt.conf" tk-time-sample && python3 steps.py tk-time-sample runs/tk-time-sample/steps.txt
+python3 floor.py full-1 runs/floor-full-1.txt                                  # qactl by number of clients
+./run-time.sh "$PWD/harness.conf" harness-1 && python3 strace_qactl.py runs/harness-out/strace.*
+./run-with.sh "$PWD/tk-fast/CTP" "$PWD/sample-tt.conf" tk-fast-sample           # qactl reaping an exited client at once
+./compare-sample.sh runs/sample-1 runs/tk-fast-sample "$PWD/sample" "$PWD/tk/sample"
+./run-with.sh "$PWD/tk-fast/CTP" "$PWD/isolation-tk-p4.conf" tk-fast-full-p4 && python3 fast_compare.py tk-fast-full-p4 runs/fast.txt
+./rerun-mini3.sh                  # insert_select_05_5 alone, 3 x tk/CTP and 3 x tk-fast/CTP; empties tk/scenario's results
 ```
+
+`mini4/` is the same rerun for `createindex_02`, with `mini4-tk.conf`; its six results are in `runs/mini4-summary.txt`.
 
 Before a run: restore `scenario/` from `cubrid-testcases/isolation` (the previous run's `result/` directories are in
 it), and check the three repositories against upstream develop.

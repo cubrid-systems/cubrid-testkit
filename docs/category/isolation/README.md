@@ -16,7 +16,7 @@ the runner's. These documents are the as-built guide.
 The design, the decisions and what was measured on the way are
 [`../../project/design/module-isolation.md`](../../project/design/module-isolation.md),
 [ADR-007](../../project/adr/ADR-007-isolation-executor.md) (the executor),
-[ADR-018](../../project/adr/ADR-018-isolation-equivalence.md) (the gate, proposed) and
+[ADR-018](../../project/adr/ADR-018-isolation-equivalence.md) (the gate) and
 [`../../project/evidence/isolation-baseline.md`](../../project/evidence/isolation-baseline.md).
 
 ## In a paragraph
@@ -54,19 +54,23 @@ DONE
 ============= TEST ==================
 STARTED
 [ENV START] local
+[ENV START] local
+[ENV START] local
+[ENV START] local
 [TESTCASE] /path/to/cubrid-testcases/isolation/_01_ReadCommitted/…/x.ctl EnvId=local [OK]
 …
 ============= PRINT SUMMARY ==================
 Test Category:isolation
 Total Case:6790
 Total Execution Case:6772
-Total Success Case:6761
-Total Fail Case:11
+Total Success Case:6758
+Total Fail Case:14
 Total Skip Case:18
 
 TEST COMPLETE
 ```
 
-That is CTP's output, line for line, and one slot takes about three hours over the whole corpus.
-[When a case fails](05-when-a-case-fails.md) explains the eleven, and [running it](03-running-it.md) how slots
-shorten the three hours.
+That is CTP's output, line for line, but for one `[ENV START]` and `[ENV STOP]` a slot: the run took four slots, the
+default, and about fifty minutes where one slot takes three and a half hours. [Running it](03-running-it.md#slots)
+says how many slots a machine gets, and [when a case fails](05-when-a-case-fails.md) which of the fourteen are not
+about the build under test.

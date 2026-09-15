@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -247,7 +248,8 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	// The corpus goes behind one only with scenario_disk, as for shell: without
 	// it runone.sh writes result/ and <name>.result into the cases tree, as under
 	// CTP, which is also what a comparison with CTP reads.
-	n := max(cfg.Int("parallel_slots", 1), 1)
+	n, why := slotsFor(cfg, runtime.NumCPU(), memAvailableMB())
+	fmt.Fprintf(os.Stderr, "[INFO] %s\n", why)
 	ctltool := filepath.Join(req.Home.Path, "isolation", "ctltool")
 	corpus := scenario
 	if !filepath.IsAbs(corpus) {

@@ -19,7 +19,9 @@
 | **문서화** | as-built 가이드 `docs/category/isolation/` 와 evidence | 가이드가 코드와 어긋나지 않음 |
 
 **sql 과 같은 모양이다.** 케이스를 실행하는 것은 기존 자산 그대로(sql 의 CQT ↔ 여기의 `runone.sh`·ctltool), 그
-둘레 — 탐색·제외·큐·슬롯·판정·기록 — 는 Go. 슬롯은 처음부터 구조이고 기본값은 off, 게이트 뒤에 켠다.
+둘레 — 탐색·제외·큐·슬롯·판정·기록 — 는 Go. 슬롯은 처음부터 구조이고, **기본값은 슬롯 4개다** (2026-09-15,
+사용자 결정 — ADR-018 의 규칙으로 슬롯 1개와 4개 모두 러너 차이 0). 기계가 작으면 줄인다: CPU 하나에 슬롯 하나까지,
+가용 메모리에서 2 GB 를 뺀 것을 슬롯당 1.5 GB 로 나눈 만큼까지. `parallel_slots` 를 쓰면 그 값, `1` 이면 CTP 처럼 직렬.
 
 **컨테이닝은 선택이 아니다.** `runone.sh` 는 케이스마다 사용자의 `sleep`·`qactl`·`qacsql` 을, 셋업마다 사용자의
 `cub` 전부를 `pkill -9` 한다(§2-3). 개발자가 일하는 기계에서 네임스페이스 없이 돌리면 그 사람의 다른 CUBRID 가 죽는다.
@@ -182,7 +184,7 @@ ADR-013 을 isolation 에 맞춘다. **엄격** — baseline 없이 diff 0: `dis
 | **컨테이닝** | `pkill -9 -u $(whoami)` 가 사용자의 다른 CUBRID·`sleep` 을 죽인다 | 개발자가 일하는 기계에서 전체 run, 바깥 프로세스 무사 | 없음 — §0 |
 | **깨끗한 코퍼스** | 케이스 트리에 케이스당 세 파일, 6,772 케이스면 2만 개 | run 뒤 체크아웃이 `git status` 로 깨끗 | `scenario_disk` / `scenario_ram_mb` |
 | **깨끗한 CTP 트리** | run 마다 `make clean`, 로그가 `$CTP_HOME` 안에 쌓인다 | run 뒤 CTP 트리 불변 | 슬롯의 ctltool 오버레이 |
-| **병렬 슬롯** | 직렬 — 전체 12,301 s. **측정 (2026-09-15):** 슬롯 4개 2,978 s, ADR-018 규칙으로 러너 차이 0. 슬롯마다 `ctldb` 이력이 달라 카탈로그 행 순서에 기대는 케이스 4개가 드러났고, 넷 다 혼자서는 두 러너 모두 통과 (`isolation-baseline.md` §4) | 슬롯 1 과 N 의 판정·`result/<name>.log` 동일. wall | `parallel_slots=1` |
+| **병렬 슬롯** | 직렬 — 전체 12,301 s. **측정 (2026-09-15):** 슬롯 4개 2,978 s, ADR-018 규칙으로 러너 차이 0. 슬롯마다 `ctldb` 이력이 달라 카탈로그 행 순서에 기대는 케이스 4개가 드러났고, 넷 다 혼자서는 두 러너 모두 통과 (`isolation-baseline.md` §4). **기본값 (2026-09-15):** `parallel_slots` 가 없으면 4, CPU 수와 (가용 메모리 − 2 GB) / 1.5 GB 로 줄인다 — 표본 슬롯 4개 최고 2,813 MB (§2) | 슬롯 1 과 N 의 판정·`result/<name>.log` 동일. wall | `parallel_slots=1` |
 | **셋업 한 번** | 슬롯마다 `createdb` + `make` | 슬롯 수와 무관한 셋업 시간 | 병렬을 끄면 없음 |
 | **보드** | 진행이 로그로만 | 케이스·슬롯·실패가 실시간 | `status_http` |
 
@@ -210,8 +212,8 @@ evidence: `evidence/isolation-baseline.md` (P0) → `evidence/regression-isolati
 |---|---|---|
 | **P0** | 샌드박스 기준 run (세 저장소 upstream develop), 코퍼스 census, 분석 공백 채우기, ADR-007, 이 문서 | `evidence/isolation-baseline.md` — CTP 전체 run 과 noise floor |
 | **P1** | 공통 코드 두 곳(§2-5) → **슬롯 위의 `isolationsuite`** + `runone.sh` 실행부, `TESTKIT_NATIVE=isolation` 뒤 | 슬롯 1개: 표본·전체가 CTP 와 동일. **진행 (2026-09-15):** 코드 완료. 표본 60 케이스, 슬롯 1개 — 판정·동결 파일·`feedback.log`·`result/<name>.log` 58/58 이 CTP 와 동일 (`isolation-baseline.md` §2). 전체는 CTP 기준 run 뒤 |
-| **게이트** | ADR-018 확정, 전체 코퍼스 슬롯 1개로 CTP 와 비교 | ADR-018 의 규칙 → 병렬 기본값 on 가능. **초안의 규칙을 현재 데이터에 적용하면 (2026-09-15):** 러너 파일 동일, 러너 차이 0, 불안정 10, 늘 실패 8. 슬롯 4개도 러너 차이 0 — 네 run 에 걸쳐 불안정 15, 늘 실패 7. ADR 검토 대기 |
-| **P2** | 병렬 증거, 축 B 나머지, as-built 가이드 | 항목별 증거 |
+| **게이트** | ADR-018 확정, 전체 코퍼스 슬롯 1개로 CTP 와 비교 | ADR-018 의 규칙 → 병렬 기본값 on 가능. **초안의 규칙을 현재 데이터에 적용하면 (2026-09-15):** 러너 파일 동일, 러너 차이 0, 불안정 10, 늘 실패 8. 슬롯 4개도 러너 차이 0 — 네 run 에 걸쳐 불안정 15, 늘 실패 7. **ADR-018 확정 (2026-09-15), 게이트 충족** |
+| **P2** | 병렬 증거, 축 B 나머지, as-built 가이드 | 항목별 증거. **진행 (2026-09-15):** 슬롯 4개 전체 코퍼스 2,978 s, 러너 차이 0 → **병렬 기본값 on** (사용자 결정). 가이드 `docs/category/isolation/` |
 
 ---
 

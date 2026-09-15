@@ -44,8 +44,8 @@ func openBoard(cfg *conf.Config, cases []string, slots []*contain.Slot, onDisk b
 	}
 	board.Setup([]status.Setting{
 		{Group: "suite", Key: "task", Value: "isolation"},
-		{Group: "suite", Key: "parallel_slots", Value: fmt.Sprint(len(slots)), Default: "1",
-			Note: "cases at once, each slot with a ctldb of its own"},
+		{Group: "suite", Key: "parallel_slots", Value: fmt.Sprint(len(slots)), Default: fmt.Sprint(defaultSlots),
+			Note: "cases at once, each slot with a ctldb of its own; unset means four, fewer on a small machine"},
 		{Group: "suite", Key: "executor", Value: "runone.sh", Note: "CTP's own script and ctltool, unchanged (ADR-007)"},
 		{Group: "suite", Key: "testcase_retry_num", Value: cfg.GetOr("testcase_retry_num", "0"), Default: "0",
 			Note: "attempts runone.sh makes after the first"},

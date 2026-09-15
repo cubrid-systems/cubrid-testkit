@@ -21,8 +21,9 @@ For engine developers and QA. Part of
 > `TESTKIT_NATIVE=sql` and passed [ADR-017](docs/project/evidence/regression-sql.md)'s gate at
 > upstream develop's head. `shell` and `rqg` run natively behind `TESTKIT_NATIVE=shell`, over the
 > whole corpus; the full-corpus comparison against CTP has not cleared yet. `isolation` runs natively
-> behind `TESTKIT_NATIVE=isolation`, with CTP's own `runone.sh` still executing every case; its
-> gate is proposed in [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md). Every other task
+> behind `TESTKIT_NATIVE=isolation`, with CTP's own `runone.sh` still executing every case, four
+> slots at once by default; its gate, [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md),
+> found no runner difference with one slot or with four. Every other task
 > dispatches to CTP unchanged. See [Status](#status).
 
 ## Prerequisites
@@ -220,7 +221,7 @@ suffix is now just its version instead of `11.2.0.0000) (64bit release build for
 | 1 — concept and freeze | **done** | north star, the freeze spec with a 24-row old↔new mapping, non-goals NG1–NG11, migration exclusions |
 | 2 — architecture | **done** | architecture, five contracts, four module documents |
 | **3 — rewrite `shell`** | **in progress** | `unittest` native; `shell` over the whole corpus at develop head, every failure attributed; `run-shell` complete, with six axis-T options; slots, a corpus that cleans itself, per-case patches and a progress page are in and measured. The full-corpus comparison against CTP has not cleared |
-| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation` native over the whole corpus, its gate proposed (ADR-018); `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
+| **4 — the rest** | **in progress** | `sql` and `medium` native, ADR-017's gate passed; `isolation` native over the whole corpus, ADR-018's gate met, four slots by default; `ha_repl`, `cdc_repl` and `jdbc` still CTP's |
 | 5 — retire | — | isolate what is no longer called; decide what to keep |
 
 **What is proven, for sql and medium.** CTP and testkit over the whole of both corpora, serial, with

@@ -47,6 +47,9 @@ func openBoard(cfg *conf.Config, cases []string, slots []*contain.Slot, onDisk b
 		{Group: "suite", Key: "parallel_slots", Value: fmt.Sprint(len(slots)), Default: fmt.Sprint(defaultSlots),
 			Note: "cases at once, each slot with a ctldb of its own; unset means four, fewer on a small machine"},
 		{Group: "suite", Key: "executor", Value: "runone.sh", Note: "CTP's own script and ctltool, unchanged (ADR-007)"},
+		{Group: "suite", Key: "controller", Value: controllerName(), Default: "qactl",
+			Note: "what runone.sh runs a case with. testkit's own drops qactl's two fixed sleeps " +
+				"and keeps qacsql (ADR-019); TESTKIT_ISOLATION_CTL=1 asks for it"},
 		{Group: "suite", Key: "testcase_retry_num", Value: cfg.GetOr("testcase_retry_num", "0"), Default: "0",
 			Note: "attempts runone.sh makes after the first"},
 		{Group: "suite", Key: "testcase_timeout_in_secs", Value: orUnset(cfg.GetOr("testcase_timeout_in_secs", "")),
@@ -85,4 +88,12 @@ func orUnset(s string) string {
 		return "unset"
 	}
 	return s
+}
+
+// controllerName is what the board shows for the executor's controller.
+func controllerName() string {
+	if wantOwnController() {
+		return "testkit"
+	}
+	return "qactl"
 }

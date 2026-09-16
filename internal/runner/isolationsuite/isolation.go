@@ -265,6 +265,14 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 		if err := s.NS.Overlay(ctltool, filepath.Join(s.Dir, "ctltool")); err != nil {
 			return err
 		}
+		// The controller is testkit's only where it is asked for. ADR-019 is a
+		// draft and its gate has not been run, so until then this is what
+		// TESTKIT_NATIVE_SHELL was before ADR-013's: one switch, off.
+		if wantOwnController() {
+			if err := installController(ctx, s, ctltool); err != nil {
+				return err
+			}
+		}
 		if err := guards.mount(s); err != nil {
 			return err
 		}
@@ -363,3 +371,31 @@ func emptyDir(dir string) error {
 	}
 	return nil
 }
+
+// wantOwnController reports whether this run executes cases with testkit's own
+// controller instead of ctltool's qactl (ADR-019).
+func wantOwnController() bool { return os.Getenv("TESTKIT_ISOLATION_CTL") == "1" }
+
+// installController puts the controller into one slot's ctltool, which is an
+// overlay of its own -- so the shim, the probe's source and the changed Makefile
+// rule are the slot's, and go with it. It has to run inside the slot: from out
+// here the same path is still ctltool's own directory.
+func installController(ctx context.Context, s *contain.Slot, ctltool string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("the controller cannot be installed: %w", err)
+	}
+	script := isolationScript(fmt.Sprintf("%s isolation-ctl-install %s || echo INSTALL_FAILED",
+		shellQuote(self), shellQuote(ctltool)))
+	res, err := run(ctx, s.Channel(), script)
+	if err != nil {
+		return fmt.Errorf("installing the controller in %s: %w", s.Label, err)
+	}
+	if out := output(res); strings.Contains(out, "INSTALL_FAILED") {
+		return fmt.Errorf("installing the controller in %s:\n%s", s.Label, out)
+	}
+	return nil
+}
+
+// shellQuote is single quoting, for a path that goes into a script.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

@@ -28,6 +28,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
+	"github.com/cubrid-systems/cubrid-testkit/internal/ctl"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
@@ -54,6 +55,18 @@ const (
 )
 
 func main() {
+	// The isolation controller is a leaf: runone.sh calls it once per case,
+	// inside the slot the runner has already made, in place of ctltool's qactl
+	// (ADR-019). It goes before containment because it is not a run.
+	if len(os.Args) > 1 && os.Args[1] == "isolation-ctl" {
+		os.Exit(isolationCtl(os.Args[2:]))
+	}
+	// And this is how it gets there: the runner asks a slot to install it, from
+	// inside, because out here that path is still ctltool's own directory.
+	if len(os.Args) > 1 && os.Args[1] == "isolation-ctl-install" {
+		os.Exit(isolationCtlInstall(os.Args[2:]))
+	}
+
 	// Containment happens before anything else or it happens to a process that
 	// has already opened files and started goroutines. Enter re-executes this
 	// program in namespaces of its own and returns the child's exit code; -1
@@ -237,6 +250,47 @@ in flight.
 `
 
 // runShell is the entry point for the looping single-case tool.
+// isolationCtl is `qactl <db> <case.ctl> <client program>`: the three arguments
+// runone.sh passes its controller (runone.sh:265). The probe it needs sits
+// beside the client program unless TESTKIT_ISOLATION_PROBE says otherwise.
+func isolationCtl(args []string) int {
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: testkit isolation-ctl <db> <case.ctl> <client program>")
+		return 2
+	}
+	probe := os.Getenv("TESTKIT_ISOLATION_PROBE")
+	if probe == "" {
+		probe = filepath.Join(filepath.Dir(args[2]), "qablocked")
+	}
+	return ctl.Run(ctl.Options{
+		DB:     args[0],
+		Case:   args[1],
+		Client: args[2],
+		Probe:  probe,
+		Out:    os.Stdout,
+		Err:    os.Stderr,
+	})
+}
+
+// isolationCtlInstall makes one ctltool directory run this controller instead of
+// ctltool's own (ADR-019 Consequence 4).
+func isolationCtlInstall(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: testkit isolation-ctl-install <ctltool directory>")
+		return 2
+	}
+	self, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "testkit: %v\n", err)
+		return 1
+	}
+	if err := ctl.Install(args[0], self); err != nil {
+		fmt.Fprintf(os.Stderr, "testkit: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
 func runShell(args []string) int {
 	fs := flag.NewFlagSet("run-shell", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

@@ -51,8 +51,17 @@ in both of this runner's, one slot and four ([`isolation-baseline.md`](../../pro
 - `_06_features/cbrd_22705_online_index_parallel/unique_index/insert_update_04`
 - `_06_features/cbrd_22705_online_index_parallel/dml_online_index/insert_odku_online_index_01`
 
-They fail under CTP on the same engine and the same cases, so they are the engine's or the corpus's to explain, not
-the runner's.
+They fail under CTP on the same engine and the same cases, so they are not the runner's — and each of them now
+has a reason ([`isolation-always-failing.md`](../../project/evidence/isolation-always-failing.md)):
+
+- `partition_table/range/dml_ddl/reorganization_select_01` **crashes the server**. One client, a range-partitioned
+  table of 100,000 rows and its `group by` are enough, and `runone.sh`'s core check cannot see it (below).
+- the three `insert_update_04` and `insert_odku_online_index_01` each print the lines of two clients that one
+  lock demotion released, in the order this machine produces and not the order their answers hold. Every
+  attempt is the answer with two adjacent lines swapped.
+- `insert_delete_05` leaves a select and an insert unordered, and each controller loses a different half of it.
+- `delete_delete_rownum_01` is the one case that fails under CTP and **passes here**, in all four whole-corpus
+  runs and three times alone: its `MC: wait until C1 ready;` names a client that is idle.
 
 ## Cases that CTP does not reproduce
 
@@ -110,3 +119,11 @@ A core file under `$ctlpath`, `$CUBRID` or the case's directory, or `FATAL ERROR
 whole install into `~/error_backup/error_<version>_<timestamp>.tar.gz` before recreating `ctldb`. In a slot the backup
 is written to the slot's own directory and copied into the real `~/error_backup` when the slot closes; the run says so
 on standard error. `backup_core_file_yn=no` turns the check and the backup off.
+
+**The check can miss a crash.** It looks for files named `core.*` and for `FATAL ERROR` in `$CUBRID/log`. Where
+`/proc/sys/kernel/core_pattern` hands cores to a crash handler such as apport, a server that dies of a signal leaves
+no `core.*` and no `FATAL ERROR` — only its own call stack in `$CUBRID/log/coredump/cub_server_<timestamp>.coredump`
+and, in the case's result, `the server seems to have died`. That is what
+`partition_table/range/dml_ddl/reorganization_select_01` does on this machine
+([`isolation-always-failing.md`](../../project/evidence/isolation-always-failing.md) §1). When a case's result says
+a transaction was aborted by server failure, look in that directory before believing the diff.

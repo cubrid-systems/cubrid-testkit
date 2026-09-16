@@ -389,7 +389,8 @@ attempt's `elapse` and what the controller said), falls into four groups:
   their waits, both blocked on C1's key, and C1's `rollback` releases both — the case needs C2 to get the key.
   **They hang under ctltool's controller too**: `full-2` spent 300 s on two attempts of each, `tk-full-1` on one
   and three, `tk-full-p4` on one of each. No wait in the language can decide which of two released clients
-  goes first.
+  goes first — kind 4, and the same shape as the four cases of `isolation-always-failing.md` §2, where it costs
+  a verdict rather than the wall clock.
 - **Not a hang.** The two `delete_select_02` cases take 35–37 s an attempt when they pass as well — their
   `MC: sleep` and `sleep()` calls — and failed all five; one is among the 25 of §7 and the other is in the same
   document's later section.

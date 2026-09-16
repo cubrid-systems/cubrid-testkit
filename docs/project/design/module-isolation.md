@@ -209,6 +209,15 @@ wall 2,977 → **2,520 s (−15.4%)**, CTP 단독의 4.4배, 결과 6,755/6,772 
 ADR-007 이 그대로 쓰기로 한 ctltool 의 C 코드이므로, 채택한다면 testkit 쪽 사본이 아니라 upstream `cubrid-testtools` 에
 제안하는 것이 순서다.
 
+**결정 (2026-09-16, ADR-019 초안) — 컨트롤러를 다시 쓴다.** 고정 sleep 둘은 문제의 절반이다. 1-클라이언트 케이스
+282 ms 는 연결 전 100 ms + 클라이언트의 일 71 ms + 마지막 클라이언트가 끝난 뒤 101 ms 이고, `wait until` 의 10 ms
+폴링이 케이스마다 60–121 ms, 클라이언트 기동은 하나씩 21 ms 씩 벌어진다 — 전부 컨트롤러의 시간이지 DB 의 시간이
+아니다. 그리고 `qactl` 이 DB 로 하는 일은 접속과 `tran_is_blocked` 뿐이다 (SQL 실행 호출 0회). 그래서 **컨트롤러는
+Go 로 다시 쓰고, answer 바이트를 만드는 클라이언트 `qacsql` 와 `runone.sh`·`prepare.sh`·`clean.sh` 는 그대로
+둔다.** C 로 남는 것은 `tran_is_blocked` 와 `lock_dump` 을 묻는 98줄(`internal/ctl/native/qablocked.c`)뿐이며, ctltool 이 그렇듯 run 마다
+빌드한다. 근거와 버리는 것의 목록은 ADR-019, 측정은 `evidence/isolation-controller.md`. upstream 패치(C5)는
+그것대로 보낸다 — CTP 를 쓰는 쪽에는 그 4줄이 15.4% 다.
+
 ---
 
 ## 4. 문서화
@@ -227,6 +236,7 @@ evidence: `evidence/isolation-baseline.md` (P0) → `evidence/regression-isolati
 | **P0** | 샌드박스 기준 run (세 저장소 upstream develop), 코퍼스 census, 분석 공백 채우기, ADR-007, 이 문서 | `evidence/isolation-baseline.md` — CTP 전체 run 과 noise floor |
 | **P1** | 공통 코드 두 곳(§2-5) → **슬롯 위의 `isolationsuite`** + `runone.sh` 실행부, `TESTKIT_NATIVE=isolation` 뒤 | 슬롯 1개: 표본·전체가 CTP 와 동일. **진행 (2026-09-15):** 코드 완료. 표본 60 케이스, 슬롯 1개 — 판정·동결 파일·`feedback.log`·`result/<name>.log` 58/58 이 CTP 와 동일 (`isolation-baseline.md` §2). 전체는 CTP 기준 run 뒤 |
 | **게이트** | ADR-018 확정, 전체 코퍼스 슬롯 1개로 CTP 와 비교 | ADR-018 의 규칙 → 병렬 기본값 on 가능. **초안의 규칙을 현재 데이터에 적용하면 (2026-09-15):** 러너 파일 동일, 러너 차이 0, 불안정 10, 늘 실패 8. 슬롯 4개도 러너 차이 0 — 네 run 에 걸쳐 불안정 15, 늘 실패 7. **ADR-018 확정 (2026-09-15), 게이트 충족** |
+| **P3** | 컨트롤러 재작성 (ADR-019) — `internal/ctl` 파서 + Go 컨트롤러 + `qablocked` 프로브 | 파서: 코퍼스 6,790개 statement 동일 **(완료)** · 어휘: 6,790개 전수 분류, 미지·폐기 명령 0 **(완료)** · 프로브: 락 대기 감지 **(완료)** · 표본 60케이스: 판정 전부 일치, 정규화 결과 58/60 바이트 동일, 케이스 중앙값 617→249 ms **(완료, `evidence/isolation-controller.md` §4)** · 게이트: ADR-018 규칙으로 전체 코퍼스 **(돌렸고 불통과, 2026-09-16)** — wall 2,977→2,509 s(−15.7%), NOK 14→40. 새 실패 28 중 규칙 3으로 **러너 차이 25**, 모두 문장 순서를 정하지 않은 케이스이고 answer 가 qactl 의 지연이 만든 순서를 담고 있다 (`evidence/isolation-corpus-races.md`). 코퍼스가 고쳐질 때까지 `TESTKIT_ISOLATION_CTL` 은 기본 off |
 | **P2** | 병렬 증거, 축 B 나머지, as-built 가이드 | 항목별 증거. **진행 (2026-09-15):** 슬롯 4개 전체 코퍼스 2,978 s, 러너 차이 0 → **병렬 기본값 on** (사용자 결정). 가이드 `docs/category/isolation/` |
 
 ---
@@ -238,6 +248,7 @@ evidence: `evidence/isolation-baseline.md` (P0) → `evidence/regression-isolati
 | ~~`~/error_backup` · `~/CUBRID/log` — 슬롯이 `$HOME` 을 공유한다~~ | **닫힘 (2026-09-15)** — `HOME` 을 통째로 바꾸지 않았다: 프로파일·`cd`·scenario 의 상대 경로가 모두 `$HOME` 이다. 두 경로만 슬롯마다 bind 한다 (§2-4) |
 | 락 대기·`sleep` 케이스의 부하 민감도 — `load average` 16 인 기계에서 CTP 자신이 흔들리는가 | P0 noise floor |
 | `hostname -i` (코어 보고), `$HOSTNAME` (`clean.sh` 의 `tranlist` 필터) 가 네트워크 namespace 안에서 | P1 — 코어 경로와 함께 확인 |
-| ADR-008 (`.ctl` grammar) · ADR-009 (정규화 정형화) | 실행부를 그대로 쓰는 동안 필요 없다. 실행부를 Go 로 옮길 때 — P2 이후 |
+| ~~ADR-008 (`.ctl` grammar)~~ | **닫힘 (2026-09-16)** — 컨트롤러를 옮기며 필요해졌고, 문법과 전수 census 를 `analysis/isolation/ctl-grammar.md` §4·§5·§8a 에 적었다 |
+| ADR-009 (정규화 정형화) | 여전히 예약. 15개 `sed` 는 `runone.sh` 의 것이고 컨트롤러는 건드리지 않는다 |
 | 오타 answer (`.asnwer` 2, `.amswer` 1) 와 `compare.log` — `answer*` glob 에 안 걸려 **읽히지 않는다**. 해당 케이스는 다른 answer 가 있다 | upstream 에 알릴 것 |
 | 다중 answer 의 의미 — 59 케이스, `ls` 순서의 첫 일치 | 가이드(2장)에 적는다 |

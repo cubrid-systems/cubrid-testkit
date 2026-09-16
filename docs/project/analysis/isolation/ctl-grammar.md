@@ -22,7 +22,7 @@ qamysql = SQL Client — MySQL
 qaoracle = SQL Client — Oracle
 ```
 
-**즉 `.ctl` 케이스 1건 실행 = MC 1 프로세스 + N 클라이언트 프로세스** (Unix socket 으로 통신).
+**즉 `.ctl` 케이스 1건 실행 = MC 1 프로세스 + N 클라이언트 프로세스** — 통신은 클라이언트마다 파이프 세 개(stdin·stdout·stderr)와 평문이다. 소켓이 아니다 (§5 — 2026-09-16 정정).
 
 CTP 의 케이스 실행 경로:
 ```
@@ -44,7 +44,7 @@ Java Test.runTestCase
 ctltool/
 ├── parse.c / parse.h        — statement splitter (state machine)
 ├── common.c / common.h      — char class / arg parsing utility
-├── qamccom.c / qamccom.h    — MC↔Client Unix socket IPC
+├── qamccom.c / qamccom.h    — super controller 와의 소켓. `-slave` 로만 켜지고 아무도 켜지 않는다 (§5)
 ├── qactl.c                  — MC main entry + .ctl DSL 인터프리터
 ├── qacsql.c                 — Client main entry + SQL 실행
 ├── cubrid_drv.c             — CUBRID DB driver (db_drv.h 구현)
@@ -124,7 +124,7 @@ command := <prefix><client ID> { blocked | unblocked | ready | finished };
 | 명령 | 의미 |
 |------|------|
 | `MC: setup NUM_CLIENTS = N;` | N 개 client 프로세스 spawn |
-| `MC: sleep <ms>;` | MC 가 N millisecond sleep |
+| `MC: sleep <n>;` | MC 가 n **초** sleep (`sleepms(sleep_time*1000)`, qactl.c:2412) |
 | `MC: pause for deadlock resolution;` | CUBRID deadlock detection cycle 까지 대기 |
 | `MC: wait until C<n> ready;` | client n 이 *직전 statement 완료* 까지 대기 |
 | `MC: wait until C<n> blocked;` | client n 이 *락 대기* 진입까지 대기 |
@@ -136,31 +136,40 @@ command := <prefix><client ID> { blocked | unblocked | ready | finished };
 
 ---
 
-## 5. MC↔Client IPC (qamccom.c/h)
+## 5. MC↔Client — 파이프와 마커 두 개 *(2026-09-16 정정)*
 
-Unix socket 기반 메시지 교환:
+이 절은 소켓 메시지 교환으로 적혀 있었다. 아니다. 그것은 `qamccom.c` 이고, `qamccom.c` 는 MC 와 클라이언트
+사이가 아니라 **MC 와 super controller 사이**의 것이며 `-slave` 로만 켜진다. `runone.sh` 도 `runall.sh` 도
+그 플래그를 넘기지 않고, 반대편에 있어야 할 프로그램은 트리에 없다. 표본 60 케이스에서 `qamccom.c` 의 실행
+라인은 8.8% 다 (`evidence/isolation-controller.md` §1).
 
-```c
-typedef struct qamc_msg {
-    int sender_id;        /* network byte order */
-    int msgtype;          /* QAMC_SMSG_* */
-    int msglen;
-    char msg[QAMC_MAX_MSGLEN];
-} qamc_msg;
+실제 MC↔Client 는 이렇다 (`start_process`, qactl.c:1868):
+
+```
+pipe() × 3 → fork → 자식에서 dup2(r[1],1) dup2(e[1],2) dup2(w[0],0) → execvp("qacsql", {qacsql, <db>, "-cl", "<n>"})
 ```
 
-- 모든 정수 필드는 network byte order (`ntohl`)
-- 헤더 (sender_id + msgtype + msglen) + body (msglen byte)
-- msglen == 0 허용 — *signal-only* 메시지
+- MC → Client: 문장을 클라이언트의 표준 입력에 그대로 쓴다 (qactl.c:2515). 쓰고 나서 MC 가
+  `MC to C%d: %s\n` 을 자기 출력에 찍는다 (`print_mc_ope`, qactl.c:1818) — **문장을 되울리는 것은 MC 이지
+  클라이언트가 아니다**.
+- Client → MC: MC 가 8,192 바이트 단위로 `read()` 하고 (`qacsql_output_filter`, qactl.c:1407),
+  읽은 덩어리마다 `C%d output (Transaction index = %d):\n` 한 줄을 찍은 뒤 덩어리의 줄마다 `"| "` 를 붙여
+  찍는다. 그래서 **줄 앞머리의 `| ` 는 read() 경계에 걸린다** — 클라이언트 한 번의 출력이 한 번의 read 로
+  들어오는 한 문제가 없지만, 경계가 줄 가운데 떨어지면 그 줄은 `| ` 가 끼어 둘로 갈린다. 코퍼스의 answer 는
+  CTP 가 실제로 받은 덩어리 모양을 담고 있다.
+- MC 가 클라이언트 출력에서 긁어내는 문자열은 **둘뿐**이다:
+  `"Transaction index = "` (뒤의 수가 그 클라이언트의 트랜잭션 인덱스 — `tran_is_blocked` 에 넘길 값),
+  `") is ready."` (하나 볼 때마다 미완 문장 수를 하나 줄이고, 0 이 되면 그 클라이언트는 READY).
 
-**메시지 타입 (qamccom.c 분석):**
-- `QAMC_SMSG_CONTINUE` — MC 가 client 에게 "다음 statement 실행" 신호
-- (다른 타입 정밀 후속)
+blocked 검출은 클라이언트가 아니라 **서버**에 묻는다. `local_tm_isblocked` → `tran_is_blocked (tran_index)`
+는 `libcubridcs` 가 내보내되 어떤 헤더에도 없는 심볼이고 (그래서 cubrid_drv.c:50 이 직접 `extern` 선언한다),
+클라이언트 스텁이 `NET_SERVER_TM_ISBLOCKED` 를 보내면 서버가 `lock_is_waiting_transaction (tran_index)` 로
+답한다 (`transaction_sr.c:576`, `lock_manager.c:7819`). **트랜잭션에 대한 질문이지 부르는 쪽에 대한 질문이
+아니므로, 접속한 아무 클라이언트나 남의 트랜잭션을 물을 수 있다** — 별도 프로세스로 떼어낼 수 있다는 뜻이고,
+`internal/ctl/native/qablocked.c` 가 그것이다 (ADR-019).
 
-**핵심 패턴:**
-- MC 가 `wait_blocked_command`, `wait_ready_command`, `wait_finish_command` 등을 호출
-- 각 함수는 `local_tm_isblocked(tran_index)` 같은 *DB 측 트랜잭션 상태 검사* 와 *client 메시지 수신* 을 결합
-- client 가 *blocked* 상태 진입 시 MC 가 detect 하는 mechanism — `lock_dump` (cubrid_drv.c 의 외부 심볼) 가 활성
+`lock_dump` 은 `wait` 가 끝내 실패했을 때 진단용으로 한 번 부른다 (qactl.c:2270, `#if defined(CUBRID)`).
+blocked 검출 경로가 아니다.
 
 ---
 
@@ -300,13 +309,78 @@ normalize:
 
 ---
 
+## 8a. 코퍼스가 실제로 쓰는 어휘 *(2026-09-16, 전수)*
+
+`cubrid-testcases/isolation` 의 **`.ctl` 파일 6,790개** 전수 — 6,772 는 제외 목록을 적용한 뒤 run 이 판정하는
+케이스 수이고, 여기 6,790 은 파일 수다.
+
+| 명령 | 파일 | 등장 |
+|---|---:|---:|
+| `MC: setup NUM_CLIENTS = n;` | 6,790 | 6,790 |
+| `MC: wait until Cn ready;` | 6,786 | 36,754 |
+| `MC: wait until Cn blocked;` | 2,480 | 3,236 |
+| `MC: wait until Cn unblocked;` | 150 | 153 |
+| `MC: sleep n;` (초) | 804 | 921 |
+| `MC: pause for deadlock resolution;` | 23 | 24 |
+| 클라이언트로 가는 문장 (`Cn:` 또는 접두를 잃어 C1 으로) | 6,790 | 155,968 |
+
+`TestCorpusVocabulary` 가 파서가 돌려준 문장을 분류해 센 값이다 — 주석 안의 명령은 세지 않으므로 같은 코퍼스를
+`grep` 하면 조금 더 많이 나온다.
+
+**한 케이스도 쓰지 않는 것:** `wait until Cn finished` · `wait for n` · `reconnect` · `rendezvous with super` ·
+`execute` 세 형태 전부 (`exec_stressgen` · `exec_stressexec` 포함) · `allocate client` · `no-op` ·
+`client_names =`, 그리고 클라이언트 쪽의 `save state by` · `verify state unchanged|changed` · `simulate` ·
+`schema` · `print`. ADR-019 는 이것들을 **거부**한다 — 조용히 무시하지 않고, 이름을 대며 오류를 낸다.
+
+### 문법과 코퍼스가 어긋나는 자리 둘
+
+**1. 한 줄에 문장이 둘이면 두 번째는 C1 으로 간다 — 5개 파일 32개 문장이 엉뚱한 클라이언트로.**
+`parse.c` 는 벌거벗은 `;` 에서 자르지 `Cn:` 접두를 보지 않는다. `C2: insert a; insert b;` 는 두 문장이 되고
+두 번째는 접두가 없어 qactl.c:2472 의 기본값에 따라 **클라이언트 1** 로 간다.
+
+전수 (`dumpline` — 문장마다 `parse_line_num` 을 함께 찍어 같은 줄을 판정):
+
+| | 파일 |
+|---|---:|
+| 접두 없는 문장을 같은 줄에 이어 쓴 파일 | 2,256 |
+| 그 줄의 주인이 **C1 이 아닌** 파일 (= 진짜 오배달) | **5** (문장 32개) |
+
+| 파일 | 줄 | |
+|---|---|---|
+| `_04_.../dml_ddl/createtable_03.ctl` | 36 | C2 의 줄, 1개가 C1 으로 |
+| `_04_.../index_column/function_index/basic_sql/insert_insert_03.ctl` | 40 | 26개 |
+| `_04_.../index_column/multi_index/basic_sql/insert_delete_02.ctl` | 35 | 2개 |
+| `_05_ReadCommitted_RepeatableRead/dml_ddl/createtable_03.ctl` | 36 | 1개 |
+| `_06_features/cbrd_22705_online_index_parallel/.../insert_delete_02.ctl` | 35 | 2개 |
+
+**줄이 다르면 오배달이 아니다.** 접두 없는 문장이 자기 줄에 홀로 선 것은 작성자가 기본값(C1)을 쓴 것이고,
+그런 파일이 2,256개다. 예: `bug_bts_14165.ctl:32-35` 의 준비 블록은 접두 없이 네 줄이고 바로 뒤가
+`MC: wait until C1 ready;` 다 — C1 을 의도한 것이 본문에 적혀 있다. *(2026-09-16 정정: 처음에는 "같은 줄"
+조건 없이 세어 8개 파일로 보고했는데, 그중 셋은 이렇게 의도된 기본값 사용이었다.)*
+
+**ADR-019 는 고쳤다가 되돌렸다.** 접두 없는 문장을 "그 줄을 연 클라이언트"에게 보내 다섯 파일을 모두 돌린 결과:
+둘은 **차이 없음**, 하나는 answer 한 줄(`on statement number: 13`→`14`)만 어긋나고, **둘은 되돌릴 수 없이 깨진다** —
+줄의 첫 문장이 바로 막히는 문장이고(그게 그 케이스가 시험하는 것이다), 막힌 클라이언트는 다음 문장을 받을 수 없다.
+`insert_delete_02` 측정: qactl 라우팅 551 ms·OK → 줄의 클라이언트로 보내면 **300,328 ms·NOK**
+(300초는 컨트롤러가 돌아오지 않을 클라이언트를 기다린 시간). 그래서 **라우팅은 qactl 의 것을 그대로 둔다**;
+고칠 자리는 코퍼스다 (`evidence/isolation-controller.md` §5). `{ … };` 로 묶으면 한 문장으로 유지되지만
+(`qamc_get_compound_stmt`, qamccom.c:881) 코퍼스에 쓰는 파일이 없다.
+
+**2. `set transaction isolation level` 은 몰래 커밋한다.** 클라이언트가 그 문장을 보면 뒤에 `COMMIT` 을
+붙인다 (qacsql.c:682). DSL 에 보이지 않는 부작용이고, 클라이언트를 그대로 두는 한 그대로 남는다.
+
+둘 다 **보존한다**. 1번은 고쳐 봤다가 케이스들이 그것에 의존하는 것이 드러나 되돌렸고(위), 2번은 클라이언트의
+행동이며 클라이언트는 그대로 두기 때문이다.
+
+---
+
 ## 9. 미해결 후속 분석
 
-- `qamccom.c` 의 모든 메시지 타입 (`QAMC_SMSG_*`)
-- `qactl.c` 의 정밀 main flow (.ctl 파일 어떻게 spawn 하고 어떻게 exit code 결정)
-- `lock_dump` 가 cubrid_drv.c 의 어디서 정의되는지 — *blocked* 검출의 핵심
-- mysql_drv.c / oracle_drv.cpp 의 *현재 빌드 활성* 여부 (Makefile 의 `oracle:` 타겟이 explicit)
-- `format_ctl_result` 의 정규화 패턴이 *모든 .ctl 케이스에 같이 적용* 인지 *케이스마다 다른* 인지
+- ~~`qamccom.c` 의 모든 메시지 타입~~ **닫힘 (2026-09-16)** — super controller 전용이고 아무도 켜지 않는다 (§5). 새 컨트롤러는 통째로 버린다
+- ~~`lock_dump` 가 어디서 — *blocked* 검출의 핵심~~ **닫힘 (2026-09-16)** — blocked 검출은 `tran_is_blocked` 이고 `lock_dump` 은 실패 시 진단용이다 (§5)
+- ~~mysql_drv.c / oracle_drv.cpp 의 빌드 활성 여부~~ **닫힘** — ADR-007 이 CUBRID 만으로 못 박았다
+- ~~`format_ctl_result` 가 케이스마다 다른지~~ **닫힘 (2026-09-16)** — `runone.sh:48-73` 이 모든 케이스에 같은 순서로 적용한다. 순서가 의미를 가진다 (14번이 15번보다 먼저여야 `key: N(OID: …)` 가 제대로 마스킹된다)
+- `qactl.c` 의 정밀 main flow — 새 컨트롤러가 포팅하며 확정한다 (ADR-019)
 - `SP_Sleep.java` 의 정확한 사용처 (sleep 시뮬레이션 SP 추정)
 - `prepare.sh` / `runall.sh` 의 정확한 호출자
 
@@ -320,19 +394,19 @@ ctltool 정체:
 - 다중 DBMS 빌드 (CUBRID / MySQL / Oracle)
 - parse.c 가 statement splitter (state machine)
 - qactl.c 가 .ctl DSL 인터프리터 (8 토큰)
-- qamccom.c 가 Unix socket IPC
+- qamccom.c 는 MC↔Client 가 아니라 super controller 용이고 꺼져 있다 (§5)
 
 DSL 어휘 (확정, case-formats.md §3 보강):
 - MC: setup NUM_CLIENTS = N
 - MC: wait until C<n> { ready | blocked | unblocked | finished }
 - MC: pause for deadlock resolution
-- MC: sleep <ms>
+- MC: sleep <n>   (초)
 - C<n>: <SQL>
 + /* */ 와 -- 주석, 따옴표 문자열, naked-semicolon 종료
 
 새 시스템 입력:
-- Option B (subprocess) 가 1차 strangler-fig 에 안전
-- 다중 DBMS 의 *현 활성 여부* 확정 필요
-- runone.sh sed normalization 동결 필수
-- 새 시스템 grammar 정형화 (BNF/PEG)
+- ADR-007 (2026-09-15): 실행부를 그대로 subprocess 로 — 게이트까지
+- ADR-019 (2026-09-16): 컨트롤러는 Go 로 다시 쓰고 클라이언트(`qacsql`)는 그대로 둔다.
+  이 문서의 §5·§8a 가 그 명세다
+- runone.sh sed normalization 동결 필수 — 컨트롤러는 건드리지 않는다 (ADR-009 예약 유지)
 ```

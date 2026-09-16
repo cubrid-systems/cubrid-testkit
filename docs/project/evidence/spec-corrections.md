@@ -237,6 +237,25 @@ develop `a1bec87`, `CTP/isolation/`.
 the design — the client argument, the `answer/` directory and whose processes are killed — and the last one is why
 even a one-slot native isolation run is contained (`design/module-isolation.md` §0).
 
+## 9. Found by reading `qactl` in order to replace it *(2026-09-16)*
+
+ADR-019 needed the controller's behaviour precisely enough to reimplement it. Two of the analysis's claims about
+how it talks to its clients were wrong, and both were load-bearing: a rewrite that believed them would have built
+a message protocol that does not exist. Line numbers are at `a1bec87`.
+
+| Spec said | Actually | Source |
+|---|---|---|
+| `qamccom.c` is the **MC↔Client** IPC, a Unix socket carrying `qamc_msg` (`ctl-grammar.md` §1, §2, §5, §10) | the controller drives a client through **three pipes and plain text**: a statement written to its standard input, its output read back in 8,192-byte chunks. `qamccom.c` is the socket to a **super controller**, reached only under `-slave`, which nothing passes and whose other end does not exist in the tree. Measured: 8.8% of its lines run in a 60-case sample, and those are helpers | `qactl.c:1868-2018`, `:1407`, `:2515`; `runone.sh:265`; `evidence/isolation-controller.md` §1 |
+| `lock_dump` is the core of blocked detection (`ctl-grammar.md` §5, §9) | blocked detection is `tran_is_blocked (tran_index)` — a client stub that asks the **server**, which answers `lock_is_waiting_transaction`. `lock_dump` is called once, for diagnostics, after a `wait` has already failed | `cubrid_drv.c:594`, `network_interface_cl.c:3112`, `transaction_sr.c:576`; `qactl.c:2270` |
+| — | the controller **executes no SQL**: `execute_sql_statement`, `print_class_info`, `print_ope` and `get_tran_id` appear zero times in `qactl.c`. Its whole use of the database is connect, disconnect and `tran_is_blocked` | `qactl.c`, `db_drv.h` |
+| — | `parse.c` splits on the naked semicolon without looking at the `Cn:` prefix, so a second statement on the same line goes to **client 1**. 2,256 files write one that way; in **5** of them the line belongs to a client other than C1, and those **32** statements have always gone to the wrong client. A prefix-less statement on a line of its own is the author using the default and means client 1 — counting without the same-line condition first reported 8 files, and three of those were that. **Kept**: two of the three cases depend on it, because the statement that goes to client 1 would otherwise be sent to a client the line has just blocked (`isolation-controller.md` §5) | `parse.c:126-370`, `qactl.c:2460-2474`, corpus `6ab786aa9`, measured |
+| — | the client appends a **`COMMIT` of its own** after `set transaction isolation level` | `qacsql.c:682-701` |
+| `lock_dump (FILE *)` — one argument (`cubrid_drv.c:49`), called with one when a `wait until` fails (`qactl.c:2271`) | the engine's is **`lock_dump (FILE *outfp, int is_contention)`**, and `is_contention` decides whether the whole lock table is printed or only the resources something is waiting on. Called with one argument, the second comes from whatever the register held. Measured, same case, same failure: qactl printed 126 lines and a correctly declared call in this runner printed 43 until it was fixed to pass 0 — the 83 missing lines are the per-object holders | `network_interface_cl.h:198`, `lock_manager.c` `xlock_dump` |
+
+**What this method catches:** an analysis written to *understand* a program and one written to *replace* it are
+not held to the same standard. `qamccom.c`'s message types were left as future work; what a port needs to know
+first is not what they contain but whether anything sends them, and nothing does.
+
 ## What this says about the freeze
 
 A frozen surface is only as good as the reading behind it, and the reading was done six different

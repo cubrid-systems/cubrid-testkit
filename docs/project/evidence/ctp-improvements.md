@@ -1,7 +1,7 @@
 # What the legacy CTP could fix cheaply
 
-Findings from running the shell corpus against CTP and against this runner on the
-same engine, same cases, same machine. Everything here is about **CTP as CI runs
+Findings from running the shell corpus, and later the isolation one, against CTP
+and against this runner on the same engine, same cases, same machine. Everything here is about **CTP as CI runs
 it today** — none of it needs the migration to finish, and most of it is a line
 or a configuration value.
 
@@ -287,6 +287,35 @@ one machine, with the verdicts identical case for case.
 
 ---
 
+## H. `qactl` waits 100 ms for a client that has already exited *(isolation)*
+
+**Measured.** Every isolation case ends by sending `quit;` to each of its clients. The client exits, its pipe
+reaches end of file, and `check_master_pipe_input` calls `kill_aclient` — which sleeps 100 ms before it reaps a
+child whose `SIGCHLD` has already arrived (`qactl.c:1131`). The next `quit;` waits behind it. With a second
+`sleepms(100)` before the controller connects (`qactl.c:3034`), the two come to **2,417 s over the corpus,
+21.8% of the case time** — three times what `clean.sh` costs.
+
+**The fix is four lines:** `waitpid (pid, &status, WNOHANG)` first, and only a client that has not exited gets
+the sleep, the `SIGKILL` and the second wait.
+
+**What it is worth.** A prototype (`tk-fast/CTP`) over the whole corpus, four slots: **2,977 s → 2,520 s
+(−15.4%)**, with 6,755 of 6,772 results byte-identical to CTP's own run and no runner difference under
+ADR-018's rules (`isolation-baseline.md` §4).
+
+## I. `lock_dump` is declared with one argument and takes two *(isolation)*
+
+**Measured.** When a `MC: wait until Cn …;` fails, `qactl` prints the server's lock table into the case's result
+(`qactl.c:2271`). The engine's function is `lock_dump (FILE *outfp, int is_contention)`
+(`network_interface_cl.h:198`); `cubrid_drv.c:49` declares it with one argument and `qactl.c` calls it with one.
+The second argument therefore comes from whatever the register held at the call, and it decides whether the
+whole lock table is printed or only the resources something is waiting on. On one failing case a correctly
+declared call printed 43 lines where `qactl` printed 126; the 83 missing lines are the per-object holders.
+
+**The fix is the declaration**, plus passing `0` — which is what the call has always meant.
+
+**What it is worth.** Nothing in wall time. It decides whether the diagnostic a failing isolation case leaves
+behind is the lock table or a fraction of it, and today that is decided by chance.
+
 ## What this runner does about each
 
 | | CTP today | here |
@@ -299,3 +328,5 @@ one machine, with the verdicts identical case for case.
 | E | — | causes recorded above |
 | F | — | nothing: it is the engine's |
 | G | one node, serial | slots on one machine, with a status page and a duration plan |
+| H | 100 ms per client at the end of every case | gone: the controller is testkit's (ADR-019), and it reaps first. The four-line patch is still worth sending, for everyone who runs CTP |
+| I | one argument, and what it prints is chance | declared with two, called with 0 (`internal/ctl/native/qablocked.c`) |

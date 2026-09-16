@@ -23,13 +23,14 @@
 | 005 | orphan ComponentEnum 폐기 정책 | Phase 1 마무리 | `phase0-retrospective.md` §2-5 |
 | 006 | DB setup recipe 정형화 (`make_sql_db_data` / `make_db_data`) | Phase 2 | 동상 |
 | [007](ADR-007-isolation-executor.md) | isolation 실행부 — ctltool 처리. **확정 (Accepted, 2026-09-15)**: 케이스는 `runone.sh`·ctltool 을 **그대로** subprocess 로, 러너는 그 둘레(탐색·큐·슬롯·판정·기록). CUBRID 만. 슬롯 1개여도 컨테이닝 — 스크립트가 사용자의 프로세스를 `pkill -9` 한다. 슬롯 1개 native run 이 표본에서 CTP 와 동일(결과 58/58) | 충족 | `design/module-isolation.md`, `evidence/isolation-baseline.md` §2. ⚠️ ADR-002 §4-2 의 Option A/B/C 문자와 **별개 공간** |
-| 008 | `.ctl` DSL grammar 정형화 | Phase 2 | 동상 |
+| 008 | `.ctl` DSL grammar 정형화 | **충족 (2026-09-16)** — ADR-019 가 트리거. 문법과 전수 census 는 `analysis/isolation/ctl-grammar.md` §4·§5·§8a 에 있고, 별도 ADR 파일을 두지 않는다 | 동상 |
 | 009 | result normalization 정형화 | Phase 2 | 동상 |
 | 010 | 신/구 공존 기간의 유지보수 정책 | Phase 3 | ROADMAP §4 |
 | 011 | 인벤토리 모듈의 재작성 / 어댑터 분류 | Phase 4 | ROADMAP §5 |
 | 012 | **QA 운영 층**의 경계와 재구축 설계 (scheduler / mail / issue / queue / **플릿** — ADR-014 로 추가) | Phase 5 완료 후 또는 운영 필요 발생 시 | `migration-exclusions.md` §3 |
 | [017](ADR-017-sql-equivalence.md) | sql 동등성 증명 방법 — ADR-013 의 sql 판. **초안 (Proposed, 2026-09-11)**: 두 코퍼스 전체, 케이스별 판정 + **`.result` 바이트 동일** + `main.info`(시각 제외) + 집계, 자기 대조 noise floor — develop 에서 0/17,459 (판정·`.result` 모두), 앞선 버전 조합에서는 동률 정렬 1건 | 사용자 검토 | ADR-016, `evidence/sql-baseline.md` |
 | [018](ADR-018-isolation-equivalence.md) | isolation 동등성 증명 방법 — ADR-013 의 isolation 판. **확정 (Accepted, 2026-09-15 — 병렬 슬롯 기본값 결정과 함께)**: CTP 는 같은 순서의 전체 run 두 번에서 판정 7개를 옮기므로 판정 diff 0 대신 — 러너 파일(check·디스패치 집합·스냅숏 키·쓴 파일 집합)은 엄격, **CTP 가 재현하는 판정은 같아야 하고**, 어긋나면 케이스 단독 3회씩 재실행해 두 러너가 갈릴 때만 러너 차이. 불안정 케이스는 제외하지 않고 보고. 현재 데이터: 슬롯 1개·4개 모두 러너 차이 0, 네 run 에 걸쳐 불안정 15, 늘 실패 7 | 충족 | `evidence/isolation-baseline.md` §4 |
+| [019](ADR-019-isolation-controller.md) | isolation 컨트롤러 — `qactl` 처리. **초안 (Proposed, 2026-09-16)**: 컨트롤러는 testkit 이 Go 로 다시 쓰고, 클라이언트 `qacsql` 와 `runone.sh`·`prepare.sh`·`clean.sh` 는 그대로. C 로 남는 것은 `tran_is_blocked` 와 `lock_dump` 을 묻는 98줄(`internal/ctl/native/qablocked.c`)뿐. 코퍼스가 안 쓰는 13개 명령과 `qamccom.c` 전체를 버린다. ADR-007 의 "나중에" 항목을 여는 결정 | 사용자 검토 | `evidence/isolation-controller.md`, `analysis/isolation/ctl-grammar.md` |
 
 > 013·014·015·016 은 아래 예약 번호보다 먼저 확정되었다. 예약은 *트리거 대기*일 뿐 순서가 아니다.
 

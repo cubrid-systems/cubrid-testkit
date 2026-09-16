@@ -128,10 +128,13 @@ The runner runs on **one machine** ([ADR-014](docs/project/adr/ADR-014-one-machi
 default, and a remote machine over SSH is still one machine. RMI worker mode is retired and asking
 for it fails loudly rather than falling back.
 
-For `shell` and `sql` parallelism is off by default; `isolation` runs four slots unless
-`parallel_slots` says otherwise. A slotted shell or isolation run writes the record files a serial
-run writes — slots share an environment id on purpose — and only the console, with an
-`[ENV START]` for each slot, shows how many there were.
+For `shell` and `sql` parallelism is off by default. `isolation` runs four slots unless
+`parallel_slots` says otherwise — fewer on a machine that cannot hold them, at most one per CPU
+and one per 1.5 GB of available memory after 2 GB is left for everything else. A value you write
+is used as written, whatever the machine; either way the run says on stderr which it chose and
+why. A slotted shell or isolation run writes the record files a serial run writes — slots share
+an environment id on purpose — and only the console, with an `[ENV START]` for each slot, shows
+how many there were.
 
 ### `run-shell` — one case, looped
 

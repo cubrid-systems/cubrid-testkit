@@ -361,6 +361,20 @@ func Volatile() bool { return os.Getenv(SlotVolatileEnv) == "1" }
 // SlotVolatileEnv names the switch for volatile slot overlays.
 const SlotVolatileEnv = "TESTKIT_SLOT_VOLATILE"
 
+// Lane names where the slots' writes go, for a record of a run: "disk" or
+// "disk, volatile", and the slot root when one is named. Where more slots stop
+// paying on one of these says nothing about another (ADR-020).
+func Lane() string {
+	l := "disk"
+	if Volatile() {
+		l = "disk, volatile"
+	}
+	if root := os.Getenv(SlotRootEnv); root != "" {
+		l += " at " + root
+	}
+	return l
+}
+
 // whyMkdirFailed names the reason a slot cannot make its own directory, when the
 // reason is the one that is invisible from the error.
 //

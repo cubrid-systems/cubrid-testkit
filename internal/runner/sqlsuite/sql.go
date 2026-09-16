@@ -26,6 +26,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 )
 
@@ -189,6 +190,17 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 	// included; not contained and serial, the one worker runs on the machine,
 	// as CTP did.
 	n := max(ini.Int("sql", "parallel_slots", 1), 1)
+	// Contained, the machine decides how many unless the configuration does, and
+	// the run measures what the next one is sized by (ADR-020). Uncontained, it
+	// is serial as CTP's was, and measures nothing.
+	var meter *sizing.Meter
+	if contain.Active() {
+		plan := slotsFor(ini, req.Task, st.scenario, len(cases.all), sizing.MemAvailableMB(), sizing.Load(suiteOf(req.Task)))
+		n = plan.Slots
+		fmt.Fprintf(os.Stderr, "[INFO] %d slot(s): %s\n", n, plan.Why)
+		meter = sizing.StartMeter(5*time.Second, nil)
+		defer meter.Stop()
+	}
 	var places []place
 	closeSlots := func() {}
 	if n > 1 || contain.Active() {
@@ -273,7 +285,7 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 	if len(places) > 1 {
 		queue.Affinity()
 	}
-	w := &work{cases: cases, rec: rec, board: board, total: len(cases.all)}
+	w := &work{cases: cases, rec: rec, board: board, total: len(cases.all), meter: meter}
 
 	// Each place starts its own server and broker, on the ports the
 	// configuration names -- the same ports in every slot, which the network
@@ -401,6 +413,20 @@ func (s *SQL) Run(ctx context.Context, req runner.Request) error {
 		return err
 	}
 	closeExecutors()
+	// A run where every slot came up and nothing stopped it is the run the next
+	// one is sized by; a slot short, it measured fewer slots than it says.
+	if meter != nil && len(startErr) == 0 && ctx.Err() == nil {
+		// The slots that ran, not the slots that were opened: one whose turn came
+		// after the queue had drained never started a server, and counting it
+		// would divide the peak by more slots than held it.
+		ran := 0
+		for _, x := range executors {
+			if x != nil {
+				ran++
+			}
+		}
+		record(meter, req.Task, st.scenario, ran)
+	}
 
 	// ---- do_summary_and_clean ---------------------------------------------
 	hostIP, _ := here.Channel().Run(ctx, "hostname -i")
@@ -576,7 +602,10 @@ func openBoard(ini *conf.Ini, st *settings, e engine, cases *caseSet, slots int)
 	notRun := len(cases.all) - len(cases.answer)
 	board.Setup([]status.Setting{
 		{Group: "suite", Key: "task", Value: st.category},
-		{Group: "suite", Key: "parallel_slots", Value: fmt.Sprint(slots), Default: "1", Note: "cases at once; a directory stays on one slot"},
+		{Group: "suite", Key: "parallel_slots", Value: fmt.Sprint(slots), Default: "sized",
+			Note: "cases at once; a directory stays on one slot. Unset and contained, sized from this machine's own runs (ADR-020)"},
+		{Group: "suite", Key: "parallel", Value: orUnset(ini.GetOr("sql", "parallel", "")), Default: "measured",
+			Note: "conservative, measured or aggressive: how an unset parallel_slots is sized"},
 		{Group: "suite", Key: "executor", Value: "jdbc", Note: "CQT's own parser and renderer (ADR-016)"},
 		{Group: "suite", Key: "db", Value: st.dbName + " " + st.dbCharset},
 		{Group: "suite", Key: "jdbc_config_file", Value: st.jdbcConfig, Default: "test_default.xml"},

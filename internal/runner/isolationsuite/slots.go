@@ -3,82 +3,72 @@ package isolationsuite
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 )
 
-// Slots are the default for isolation, decided on 2026-09-15 once ADR-018's
-// rules found no runner difference with four slots over the whole corpus, in
-// 2,978 s against 12,301 s for one (docs/project/evidence/isolation-baseline.md
-// §4). parallel_slots still decides; a configuration that does not say gets
-// defaultSlots, or fewer on a machine that cannot hold them.
-const defaultSlots = 4
-
-// slotMB is what one slot is budgeted. The server is most of it and is its
-// buffers plus a floor: 1.38 GB at its peak with the shipped 512 MB data buffer
-// and 256 MB log buffer, measured on the same engine for the sql family
-// (evidence/sql-native.md §3). The rest of an isolation slot -- cub_pl,
-// cub_master, qactl and its clients -- came to about 110 MB at the peak of a
-// four-slot run of the sample, where each server was 595 MB
-// (evidence/isolation-baseline.md §2).
-const slotMB = 1500
-
-// reservedMB is left to everything else on the machine, as scripts/sizing.sh
-// leaves it.
-const reservedMB = 2048
-
-// slotsFor is how many slots a run gets, and the sentence that says why.
-//
-// cpus and availMB are the machine's; zero means unknown and bounds nothing. A
-// value in the configuration is used as it is, whatever the machine: whoever
-// wrote it has decided.
-func slotsFor(cfg *conf.Config, cpus, availMB int) (int, string) {
-	if v, ok := cfg.Get("parallel_slots"); ok && strings.TrimSpace(v) != "" {
-		n, err := strconv.Atoi(strings.TrimSpace(v))
-		if err != nil || n < 1 {
-			return 1, fmt.Sprintf("parallel_slots=%s is not a number of slots; running one", strings.TrimSpace(v))
-		}
-		return n, fmt.Sprintf("parallel_slots=%d", n)
-	}
-
-	n := defaultSlots
-	why := fmt.Sprintf("parallel_slots is not set: %d slots, the default", n)
-	if cpus > 0 && cpus < n {
-		n = cpus
-		why = fmt.Sprintf("parallel_slots is not set: %d slot(s), one for each CPU", n)
-	}
-	if availMB > 0 {
-		byMem := (availMB - reservedMB) / slotMB
-		if byMem < 1 {
-			byMem = 1
-		}
-		if byMem < n {
-			n = byMem
-			why = fmt.Sprintf("parallel_slots is not set: %d slot(s), what %d MB of available memory holds at %d MB a slot "+
-				"after %d MB for the rest", n, availMB, slotMB, reservedMB)
-		}
-	}
-	return n, why
+// sizingInput is what this run is sized from (ADR-020): parallel_slots when it
+// is written, and otherwise the machine's own runs of this corpus on this lane,
+// as `parallel` asks -- conservative, measured or aggressive.
+func sizingInput(cfg *conf.Config, corpus string, cases, availMB int, recs []sizing.Record) (sizing.Input, string) {
+	mode, warn := sizing.ModeOf(cfg.GetOr("parallel", ""))
+	configured, _ := cfg.Get("parallel_slots")
+	return sizing.Input{
+		Suite:      sizing.Isolation,
+		Configured: configured,
+		Mode:       mode,
+		Engine:     engineOf(cfg),
+		AvailMB:    availMB,
+		Cases:      cases,
+		Corpus:     corpus,
+		Lane:       contain.Lane(),
+		Records:    recs,
+	}, warn
 }
 
-// memAvailableMB is what the kernel says can be handed out without swapping, or
-// zero when it cannot be read.
-func memAvailableMB() int {
-	b, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 0
+// slotsFor is how many slots a run gets, and the sentence that says why.
+func slotsFor(cfg *conf.Config, corpus string, cases, availMB int, recs []sizing.Record) sizing.Plan {
+	in, warn := sizingInput(cfg, corpus, cases, availMB, recs)
+	p := sizing.Slots(in)
+	if warn != "" {
+		p.Why = warn + "; " + p.Why
 	}
-	for _, line := range strings.Split(string(b), "\n") {
-		f := strings.Fields(line)
-		if len(f) >= 2 && f[0] == "MemAvailable:" {
-			kb, err := strconv.Atoi(f[1])
-			if err != nil {
-				return 0
-			}
-			return kb / 1024
-		}
+	return p
+}
+
+// engineOf is the buffers the slots' servers run with: the install's
+// cubrid.conf, as DEPLOY leaves it after writing the configuration's
+// default.cubrid.* keys into each slot.
+func engineOf(cfg *conf.Config) sizing.Engine {
+	return sizing.EngineFromConf(os.Getenv("CUBRID")).With(
+		cfg.GetOr("default.cubrid.data_buffer_size", ""), cfg.GetOr("default.cubrid.log_buffer_size", ""))
+}
+
+// sampleEvery is how often a run looks at the machine's available memory. A
+// slot's server takes seconds to reach its size, and the peak holds for most of
+// the run, so five seconds misses nothing a budget needs.
+const sampleEvery = 5 * time.Second
+
+// firstAttempt reports whether runone.sh's output is a single attempt: its
+// `set -x` trace has one `+ elapse=` line for each time it ran the controller.
+func firstAttempt(out string) bool {
+	return strings.Count(out, "\n+ elapse=") == 1
+}
+
+// record writes what this run measured, for the next run on this machine. Only a
+// run of the whole of what it discovered is written: a continued run is a
+// remainder, and its case seconds would bound the next run by the remainder.
+func record(m *sizing.Meter, cfg *conf.Config, corpus string, slots int) {
+	r := m.Stop()
+	r.Slots, r.Engine, r.Corpus, r.Lane = slots, engineOf(cfg), corpus, contain.Lane()
+	if err := sizing.Save(sizing.Isolation, r); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] this run's sizing was not recorded: %v\n", err)
+		return
 	}
-	return 0
+	fmt.Fprintf(os.Stderr, "[INFO] sizing recorded at %s: %d slots, %d MB at the peak, %d s of cases, the longest first attempt %d s\n",
+		sizing.Path(sizing.Isolation), r.Slots, r.PeakMB, r.CaseS, r.LongestUnitS)
 }

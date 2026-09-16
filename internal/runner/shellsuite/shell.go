@@ -20,6 +20,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/plan"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
 )
@@ -239,6 +240,23 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		return quit("%v", err)
 	}
 
+	// How many is the machine's to say unless the configuration does, and the
+	// run measures what the next one is sized by (ADR-020) -- when it is
+	// contained and opens its own slots. Uncontained it is serial, as CTP's was;
+	// a caller that supplies its channels is controlling how commands run.
+	sized := s.Channels == nil && contain.Active()
+	if sized {
+		plan := slotsFor(cfg, machine, ramMB, lanes, onDisk, sizing.MemAvailableMB(), sizing.Load(sizing.Shell))
+		slots = plan.Slots
+		// Lanes are two pools of slots, so one slot cannot have them; a run that
+		// asked for lanes and was sized at one would stop in planLanes instead.
+		if lanes && slots < 2 {
+			slots = 2
+			plan.Why += "; lanes need two"
+		}
+		fmt.Fprintf(os.Stderr, "[INFO] %d slot(s): %s\n", slots, plan.Why)
+	}
+
 	var corpus *Corpus
 	var split laneSplit
 	if ramMB > 0 {
@@ -304,6 +322,15 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// are only for the real opener. Setting Channels is how a caller says it is
 	// controlling how commands run -- the whole-task test does it to intercept
 	// the destructive reset.
+	// Started once the corpus exists and before the slots do, so the fall in
+	// available memory is the slots' -- and what is in the corpus tmpfs at that
+	// moment is subtracted as the run's writes rather than its slots.
+	var meter *sizing.Meter
+	if sized {
+		meter = sizing.StartMeter(5*time.Second, corpus.Usage1)
+		defer meter.Stop()
+	}
+
 	own := s.Channels == nil
 	pairs := []channelPair{{worker: worker, monitor: monitor, close: func() {}}}
 	if own && (slots > 1 || contain.Active()) {
@@ -580,7 +607,10 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	}
 
 	fmt.Println("STARTED")
-	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split, patches, logs)
+	err = s.test(ctx, machine, pairs, queue, sink, report, cfg, buildID, bits, local, board, corpus, record, split, patches, logs, meter)
+	if meter != nil && err == nil && !continueMode && ctx.Err() == nil {
+		recordSizing(meter, cfg, machine, ramMB, lanes, onDisk, len(pairs))
+	}
 
 	if planPath != "" {
 		if werr := record.Write(planPath); werr != nil {
@@ -958,7 +988,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 	pairs []channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, split laneSplit, patches *patch.Set, logs *CaseLogs) error {
+	record *plan.Record, split laneSplit, patches *patch.Set, logs *CaseLogs, meter *sizing.Meter) error {
 
 	var wg sync.WaitGroup
 	errs := make([]error, len(pairs))
@@ -968,7 +998,7 @@ func (s *Shell) test(ctx context.Context, machine *topology.Instance,
 			defer wg.Done()
 			errs[i] = s.oneWorker(ctx, machine, pair, queue, sink, report, cfg,
 				buildID, bits, local, board, corpus, record, split.laneOf(i),
-				fmt.Sprintf("slot%d", i), patches, logs)
+				fmt.Sprintf("slot%d", i), patches, logs, meter)
 		}(i, pair)
 	}
 	wg.Wait()
@@ -1014,7 +1044,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 	pair channelPair, queue *dispatch.Queue,
 	sink *result.Sink, report feedback.Feedback, cfg *conf.Config,
 	buildID, bits string, local bool, board *status.Board, corpus *Corpus,
-	record *plan.Record, lane dispatch.Lane, slotID string, patches *patch.Set, logs *CaseLogs) error {
+	record *plan.Record, lane dispatch.Lane, slotID string, patches *patch.Set, logs *CaseLogs, meter *sizing.Meter) error {
 
 	workerCh, monitorCh := pair.worker, pair.monitor
 	// Which lane this slot is in: where its corpus writes land. With lanes off
@@ -1030,6 +1060,7 @@ func (s *Shell) oneWorker(ctx context.Context, machine *topology.Instance,
 		Logs:      logs,
 		Corpus:    corpus,
 		Plan:      record,
+		Meter:     meter,
 		LaneID:    lane,
 		Contained: contain.Active(),
 		Channel:   workerCh,

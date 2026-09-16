@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -38,6 +39,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/sqlsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runshell"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 )
 
 // version is stamped at build time: -ldflags "-X main.version=..."
@@ -65,6 +67,10 @@ func main() {
 	// inside, because out here that path is still ctltool's own directory.
 	if len(os.Args) > 1 && os.Args[1] == "isolation-ctl-install" {
 		os.Exit(isolationCtlInstall(os.Args[2:]))
+	}
+	// sizing says what this machine would run at once, and on what evidence.
+	if len(os.Args) > 1 && os.Args[1] == "sizing" {
+		os.Exit(sizingCmd(os.Args[2:]))
 	}
 
 	// Containment happens before anything else or it happens to a process that
@@ -270,6 +276,85 @@ func isolationCtl(args []string) int {
 		Out:    os.Stdout,
 		Err:    os.Stderr,
 	})
+}
+
+// sizingCmd prints what a suite would run at once on this machine, and the runs
+// it read to decide (ADR-020). It decides nothing and runs nothing.
+//
+//	testkit sizing [suite] [mode] [corpus] [lane]
+//
+// corpus is the scenario path a run would name, and lane where its slots would
+// write; without them the newest run's are taken, which is the question most
+// often asked -- what would the same run again get.
+func sizingCmd(args []string) int {
+	arg := func(i int) string {
+		if len(args) > i {
+			return strings.TrimSpace(args[i])
+		}
+		return ""
+	}
+	suite := sizing.Isolation
+	if arg(0) != "" {
+		suite = sizing.Suite(arg(0))
+		if !slices.Contains(sizing.Suites, suite) {
+			fmt.Fprintf(os.Stderr, "%s is not a suite. One of: %v\n", arg(0), sizing.Suites)
+			return 2
+		}
+	}
+	mode, warn := sizing.ModeOf(arg(1))
+	if warn != "" {
+		fmt.Fprintln(os.Stderr, warn)
+	}
+	machine := sizing.ThisMachine()
+	avail := sizing.MemAvailableMB()
+	eng := sizing.EngineFromConf(os.Getenv("CUBRID"))
+	recs := sizing.Load(suite)
+	corpus, lane := arg(2), arg(3)
+	if corpus == "" && len(recs) > 0 {
+		corpus = recs[0].Corpus
+	}
+	if lane == "" {
+		lane = contain.Lane()
+		if len(recs) > 0 {
+			lane = recs[0].Lane
+		}
+	}
+
+	fmt.Printf("machine   %s, %d processors, %d MB of memory, %d MB free now\n",
+		machine.Host, machine.Cores, machine.MemTotalMB, avail)
+	fmt.Printf("engine    data_buffer_size %d MB, log_buffer_size %d MB, from $CUBRID/conf/cubrid.conf\n",
+		eng.DataBufferMB, eng.LogBufferMB)
+	if len(recs) == 0 {
+		fmt.Printf("runs      none at %s: this machine has not run %s yet\n", sizing.Path(suite), suite)
+	} else {
+		fmt.Printf("runs      %s, newest first\n", sizing.Path(suite))
+		for _, r := range recs {
+			fmt.Printf("          %s  %2d slots  %5d s wall  %5d MB a slot  %5d cases  longest %4d s  %s  %s\n",
+				r.When, r.Slots, r.WallS, r.PerSlotMB, r.Cases, r.LongestUnitS, orNone(r.Lane), r.Corpus)
+		}
+	}
+	fmt.Printf("sizing    %s on %s\n", orNone(corpus), orNone(lane))
+	if suite == sizing.Shell {
+		fmt.Printf("          a run also sets scenario_ram_mb aside from memory, and is bounded by its own case count,\n")
+		fmt.Printf("          so what it takes can be lower than this\n")
+	}
+	for _, m := range []sizing.Mode{sizing.Conservative, sizing.Measured, sizing.Aggressive} {
+		p := sizing.Slots(sizing.Input{Suite: suite, Mode: m, Engine: eng, AvailMB: avail, Corpus: corpus, Lane: lane,
+			Records: recs})
+		mark := " "
+		if m == mode {
+			mark = "*"
+		}
+		fmt.Printf("%s %-13s %2d slots -- %s\n", mark, m, p.Slots, p.Why)
+	}
+	return 0
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "unrecorded"
+	}
+	return s
 }
 
 // isolationCtlInstall makes one ctltool directory run this controller instead of

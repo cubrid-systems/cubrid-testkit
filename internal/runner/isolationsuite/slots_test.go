@@ -3,26 +3,48 @@ package isolationsuite
 import (
 	"strings"
 	"testing"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 )
 
-func TestSlotsAreTheDefaultAndTheMachineBoundsThem(t *testing.T) {
+// With nothing written, the machine decides; with nothing known about it, one.
+func TestAnUnsetSlotCountIsSized(t *testing.T) {
+	t.Setenv("CUBRID", "")
 	unset := load(t, "scenario=/s\n")
-	for _, c := range []struct {
-		name          string
-		cpus, availMB int
-		want          int
-		why           string
-	}{
-		{"a machine with room", 16, 16000, 4, "the default"},
-		{"nothing known about the machine", 0, 0, 4, "the default"},
-		{"two CPUs", 2, 16000, 2, "one for each CPU"},
-		{"memory for three", 16, 2048 + 3*slotMB + 100, 3, "available memory"},
-		{"memory for none", 16, 1000, 1, "available memory"},
-	} {
-		n, why := slotsFor(unset, c.cpus, c.availMB)
-		if n != c.want || !strings.Contains(why, c.why) {
-			t.Errorf("%s: %d slots (%q), want %d (%q)", c.name, n, why, c.want, c.why)
-		}
+	if p := slotsFor(unset, "/s", 100, 0, nil); p.Slots != 1 || !strings.Contains(p.Why, "unknown") {
+		t.Errorf("unknown memory: %d slots (%q), want one", p.Slots, p.Why)
+	}
+	if p := slotsFor(unset, "/s", 100, 1000, nil); p.Slots != 1 || !strings.Contains(p.Why, "floor") {
+		t.Errorf("no memory to speak of: %d slots (%q), want one", p.Slots, p.Why)
+	}
+	if p := slotsFor(unset, "/s", 100, 2048+1750*2, nil); p.Slots != 2 || !strings.Contains(p.Why, "shipped") {
+		t.Errorf("memory for two at the shipped figure: %d slots (%q)", p.Slots, p.Why)
+	}
+}
+
+// parallel reaches the decision, and a word it does not know is said out loud.
+func TestParallelIsReadFromTheConfiguration(t *testing.T) {
+	t.Setenv("CUBRID", "")
+	recs := []sizing.Record{{Corpus: "/s", Lane: contain.Lane(), Slots: 8, Cases: 100, PerSlotMB: 100}}
+	const avail = 2048 + 115*2
+	measured := slotsFor(load(t, "scenario=/s\n"), "/s", 100, avail, recs)
+	careful := slotsFor(load(t, "scenario=/s\nparallel=conservative\n"), "/s", 100, avail, recs)
+	if careful.Slots >= measured.Slots || !strings.Contains(careful.Why, "conservative") {
+		t.Errorf("conservative: %d slots (%q) against measured %d", careful.Slots, careful.Why, measured.Slots)
+	}
+	typo := slotsFor(load(t, "scenario=/s\nparallel=fast\n"), "/s", 100, avail, recs)
+	if typo.Slots != measured.Slots || !strings.Contains(typo.Why, `parallel="fast"`) {
+		t.Errorf("an unknown word: %d slots (%q), want measured's %d and a warning", typo.Slots, typo.Why, measured.Slots)
+	}
+}
+
+// The buffers a slot runs with are the configuration's when it writes them.
+func TestTheConfigurationsBuffersAreTheSlots(t *testing.T) {
+	t.Setenv("CUBRID", "")
+	e := engineOf(load(t, "scenario=/s\ndefault.cubrid.data_buffer_size=128M\ndefault.cubrid.log_buffer_size=64M\n"))
+	if e.DataBufferMB != 128 || e.LogBufferMB != 64 {
+		t.Errorf("got %+v, want 128 and 64", e)
 	}
 }
 
@@ -35,8 +57,21 @@ func TestAWrittenSlotCountIsUsedAsWritten(t *testing.T) {
 		"parallel_slots=0\n":  1,
 		"parallel_slots=x\n":  1,
 	} {
-		if n, _ := slotsFor(load(t, body), 2, 1000); n != want {
-			t.Errorf("%q: %d slots, want %d", strings.TrimSpace(body), n, want)
+		if p := slotsFor(load(t, body), "/s", 100, 1000, nil); p.Slots != want {
+			t.Errorf("%q: %d slots, want %d", strings.TrimSpace(body), p.Slots, want)
 		}
+	}
+}
+
+// A case's longest time is evidence about the corpus only when runone.sh ran the
+// controller once; a retried case measures the timeout.
+func TestFirstAttempt(t *testing.T) {
+	one := "+ START=1\n+ elapse=66000\n+ echo 'elapse: 66000'\nflag: OK\n"
+	three := "+ START=1\n+ elapse=100431\n+ echo 'elapse: 100431'\n+ elapse=100427\n+ elapse=250\nflag: OK\n"
+	if !firstAttempt(one) {
+		t.Error("one attempt should be a first attempt")
+	}
+	if firstAttempt(three) {
+		t.Error("three attempts should not be")
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/patch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/plan"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 	"path/filepath"
 )
@@ -45,7 +46,10 @@ type Worker struct {
 	Corpus *Corpus
 	// Plan is where this worker records what each case took, so the next run can
 	// hand the long ones out first. Nil when no plan was asked for.
-	Plan    *plan.Record
+	Plan *plan.Record
+	// Meter takes what the next run on this machine is sized by (ADR-020). Nil
+	// when the run is not sizing itself.
+	Meter   *sizing.Meter
 	Channel exec.Channel
 	Queue   *dispatch.Queue
 	Sink    *result.Sink
@@ -311,6 +315,11 @@ func (w *Worker) finish(ticket dispatch.Ticket, v Verdict, console string, elaps
 	}
 
 	retrying := w.Queue.Complete(ticket, v.Success, v.HasCore)
+	// A case is its own unit here. One that needed a retry measured the retry --
+	// often a timeout -- and not how long the corpus's cases are.
+	if w.Meter != nil {
+		w.Meter.Case(ticket.Case, ticket.Case, elapsed, v.Success && ticket.Retry == 0)
+	}
 	ev := feedback.CaseStop{
 		Case:       ticket.Case,
 		EnvID:      w.envIdentify(),

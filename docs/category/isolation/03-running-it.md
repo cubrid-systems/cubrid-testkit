@@ -58,14 +58,31 @@ shows the raw result `runone.sh` is writing.
 
 ## Slots
 
-**Slots are the default.** A run whose conf does not set `parallel_slots` takes four, fewer on a machine with fewer
-CPUs or less memory than four need, and says on standard error what it chose and why:
+**Slots are the default, and the machine sizes them.** A run whose conf does not set `parallel_slots` takes the
+smallest of: the available memory, less 2 GB for everything else, divided by what one slot cost in this machine's
+own runs; one slot per CPU; four on a machine's first run, and afterwards twice the most it has run; and the count
+where a run of the same corpus was fastest, when more slots were measured to be no faster. It says on standard
+error what it chose and why:
 
 ```
-[INFO] parallel_slots is not set: 4 slots, the default
+[INFO] 12 slot(s): 12 by memory (23212 MB less 2048, at 1739 MB a slot, this machine's own runs)
 ```
 
-`parallel_slots=1` runs serially, as CTP does; any other value is used as written. Each slot has its own install
+A machine that has not run this corpus yet is sized at 1,750 MB a slot. Every complete run records what it used —
+how far available memory fell, its wall time, the case seconds, the longest case that passed on its first attempt,
+where its slots wrote — in `~/.local/state/testkit/sizing/isolation.json` (or `$XDG_STATE_HOME/testkit/sizing/`, or
+`$TESTKIT_SIZING_DIR`), and the next run on that machine is sized by the largest per-slot peak of its runs of a
+corpus at least as large, with 15% on top ([ADR-020](../../project/adr/ADR-020-sizing.md)). The file is not in the checkout and is ignored on any other
+machine. `testkit sizing isolation` prints it and what each of the three `parallel` words would decide:
+
+```
+  conservative   6 slots -- 6 by memory (23212 MB less 2048, at 3478 MB a slot, this machine's own runs), sized conservative
+* measured      12 slots -- 12 by memory (23212 MB less 2048, at 1739 MB a slot, this machine's own runs)
+  aggressive    15 slots -- 15 by memory (23212 MB less 2048, at 1391 MB a slot, this machine's own runs), sized aggressive
+```
+
+`parallel=conservative` is for a machine something else is using: it doubles the budget and never goes past what was
+run. `aggressive` finds the ceiling rather than avoiding it: 0.8 of the budget, four times what was run, and no knee. `parallel_slots=1` runs serially, as CTP does; any other value is used as written. Each slot has its own install
 overlay, its own `ctldb` and its own build of ctltool, which it makes at its first case. Measured on this machine
 ([`isolation-baseline.md`](../../project/evidence/isolation-baseline.md)):
 
@@ -88,7 +105,9 @@ controller — so slots add little CPU. Two things set the ceiling instead:
   [ADR-018](../../project/adr/ADR-018-isolation-equivalence.md)'s rules, not verdict for verdict.
 
 `scenario_disk=on` gives each slot its own layer over the cases tree, and `TESTKIT_SLOT_VOLATILE=1` makes the syncs on
-slot layers return at once; both are in [configuration](04-configuration.md).
+slot layers return at once; both are in [configuration](04-configuration.md). Volatile does not make isolation faster:
+over the whole corpus at eight slots it saved under 1% of case seconds, where sql's cases halved
+([`isolation-controller.md`](../../project/evidence/isolation-controller.md) §8).
 
 ## What it leaves behind
 

@@ -71,6 +71,13 @@ Three things bound it, and the smallest wins:
   directory does — 72 s of the 891 s of cases here, so about twelve slots is where the wall stops
   improving whatever the machine has.
 
+**The runner finds this for itself** when `parallel_slots` is unset and the run is contained
+([ADR-020](../../project/adr/ADR-020-sizing.md)). A machine's first sql run takes four slots and medium's one. Each
+run records its wall time, what a slot cost and its longest directory in `~/.local/state/testkit/sizing/`, and the
+next may go to twice the most that machine has run — until memory, the processors or the longest directory stops
+it, or until a run with more slots on the same corpus and the same disk was measured to be no faster, which is
+where it stays. `testkit sizing sql` shows the runs and the decision.
+
 Six is what this machine takes. More slots also stopped paying earlier than expected when the slots
 started one at a time; with `volatile` they start together — all four up in 27 s where one at a time
 took 4 × 26 s — because what a start waits for is the heartbeat, not the disk.

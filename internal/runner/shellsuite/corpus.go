@@ -244,6 +244,13 @@ func (c *Corpus) Usage() (used, limit int) {
 	return c.used(), c.mb
 }
 
+// Usage1 is the used half of Usage, for a caller that samples it -- a nil corpus
+// is a run whose writes are not in memory, and holds none of it.
+func (c *Corpus) Usage1() int {
+	used, _ := c.Usage()
+	return used
+}
+
 // Held is what each case directory was holding when it retired, in megabytes.
 // A copy, because the run writes it to a file after the slots have stopped and
 // the corpus may still be sampling.

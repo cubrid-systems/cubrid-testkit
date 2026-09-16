@@ -47,7 +47,8 @@ All under `[sql]`.
 
 | key | default | impact | |
 |---|---|---|---|
-| `parallel_slots` | `1` | **large** | how many cases run at once. A directory is claimed whole, so this is slots, not case-level fan-out |
+| `parallel_slots` | sized | **large** | how many cases run at once. A directory is claimed whole, so this is slots, not case-level fan-out. Unset and contained: four on a machine's first run (one for medium), then up to twice the most it has run, until memory at 2.6 GB a slot, processors, the longest directory or the knee stops it ([slots and speed](05-slots-and-speed.md#how-many-slots)). Uncontained, one |
+| `parallel` | `measured` | how the above grows | `conservative` does not grow and doubles the memory budget; `aggressive` grows four times and ignores the knee |
 | `case_patch_dir` | off | none directly | corpus changes this run carries, applied before the first case and reverted at the end. See [when a case fails](06-when-a-case-fails.md) |
 | `status_http` | off | none | the progress page. `on` is `127.0.0.1:51523`; a bare port takes every interface |
 

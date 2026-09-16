@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
 )
 
@@ -248,8 +248,12 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	// The corpus goes behind one only with scenario_disk, as for shell: without
 	// it runone.sh writes result/ and <name>.result into the cases tree, as under
 	// CTP, which is also what a comparison with CTP reads.
-	n, why := slotsFor(cfg, runtime.NumCPU(), memAvailableMB())
-	fmt.Fprintf(os.Stderr, "[INFO] %s\n", why)
+	plan := slotsFor(cfg, scenario, len(cases), sizing.MemAvailableMB(), sizing.Load(sizing.Isolation))
+	n := plan.Slots
+	fmt.Fprintf(os.Stderr, "[INFO] %d slot(s): %s\n", n, plan.Why)
+	// From before the slots open, so that the fall in available memory is theirs.
+	meter := sizing.StartMeter(sampleEvery, nil)
+	defer meter.Stop()
 	ctltool := filepath.Join(req.Home.Path, "isolation", "ctltool")
 	corpus := scenario
 	if !filepath.IsAbs(corpus) {
@@ -321,11 +325,11 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	fmt.Println("============= TEST ==================")
 	queue := dispatch.New(cases, 0)
 	opts := optionsOf(cfg)
-	board, stopBoard := openBoard(cfg, cases, slots, onDisk, filepath.Join(sink.Dir(), "feedback.log"), buildID)
+	board, stopBoard := openBoard(cfg, cases, slots, onDisk, filepath.Join(sink.Dir(), "feedback.log"), buildID, plan.Why)
 	defer stopBoard()
 	for i, s := range slots {
 		w := &worker{slot: s.Label, envID: envID, ch: s.Channel(), queue: queue, sink: sink, report: report,
-			opts: opts, board: board}
+			opts: opts, board: board, meter: meter}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -337,6 +341,9 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 
 	report.TaskStop()
 	fmt.Println("TEST COMPLETE")
+	if !continueMode && ctx.Err() == nil && errors.Join(errs...) == nil {
+		record(meter, cfg, scenario, len(slots))
+	}
 	// Before the slots go, because their directories go with them.
 	for _, s := range slots {
 		kept, err := keepBackups(filepath.Join(s.Dir, "error_backup"), guards.errorBackup, s.Label)

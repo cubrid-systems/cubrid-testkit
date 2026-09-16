@@ -1,6 +1,11 @@
 #!/bin/bash
 # Say what this machine can run at once, and why.
 #
+# It no longer decides a slot count: internal/sizing does, from this machine's
+# own runs, and `testkit sizing <suite>` prints that decision (ADR-020). What is
+# left here is what only this script measures -- the disk, the cores -- and
+# shell's scenario_ram_mb ceiling.
+#
 #   tools/sizing.sh [--measure-disk] [shell|sql] [a run's conf file]
 #
 # shell is the default. `sql` sizes the sql family -- sql and medium -- whose
@@ -262,7 +267,8 @@ if [ "$family" = sql ]; then
   say "for the run's conf and environment"
   say ""
   say "  [sql]"
-  say "  parallel_slots=${slots}"
+  say "  # parallel_slots unset: the runner sizes it from this machine's own runs (ADR-020)."
+  say "  # This machine's figures above suggest about ${slots}; testkit sizing sql says what a run will take."
   say "  case_patch_dir=<this repository>/patches/sql"
   say ""
   say "  TESTKIT_NATIVE_SQL=1 TESTKIT_CONTAIN=1"
@@ -413,11 +419,12 @@ say ""
 say "for shell.conf"
 say ""
 say "  # writes in memory -- the corpus stays read-only and the run leaves nothing behind"
-say "  parallel_slots=${ram_slots}"
+say "  # parallel_slots unset: the runner sizes it from this machine's own runs (ADR-020)."
+say "  # The ceiling below is sized for ${ram_slots} slots; testkit sizing shell says what a run will take."
 say "  scenario_ram_mb=${ceiling_mb}"
 say ""
-say "  # writes on disk -- more slots than this made it slower, measured"
-say "  # parallel_slots=${disk_slots}"
+say "  # writes on disk -- on the machine this was measured on, more than ${disk_slots} slots were slower;"
+say "  # a run finds its own machine's point and stays there"
 say ""
 say "why ${ceiling_mb} MB"
 kv "a run needs" "~${need_mb} MB (${ram_slots} slots x ${worst_mb} MB, the largest case)"

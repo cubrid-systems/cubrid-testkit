@@ -18,7 +18,7 @@ import (
 // A click on a finished case shows its block of feedback.log, which the
 // isolation module writes in a shape the page already reads: the verdict line,
 // and for a failure the diff.
-func openBoard(cfg *conf.Config, cases []string, slots []*contain.Slot, onDisk bool, feedbackLog, build string) (*status.Board, func()) {
+func openBoard(cfg *conf.Config, cases []string, slots []*contain.Slot, onDisk bool, feedbackLog, build, sized string) (*status.Board, func()) {
 	addr := status.Addr(cfg.GetOr("status_http", ""))
 	if addr == "" {
 		return nil, func() {}
@@ -44,8 +44,11 @@ func openBoard(cfg *conf.Config, cases []string, slots []*contain.Slot, onDisk b
 	}
 	board.Setup([]status.Setting{
 		{Group: "suite", Key: "task", Value: "isolation"},
-		{Group: "suite", Key: "parallel_slots", Value: fmt.Sprint(len(slots)), Default: fmt.Sprint(defaultSlots),
-			Note: "cases at once, each slot with a ctldb of its own; unset means four, fewer on a small machine"},
+		{Group: "suite", Key: "parallel_slots", Value: fmt.Sprint(len(slots)), Default: "sized",
+			Note: "cases at once, each slot with a ctldb of its own. This run: " + sized},
+		{Group: "suite", Key: "parallel", Value: orUnset(cfg.GetOr("parallel", "")), Default: "measured",
+			Note: "conservative, measured or aggressive: how an unset parallel_slots is sized from this machine's " +
+				"own runs (ADR-020)"},
 		{Group: "suite", Key: "executor", Value: "runone.sh", Note: "CTP's own script and ctltool, unchanged (ADR-007)"},
 		{Group: "suite", Key: "controller", Value: controllerName(), Default: "qactl",
 			Note: "what runone.sh runs a case with. testkit's own drops qactl's two fixed sleeps " +

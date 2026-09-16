@@ -11,6 +11,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 	"github.com/cubrid-systems/cubrid-testkit/internal/topology"
 )
@@ -31,6 +32,8 @@ type worker struct {
 	opts   options
 	// board is the status page, or nil; every method on it tolerates nil.
 	board *status.Board
+	// meter takes what the next run on this machine is sized by, or is nil.
+	meter *sizing.Meter
 }
 
 // envIdentify is what feedback records a case against: the env and the title
@@ -66,6 +69,7 @@ func (w *worker) one(ctx context.Context, ticket dispatch.Ticket) {
 	// writer, and a case's trace must not be cut into by another's.
 	lines := []string{"[TESTCASE] " + tc}
 	var v verdict
+	first := false
 	res, err := run(ctx, w.ch, runoneScript(tc, w.opts))
 	if err != nil {
 		v = verdict{items: []string{item("NOK", "Runtime error ("+err.Error()+")")}}
@@ -73,9 +77,13 @@ func (w *worker) one(ctx context.Context, ticket dispatch.Ticket) {
 		out := output(res)
 		lines = append(lines, out)
 		v = judge(out)
+		first = firstAttempt(out)
 	}
 	// Taken where CTP took it, before the diff.
 	elapsed := time.Since(start)
+	if w.meter != nil {
+		w.meter.Case(tc, tc, elapsed, v.ok && first)
+	}
 	lines = append(lines, v.items...)
 
 	diff := ""

@@ -23,7 +23,8 @@ The conf is CTP's flat `isolation.conf`: `key=value`, `#` comments, `${VAR}` exp
 | `test_category` | isolation | what feedback prints. The run directory is `result/isolation` whatever it says |
 | `test_continue_yn` | no | resume: `dispatch_tc_ALL.txt` less every `dispatch_tc_FIN_*.txt`, appending to the logs |
 | `feedback_type` | file | `file` writes `feedback.log` and `test_status.data`; `database` is not a backend here and writes the file with a warning; anything else keeps no feedback |
-| `parallel_slots` | 4, fewer on a small machine | cases at once, each slot with its own `ctldb`. Unset, the runner takes four — no more than one per CPU, and no more than the available memory holds at 1.5 GB a slot after 2 GB for everything else — and says what it chose on standard error. A value is used as written; `1` runs serially, as CTP does ([running it](03-running-it.md#slots)) |
+| `parallel_slots` | sized | cases at once, each slot with its own `ctldb`. Unset, the runner takes the smallest of what memory holds at what a slot cost in this machine's runs (1,750 MB until it has run the corpus), one per CPU, four on a first run and twice the most run since, and the count where more slots were measured not to pay; it says what it chose on standard error. A value is used as written; `1` runs serially, as CTP does ([running it](03-running-it.md#slots)) |
+| `parallel` | measured | how an unset `parallel_slots` is sized: `conservative` doubles the budget and does not grow; `aggressive` takes 0.8 of it, grows four times and ignores the knee. Anything else is `measured`, with a warning ([ADR-020](../../project/adr/ADR-020-sizing.md)) |
 | `scenario_disk` | no | puts the cases tree behind an overlay per slot, so `result/` and `<name>.result` are not written into it |
 | `status_http` | off | the status page: `on`, a port, or `host:port` |
 

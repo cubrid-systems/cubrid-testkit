@@ -28,7 +28,8 @@ These behave as they always did.
 
 | key | default | impact | |
 |---|---|---|---|
-| `parallel_slots` | `1` | **large** | how many cases run at once |
+| `parallel_slots` | sized | **large** | how many cases run at once. Unset and contained, one on a machine's first run, then up to twice the most it has run, until memory, processors or the knee — the count where more slots were measured to be no faster — stops it ([ADR-020](../../project/adr/ADR-020-sizing.md)). Uncontained, one |
+| `parallel` | `measured` | how the above grows | `conservative` does not grow and doubles the memory budget; `aggressive` grows four times and ignores the knee |
 | `scenario_ram_mb` | off | **large; can fail a run** | the corpus overlay's upper layer becomes a tmpfs of this size. See [the ceiling](05-the-ceiling.md) |
 | `scenario_ram_high_water` | `80` | protective | percent of the ceiling above which no new case starts |
 | `scenario_disk` | off | situational | every slot sees the corpus through an overlay of its own, its upper layer in the slot's directory under `TESTKIT_SLOT_ROOT`, removed with it. The corpus on disk is unchanged. What makes `TESTKIT_SLOT_VOLATILE` reach the databases a case creates in its directory. Not with `scenario_ram_mb` or a `testcase_workspace_dir` of its own; needs `TESTKIT_CONTAIN=1` |

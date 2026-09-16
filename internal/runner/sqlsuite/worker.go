@@ -13,6 +13,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/coredump"
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
+	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 )
 
@@ -29,6 +30,8 @@ type work struct {
 	// the numbers arrive out of order; each one still says where its case
 	// started.
 	started atomic.Int64
+	// meter takes what the next run on this machine is sized by, or is nil.
+	meter *sizing.Meter
 }
 
 // loop runs cases in one place until the queue is empty. An error is the
@@ -86,6 +89,13 @@ func (w *work) loop(ctx context.Context, name string, p place, q *dispatch.Queue
 		if err := w.rec.Case(c); err != nil {
 			q.Complete(t, true, false)
 			return err
+		}
+		// A directory is what a slot runs whole, so it is the unit the corpus
+		// bound needs. A case that failed on its answer took its ordinary time; one
+		// that ended in an error may have waited out a timeout, and its directory
+		// says nothing about how long the corpus's are.
+		if w.meter != nil {
+			w.meter.Case(t.Case, caseDirOf(t.Case), time.Since(c.Start), c.Err == nil)
 		}
 		w.board.Live(t.Case, "")
 		w.board.End(name, t.Case, c.Ran && c.OK && c.Err == nil)

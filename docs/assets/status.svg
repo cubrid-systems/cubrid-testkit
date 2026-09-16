@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 556" width="880" height="556" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="status-title status-desc">
 <title id="status-title">Where each of the fourteen tasks stands</title>
-<desc id="status-desc">The fourteen tasks CTP accepts, in three states. Eight are still CTP's and run as a subprocess with argv and environment reproduced byte for byte: kcc, neis05, neis08, sql_by_cci, jdbc, ha_repl, cdc_repl and webconsole. Five run natively but only when a switch names their family: shell and rqg behind TESTKIT_NATIVE=shell, sql and medium behind TESTKIT_NATIVE=sql, isolation behind TESTKIT_NATIVE=isolation. One, unittest, runs natively with nothing to opt into. A gated task moves right when its comparison against CTP clears and never moves back; unittest is already there and no ADR gates it. The gates: shell and rqg are held by ADR-013, still open, with 3,216 cases judged at develop head and the full-corpus comparison not yet cleared; sql and medium passed ADR-017 with 17,459 result files and 2,762 record files byte-identical to CTP; isolation met ADR-018, with no runner difference at one slot or four, and runs four slots by default.</desc>
+<desc id="status-desc">The fourteen tasks CTP accepts, in three states. Eight are still CTP's and run as a subprocess with argv and environment reproduced byte for byte: kcc, neis05, neis08, sql_by_cci, jdbc, ha_repl, cdc_repl and webconsole. Five run natively but only when a switch names their family: shell and rqg behind TESTKIT_NATIVE=shell, sql and medium behind TESTKIT_NATIVE=sql, isolation behind TESTKIT_NATIVE=isolation. One, unittest, runs natively with nothing to opt into. A gated task moves right when its comparison against CTP clears and never moves back; unittest is already there and no ADR gates it. The gates: shell and rqg are held by ADR-013, still open, with 3,216 cases judged at develop head and the full-corpus comparison not yet cleared; sql and medium passed ADR-017 with 17,459 result files and 2,762 record files byte-identical to CTP; isolation met ADR-018, with no runner difference at one slot or four, and runs four slots by default, reduced by CPU count and by available memory.</desc>
 <style>
   .ttl{font-size:16px;font-weight:700;fill:#1f2937}
   .sub{font-size:12px;fill:#6b7280}
@@ -81,7 +81,7 @@
 <text class="name" x="40" y="454">isolation</text>
 <text class="mm" x="168" y="454">ADR-018</text>
 <text class="ok" x="256" y="454">MET</text>
-<text class="d" x="336" y="454">No runner difference at one slot or at four; four slots by default.</text>
+<text class="d" x="336" y="454">No runner difference at one slot or at four; four slots by default, fewer on a small machine.</text>
 <text class="dk" x="336" y="470">CTP does not reproduce its own verdicts here: two CTP runs disagree on 7 of 6,772.</text>
 
 <text class="note" x="24" y="520">Seven further names — cci · dots · nbd · sysbench · tpcc · tpcw · ycsb — are ones CTP accepted and silently ignored.</text>

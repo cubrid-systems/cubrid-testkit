@@ -8,8 +8,14 @@
 - **Phase 3 진행 중** — `unittest` 네이티브. `shell`·`rqg` 는 `TESTKIT_NATIVE=shell` 뒤에서 전체 코퍼스를
   돈다(develop head 에서 3,216건 판정, 실패 32건 전부 원인 귀속). CTP 와의 전체 코퍼스 비교는 아직 통과 전
   → [parallel-shell](evidence/parallel-shell.md) §6–7
-- **Phase 4 착수** — `sql`·`medium` 네이티브, ADR-017 게이트 통과(세 저장소 모두 upstream develop head)
-  → [regression-sql](evidence/regression-sql.md)
+- **Phase 4 진행 중**
+  - `sql`·`medium` 네이티브, ADR-017 게이트 통과(세 저장소 모두 upstream develop head)
+    → [regression-sql](evidence/regression-sql.md)
+  - `isolation` 네이티브, 전체 코퍼스에서 ADR-018 게이트 충족. 케이스 실행은 CTP 의 `runone.sh` 가
+    그대로 맡고, 기본 슬롯은 4개(기계가 작으면 그보다 적게)
+    → [isolation-baseline](evidence/isolation-baseline.md)
+  - 나머지 여덟 task 는 여전히 CTP. 어느 task 가 어디서 도는지는 루트
+    [README](../../README.md#what-runs-where) 한 곳이 단일 출처다
 
 **프로젝트 방향성:** 테스트 실행 축(T)과 QA 운영 축(O)을 분리한다. 이번 마이그레이션은 축 T 만 옮기고, 축 O 는
 제외 기록 후 나중에 새 층으로 세운다 → [migration-exclusions.md](concept/migration-exclusions.md)
@@ -34,6 +40,7 @@
 - **Evidence (측정과 비교)** — 주장마다 근거. 숫자는 전부 실제 run 에서 나온다
   - [regression-shell](evidence/regression-shell.md) · [parallel-shell](evidence/parallel-shell.md) — shell
   - [sql-baseline](evidence/sql-baseline.md) · [sql-native](evidence/sql-native.md) · [regression-sql](evidence/regression-sql.md) — sql·medium (ADR-017 게이트 포함)
+  - [isolation-baseline](evidence/isolation-baseline.md) — isolation (ADR-018 게이트 포함)
   - [compare/](evidence/compare/README.md) — 정규화 후 비교하는 방법 (ADR-013)
 
 돌리는 사람을 위한 문서는 한 단계 위에 있다.

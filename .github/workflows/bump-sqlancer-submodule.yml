@@ -31,7 +31,7 @@ concurrency:
 
 env:
   BRANCH: bot/bump-sqlancer
-  SUBMODULE: ext/cubrid-sqlancer
+  SUBMODULE: extensions/cubrid-sqlancer
 
 jobs:
   bump:

@@ -122,7 +122,7 @@ fail a run rather than a way to speed one up.
 
 ### One machine, the whole corpus
 
-Sized for a 30 GB machine — run `tools/sizing.sh` before trusting these on another. Sized means
+Sized for a 30 GB machine — run `scripts/sizing.sh` before trusting these on another. Sized means
 cores that are free, not cores that are counted: on a 30 GB, 16-core machine that other work was
 also using, sixteen slots ran no faster than eight, and `sizing.sh` had said so by measuring four
 to five cores' work at once ([`parallel-shell.md` §6](../../project/evidence/parallel-shell.md)).

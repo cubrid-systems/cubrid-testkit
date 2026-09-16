@@ -68,7 +68,7 @@ feedback rule cannot help because nothing has been written yet and every slot is
 ## Sizing it
 
 ```bash
-CUBRID=/path/to/install tools/sizing.sh
+CUBRID=/path/to/install scripts/sizing.sh
 ```
 
 It reads the machine and the engine's own configuration and says what bounds the slot count —
@@ -116,4 +116,4 @@ sed -i '/^[[:space:]]*db_volume_size[[:space:]]*=/d;/^[[:space:]]*log_volume_siz
 
 `case_patch_dir` applies it into the overlay, `cubrid.conf` is restored before every case, so it
 reaches nothing else, and the corpus on disk is unchanged. See
-[`../../../patches/README.md`](../../../patches/README.md).
+[`../../../overrides/patches/README.md`](../../../overrides/patches/README.md).

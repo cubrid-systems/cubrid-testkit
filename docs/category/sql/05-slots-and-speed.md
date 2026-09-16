@@ -56,7 +56,7 @@ A 4 KB synchronous write took 5.8 ms on the first and 1.3 ms on the second. And 
 rescue a slow disk — four slots on the slow one took 572 s against 362 s on the fast one, because
 what is left after the syncs is still bandwidth.
 
-`tools/sizing.sh sql <conf>` measures the candidates on your machine and names the fastest.
+`scripts/sizing.sh sql <conf>` measures the candidates on your machine and names the fastest.
 
 ## How many slots
 

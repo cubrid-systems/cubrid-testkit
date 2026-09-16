@@ -68,7 +68,7 @@ And CTP's own: `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME`.
 
 ## Recommended settings
 
-Run `tools/sizing.sh sql <your conf>` — it measures the machine and prints these with its numbers.
+Run `scripts/sizing.sh sql <your conf>` — it measures the machine and prints these with its numbers.
 For a 30 GB, 16-core machine whose fast disk is `/data`:
 
 ```

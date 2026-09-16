@@ -35,7 +35,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 │   ├── design/            Phase 2 — 아키텍처/모듈 설계 (미착수)
 │   ├── extensions/        §6a 확장 E1~E10 (E8 은 Hybrid CI 메타 자리로 예약)
 │   └── survey/            DBMS 테스팅 생태계 조사
-├── ext/
+├── extensions/
 │   └── cubrid-sqlancer/   submodule — §6a-E3 SQLancer provider (별도 private 저장소)
 ├── go.mod                 모듈 루트는 저장소 루트다 (Go 표준 배치)
 ├── cmd/testkit/           진입점

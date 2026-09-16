@@ -25,7 +25,7 @@ const defaultSlots = 4
 // (evidence/isolation-baseline.md §2).
 const slotMB = 1500
 
-// reservedMB is left to everything else on the machine, as tools/sizing.sh
+// reservedMB is left to everything else on the machine, as scripts/sizing.sh
 // leaves it.
 const reservedMB = 2048
 

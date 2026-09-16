@@ -170,7 +170,7 @@ func TestApplyIsIdempotent(t *testing.T) {
 // trace there at all.
 func TestTheRunRecordsWhatItActuallyPatched(t *testing.T) {
 	dir := t.TempDir()
-	p := &Set{dir: "patches/shell"}
+	p := &Set{dir: "overrides/patches/shell"}
 
 	// Nothing applied, nothing written: the file's presence is itself the
 	// answer to "did this run patch anything".
@@ -181,8 +181,8 @@ func TestTheRunRecordsWhatItActuallyPatched(t *testing.T) {
 		t.Fatal("a run that patched nothing should not leave a record saying it did")
 	}
 
-	p.Applied("/c/shell/_08_shard/x/cases/x.sh", "patches/shell/_08_shard~x.patch")
-	p.Applied("/c/shell/_06_issues/y/cases/y.sh", "patches/shell/_06_issues~y.patch")
+	p.Applied("/c/shell/_08_shard/x/cases/x.sh", "overrides/patches/shell/_08_shard~x.patch")
+	p.Applied("/c/shell/_06_issues/y/cases/y.sh", "overrides/patches/shell/_06_issues~y.patch")
 	if err := p.Report(dir); err != nil {
 		t.Fatal(err)
 	}

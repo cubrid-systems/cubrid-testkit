@@ -165,7 +165,7 @@ func ParseSkipped(grepOutput, key string) []string {
 // upstream's judgement about a case, while a list of cases this machine cannot
 // run at all is a fact about the machine. Kept in one file they cannot be told
 // apart, and the machine's list can never be deleted when the machine changes.
-// See exclusions/README.md.
+// See overrides/machine-exclusions/README.md.
 //
 // Commas separate, whitespace around a name is not part of it, and an empty
 // entry is skipped rather than becoming `cat ""`.

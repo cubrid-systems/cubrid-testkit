@@ -174,7 +174,7 @@ They are no-op shell functions in `init.sh`, so the line is harmless when the ma
 filtered on. `WINDOWS_NOT_SUPPORTED` and `AIX_NOT_SUPPORTED` exist too.
 
 To skip a case by path instead, put a fragment of its path in a file and point
-`testcase_exclude_from_file` at it — see [`../../../exclusions/README.md`](../../../exclusions/README.md),
+`testcase_exclude_from_file` at it — see [`../../../overrides/machine-exclusions/README.md`](../../../overrides/machine-exclusions/README.md),
 which also explains why this machine's list is kept apart from upstream's.
 
 A file named there that does not exist stops the run. CTP read nothing from it and ran every case it

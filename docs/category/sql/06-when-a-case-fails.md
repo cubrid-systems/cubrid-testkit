@@ -101,7 +101,7 @@ nobody asked. What was patched is written to `patched.txt` in the result tree, a
 output, and shown on the page: a verdict from patched source is a claim about the patched case.
 
 The principle behind every one of them is the same — **a case says what it needs and cleans up what
-it leaves** — and [`patches/README.md`](../../../patches/README.md) says what each does and why. To
+it leaves** — and [`overrides/patches/README.md`](../../../overrides/patches/README.md) says what each does and why. To
 write one: fix the case in a copy of the corpus, run it, take the `.result` it produces as the new
 answer rather than writing one by hand, and diff both files with paths relative to the case
 directory.

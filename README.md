@@ -27,7 +27,7 @@ For engine developers and QA. Part of
 ```bash
 go build -o bin/testkit ./cmd/testkit
 
-CUBRID=/path/to/install tools/sizing.sh          # once, to size the run
+CUBRID=/path/to/install scripts/sizing.sh          # once, to size the run
 TESTKIT_CONTAIN=1 TESTKIT_NATIVE=shell testkit shell -c shell.conf
 ```
 
@@ -165,7 +165,7 @@ JUnit report and a `.result` beside every case; [`category/sql/`](docs/category/
 them.
 
 One file is this runner's own, and it is absent unless it has something to say: `patched.txt`, the
-cases that did not run as the corpus has them. See [`patches/README.md`](patches/README.md).
+cases that did not run as the corpus has them. See [`overrides/patches/README.md`](overrides/patches/README.md).
 
 ## The categories
 
@@ -295,11 +295,13 @@ internal/                cli · conf · registry · dispatch · runshell · exec
                          contain (namespaces per slot) · plan (case durations) ·
                          patch (per-case patches) · coredump (a crashed case's stack) ·
                          status (the progress page)
-patches/                 fixes carried for the corpus until upstream takes them
-exclusions/              cases this machine cannot run, each with the reason and what ends it
-tools/sizing.sh          how many slots, which disk, and how big a ceiling, for this machine
-                         (`tools/sizing.sh sql <conf>` for the sql family)
-ext/cubrid-sqlancer/     submodule — a SQLancer provider for CUBRID
+overrides/               what this run does differently from the corpus as it stands
+  patches/               fixes carried for the corpus until upstream takes them
+  machine-exclusions/    cases this machine cannot run, each with the reason and what ends it
+scripts/sizing.sh        how many slots, which disk, and how big a ceiling, for this machine
+                         (`scripts/sizing.sh sql <conf>` for the sql family)
+extensions/              separate repositories testkit will drive
+  cubrid-sqlancer/       submodule — a SQLancer provider for CUBRID
 docs/
   assets/                the diagrams these pages use
   category/              how to run each test category, and what to set

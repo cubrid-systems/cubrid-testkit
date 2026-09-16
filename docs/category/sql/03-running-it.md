@@ -53,7 +53,7 @@ data_buffer_size=512M
 log_buffer_size=256M
 ```
 
-`tools/sizing.sh sql sql.conf` measures this machine — its cores, what they deliver at once, its
+`scripts/sizing.sh sql sql.conf` measures this machine — its cores, what they deliver at once, its
 memory, and what its disk does with a synchronous write — and prints the settings it would use.
 [Slots and speed](05-slots-and-speed.md) is the reasoning behind them; [configuration](04-configuration.md)
 is every key.

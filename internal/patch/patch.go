@@ -37,10 +37,10 @@ import (
 // The name of a patch is the case's path under the scenario, flattened:
 //
 //	_06_issues/_17_1h/cbrd_20760_1/cases/cbrd_20760_1.sh
-//	  -> patches/shell/_06_issues~_17_1h~cbrd_20760_1.patch
+//	  -> overrides/patches/shell/_06_issues~_17_1h~cbrd_20760_1.patch
 //
 // Flat rather than a mirror of the corpus, because the corpus is five levels
-// deep and this set is not: `ls patches/shell` should show everything a run
+// deep and this set is not: `ls overrides/patches/shell` should show everything a run
 // carries, on one screen. Two segments come out on the way -- "cases", which
 // every case has, and a file name that repeats its directory, which almost every
 // case has. Nothing collides: a case always lives under cases/, so no case maps
@@ -53,7 +53,7 @@ import (
 // reverts it after, sql applies the run's before the first case and reverts them
 // at the end, because its slots share one corpus.
 type Set struct {
-	// dir is the category root, e.g. patches/shell.
+	// dir is the category root, e.g. overrides/patches/shell.
 	dir string
 	// byCase maps a case script to the patch file for it.
 	byCase map[string]string
@@ -268,7 +268,7 @@ func (p *Set) Report(dir string) error {
 	sort.Strings(names)
 	var b strings.Builder
 	b.WriteString("# Cases this run did not execute as the corpus has them.\n")
-	b.WriteString("# Their verdicts are about the patched case. See patches/README.md.\n")
+	b.WriteString("# Their verdicts are about the patched case. See overrides/patches/README.md.\n")
 	for _, c := range names {
 		fmt.Fprintf(&b, "%s\t%s\n", c, p.applied[c])
 	}

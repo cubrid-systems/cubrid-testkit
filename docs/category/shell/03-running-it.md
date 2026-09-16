@@ -41,7 +41,7 @@ status_http=on
 EOF
 
 # 4. size the machine before asking for more slots than it has
-CUBRID=$CUBRID tools/sizing.sh
+CUBRID=$CUBRID scripts/sizing.sh
 
 # 5. run
 TESTKIT_CONTAIN=1 TESTKIT_NATIVE=shell bin/testkit shell -c shell.conf

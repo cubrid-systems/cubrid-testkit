@@ -231,7 +231,7 @@ The same corpus, same everything, at 16 slots, stopped after 1,137 cases:
 | 8 | ~35 | 2.1 GB | 16.8 GB |
 | 16 | ~34, falling to 28 | 3.2 GB | 13.2 GB |
 
-`tools/sizing.sh` had already said why: this machine delivers **4–5 cores' work at once** of the 16
+`scripts/sizing.sh` had already said why: this machine delivers **4–5 cores' work at once** of the 16
 it counts, because other work runs on it. Doubling the slots doubles the waiting. The dirty-page
 limit is the other wall — at 16 slots the run sits against `dirty_ratio`, where a write blocks and
 the sync avoidance stops paying. So the answer to "does volatile let us raise the slot count" is
@@ -247,7 +247,7 @@ Re-run alone, one slot, no volatile, they split three ways:
 | reproduce alone | 7 | counters, page counts and statistics: `cbrd_20145_1` (`Num_page_locks_acquired` 27 vs 25), `cbrd_20149_xasl`, `cbrd_24644`, `bug_bts_11649`, `bug_bts_8934_3`, `bug_bts_9411_5`, `CUBRID_LANG_EUCKR`. Engine and answers are both at develop head, so this is upstream's to settle |
 | unstable on their own | 1 | `cbrd_25080` failed 4 of 5 runs **alone**: the optimizer picks `temp(order by)` over the index's order, a cost decision, and costs come from the sampled statistics `CBRD-26959` introduced |
 | not reproduced in a small tree | 1 | `cbrd_23732` passes alone and at 8 slots in a 9-case tree; it fails only in the full run |
-| the machine's own | 2 | `cbrd_24911`, `cbrd_26501` drive CUBRID Manager, which this machine cannot build. Now on `exclusions/no-cubrid-manager.txt` |
+| the machine's own | 2 | `cbrd_24911`, `cbrd_26501` drive CUBRID Manager, which this machine cannot build. Now on `overrides/machine-exclusions/no-cubrid-manager.txt` |
 | timing and state | the rest | empty variables in comparisons, an `expect` pager interaction, a `sleep` loop's log |
 
 **A wrong turn worth recording.** The first read blamed the 16-slot load, because the failures

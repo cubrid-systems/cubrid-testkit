@@ -469,7 +469,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 	// perSlotMB is the floor a server measures at this suite's settings -- 157
 	// MB that no parameter reaches, plus a quarter of the buffers. It is a
 	// reserve rather than a prediction: a case's own working set is larger and
-	// is not knowable here. tools/sizing.sh computes the figure properly.
+	// is not knowable here. scripts/sizing.sh computes the figure properly.
 	const perSlotMB = 175
 	if _, limit := corpus.Usage(); limit > 0 {
 		reserve := slots * perSlotMB
@@ -480,7 +480,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 				"running can fill the ceiling, and a run that reaches it meets the OOM killer "+
 				"rather than the gate.\n", highWater)
 			if room := avail - reserve; room > 0 {
-				fmt.Printf("[WARN]   A ceiling at or below %d MB fits. tools/sizing.sh sizes it "+
+				fmt.Printf("[WARN]   A ceiling at or below %d MB fits. scripts/sizing.sh sizes it "+
 					"from the machine.\n", room)
 			}
 		}
@@ -850,7 +850,7 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 	// reason. The corpus's own daily_regression list is upstream's judgement
 	// about a case; a list of cases this machine cannot run is a fact about the
 	// machine, and it has to be readable and deletable on its own -- see
-	// exclusions/README.md. CTP took a single path and that still works.
+	// overrides/machine-exclusions/README.md. CTP took a single path and that still works.
 	if files := ExcludeFiles(cfg.GetOr("testcase_exclude_from_file", "")); len(files) > 0 {
 		var patterns []string
 		for _, file := range files {

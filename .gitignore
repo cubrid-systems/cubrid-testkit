@@ -1,73 +1,25 @@
-# Java
-*.class
-*.jar
-*.war
-*.ear
-*.nar
+# Build output
+/bin/
+/testkit
 
-# Maven
-target/
-pom.xml.tag
-pom.xml.releaseBackup
-pom.xml.versionsBackup
-pom.xml.next
-release.properties
-dependency-reduced-pom.xml
-buildNumber.properties
-.mvn/timing.properties
-.mvn/wrapper/maven-wrapper.jar
+# Go
+*.test
+*.out
+coverage.*
 
-# Gradle
-build/
-.gradle/
-gradle-app.setting
-!gradle-wrapper.jar
-!gradle-wrapper.properties
-
-# Ant
-dist/
-
-# IntelliJ IDEA
+# Editors
 .idea/
-*.iml
-*.iws
-*.ipr
-out/
-
-# Eclipse
-.project
-.classpath
-.settings/
-.metadata
-bin/
-tmp/
-*.tmp
-*.bak
-*.swp
-*~.nib
-local.properties
-
-# VS Code
 .vscode/
+*.swp
+*.swo
 
-# macOS
+# OS
 .DS_Store
-.AppleDouble
-.LSOverride
+Thumbs.db
 
 # Logs
 *.log
 logs/
 
-# Vim
-*.swp
-*.swo
-
-# OS
-Thumbs.db
-ehthumbs.db
-
+# Tooling state
 .omc/
-
-# build output
-/testkit

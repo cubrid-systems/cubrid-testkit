@@ -123,6 +123,75 @@ same two rows, and won it on the retry (`isolation-baseline.md` §4). A faster c
 
 **The fix is a wait** for the client that takes the snapshot, before the others commit.
 
+### 4. Two clients released by one commit
+
+`_04_RepeatableRead_ReadCommitted/partition_table/range/with_index/unique_with_key/update_insert_01_1_complex.ctl:45-53`
+
+```
+C2: insert into t values(11,'abc');   -- blocked on C1's update to 11
+MC: wait until C2 blocked;
+C3: insert into t values(1,'abc');    -- blocked on C1's insert of 1
+MC: wait until C3 blocked;
+C1: commit;
+MC: wait until C1 ready;
+MC: wait until C2 ready;
+```
+
+Both clients are released by the same commit and both fail on a unique key. The waits are there, and they
+order nothing that is printed: the two errors come out in the order the controller reads them from two clients
+that are running at the same time. The answer holds C3's (`key: {1, 'abc'}`, partition `p1`) before C2's
+(`{11, 'abc'}`, `p2`); testkit's controller printed C2's first, alone, three times out of three.
+
+The case already allows both orders — `update_insert_01_1_complex.answer1` holds C2's error first — but that
+file was not updated when the class names gained their owner (`t__p__p2` against `public.t__p__p2`), so it
+matches nothing. With `public.` put in front of the two class names it is byte-identical to all three of
+testkit's results.
+
+**The fix is the second answer**, with `public.` in the two class names.
+
+## Found at eight and fourteen slots
+
+The four-slot run above is where the 28 came from. Three more whole-corpus runs with testkit's controller —
+eight slots, fourteen, and eight with volatile overlays (`isolation-controller.md` §8) — failed five cases that
+are not among its 40. Each went through rule 3 the same way, with every attempt's result kept
+(`rule3-later.sh`):
+
+| case | failed at | alone, ctltool | alone, testkit | rule 3 | kind |
+|---|---|---|---|---|---|
+| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | 8, 14, 8 volatile | OK,OK,OK | NOK,NOK,NOK | **runner difference** | 3 |
+| `_04_RepeatableRead_ReadCommitted/partition_table/range/with_index/unique_with_key/update_insert_01_1_complex` | 8 volatile | OK,OK,OK | NOK,NOK,NOK | **runner difference** | 4 |
+| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_02_5` | 14, 8 volatile | OK,OK,OK | OK,NOK,NOK | unstable alone | 3 |
+| `_01_ReadCommitted/index_column/filter_index/basic_sql/insert_select_16` | 8 volatile | OK,OK,OK | OK,OK,OK | both pass alone | 3 |
+| `_01_ReadCommitted/catalog/db_index_04` | 8 volatile | OK,OK,OK | OK,OK,OK | both pass alone | 2 |
+
+Two more runner differences, and one of them is not a new case: the `_06_features` `insert_insert_20` is
+`_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` with
+`with online parallel 7` on its `create unique index` (line 31), and it fails the same way. The other three
+are the same kinds, lost less often.
+
+**`insert_insert_20`** (`:40-43`). C1's `insert … select … where … (select sleep(1)) = 0` is the statement
+whose snapshot matters, and C2's `insert into t values(20,'b')` and its `commit` are sent with nothing waiting
+for C1 to have taken it. Under ctltool's controller C1 copies 4 rows; under testkit's, C2 has committed first
+and C1 copies 5. C1 is REPEATABLE READ, so **the fix is for C1 to take its snapshot in a statement of its own**
+— a `select` and a `MC: wait until C1 ready;` before line 40.
+
+**`delete_select_02_5`** (`:70-76`). C6's `SELECT col,AVG(id),sleep(3) …` and then, with no wait, C3's
+`DELETE … BETWEEN 10100 AND 10150` and its `commit`. In the two failing attempts both of C6's selects average
+higher — `1.453440e+04` where the answer has `1.450500e+04` for `'0'`, which is the average of the answer's 900
+ids for `'0'` without the six that C3 deletes (`10100`, `10110` … `10150`). C3 had committed before C6 took its
+snapshot. Every client is REPEATABLE READ; **the fix is the same**: C6 takes its snapshot before line 72.
+
+**`insert_select_16`** (`:63-68`). C6, READ COMMITTED, selects with `(select sleep(1)=0)<>0`; C3 inserts
+`(8,'cc')` at line 64 and commits at line 68, while C6 may still be sleeping. In the eight-slot volatile run
+C6's result had `8 'cc'` — five rows for the answer's four. **The fix is a wait for C6 before line
+64**, and the answer's lines reordered to match, since C3's `1 row affected` then prints after C6's rows.
+
+**`db_index_04`** (`:36-39`) is `db_index_key_04`'s kind exactly: `MC: wait until C1 ready;` between C2's
+`alter table tb2 drop constraint fk_tb2_id_col` and C3's `alter table tb1 drop constraint pk_tb1_id_col` names
+a client with nothing outstanding. In all five attempts of the volatile run C3 went first, failed on the
+foreign key C2 had not yet dropped, and `MC: wait until C2 ready;` waited out the attempt. **The fix is the
+wait at line 37 naming C2.** (`full-1` failed it too, differently: a catalog listing in another order.)
+
 ## What this runner does about it meanwhile
 
 `TESTKIT_ISOLATION_CTL` stays off. Without it a run is ADR-007's — ctltool's `qactl`, unchanged — so nothing in

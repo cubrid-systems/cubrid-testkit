@@ -6,7 +6,7 @@
   machine or read from source.
 - **Trees:** engine `cubrid/cubrid` `f1ae86ff7` · cases `cubrid/cubrid-testcases` `6ab786aa9` · CTP
   `cubrid/cubrid-testtools` `a1bec87`, in the `regr-iso` sandbox (`isolation-baseline.md` §1).
-- **Status:** §1–§3 done. §4 is the gate, and it has not been run.
+- **Status:** §1–§8 done. The gate (§7) has been run and does not pass.
 
 ---
 
@@ -316,10 +316,107 @@ own `MC: sleep`, its lock waits and its timeouts — nothing a controller can sh
 of the time. The tail also grew: the 40 failures spend 1,539 s of it against the 84 s the 14 earlier failures
 spent, because a failing case uses all five attempts and some of them wait a hundred seconds first.
 
-## 8. What is left
+## 8. More slots, and a volatile layer
+
+The same controller over the whole corpus at four, eight and fourteen slots, and at eight with the slots'
+overlays mounted volatile (`TESTKIT_SLOT_VOLATILE=1`). The disk is the slow one: 5–8 ms for a synchronous 4 KB
+write, and `/var/tmp` on this machine is no faster, so a slot root elsewhere was not tried.
+
+| | 4 slots | 8 slots | 14 slots | 8 slots, volatile |
+|---|---:|---:|---:|---:|
+| wall | 2,509 s | 1,239 s | **797 s** | 1,632 s |
+| case seconds | 9,823 | 9,591 | 10,473 | 11,899 |
+| case seconds, without the hangs below | 9,093 | 9,101 | 9,899 | 9,025 |
+| NOK | 40 | 32 | 30 | 36 |
+| cases that needed a second attempt | 56 | 44 | 47 | 65 |
+| peak, the run's processes' resident size | — | 11,381 MB | 17,738 MB | 11,739 MB |
+| peak, the fall in available memory | — | — | 18,631 MB, **1,330 a slot** | 12,106 MB, **1,513 a slot** |
+| least available | — | — | 2,033 MB | 12,430 MB |
+
+"Without the hangs" leaves out, in all four runs, the twelve cases that took at least a minute and at least five
+times their fastest time in the four.
+
+**Volatile buys isolation nothing.** Without the hangs, eight volatile slots spent 9,025 case seconds against
+9,101 — under 1%. A case's time is its sleeps, its lock waits and its round trips to the clients, not the
+database's writes; the sql family's factor of two under volatile does not carry over.
+
+**The volatile run was slower because of its hangs.** Five cases took 2,508 s, 21% of its case seconds.
+`_01_ReadCommitted/catalog/db_index_04.ctl` alone held a slot for **1,501 s** of the run's 1,632: five attempts,
+each ended by `timeout3.sh` at 300 s. In each, C3's `alter table tb1 drop constraint pk_tb1_id_col` fails on the
+foreign key that C2's `alter table tb2 drop constraint fk_tb2_id_col`, sent just before it, was to drop — the
+wait between them names C1, which has nothing outstanding — and then `MC: wait until C2 ready;` gives up after a
+hundred seconds and the attempt runs out its time. It is kind 2 of `isolation-corpus-races.md`, and the cases
+that hang change from run to run:
+
+| run | cases that hung | seconds |
+|---|---|---:|
+| 4 slots | 4 — `insert_insert_01`, `delete_insert_12`, `delete_select_02`, `create_multiple_index_02` | 684 |
+| 8 slots | 1 — `update_update_17` | 301 |
+| 14 slots | 4 — `delete_insert_02`, `insert_insert_03`, `delete_select_02`, `delete_select_02_5` | 569 |
+| 8 slots, volatile | 5 — `db_index_04`, `db_trig_04`, two `insert_insert_01`, `delete_insert_02` | 2,508 |
+
+Ten of the fourteen pass on a later attempt, so they are not in the NOK column. One of the twelve cases,
+`_02_RepeatableRead/index_column/common_index/aggregate/delete_select_02.ctl`, is among the 25 of §7. So is the
+longest case of three of the four runs, `_01_ReadCommitted/catalog/db_index_key_04.ctl` — 502 s, and 302 s at
+fourteen slots — whose failing attempts each wait a hundred seconds for `C3 blocked`.
+
+**What the hangs were.** Every attempt of the fourteen, read from the worker logs (`test_local.log` keeps each
+attempt's `elapse` and what the controller said), falls into four groups:
+
+| what gave up | cases (run) | the attempts |
+|---|---|---|
+| `wait until Cn blocked` on the statement that **closes a lock cycle** | `_01…/primary_key_column/basic_sql/delete_insert_12` (4) `:49-50`, `_01…/primary_key_column/basic_sql/delete_insert_02` (14) `:46-47`, `_01…/index_column/common_index/basic_sql/delete_insert_02` (8 volatile) `:47-48`, `_05…/primary_key_column/basic_sql/insert_insert_03` (14) `:47-48` | 100 s ending in `ERROR! Client n is ready.`, then a pass in 0–3 s |
+| `wait until Cn blocked` with **nothing ordering the lock** it expects | `_01…/catalog/db_trig_04` (8 volatile) `:34-41`, `_06…/normal_index/create_multiple_index_02` (4) | 100 s ending in `ERROR! Client n is ready.` — three attempts of `db_trig_04`, one of the other — then a pass |
+| `wait until Cn ready` on the client that **lost a race** and stays blocked | `_01…/composite_index/basic_sql/update_update_17` (8) `:49-50`, `_01…/catalog/db_index_04` (8 volatile) `:36-39`, `_02…` and `_05…/partition_table/range/with_index/unique_with_key/insert_insert_01` (4; 8 volatile, both) `:35-40` | `WARNING! Client 2 was not ready after waiting 100 seconds.`, then `timeout3.sh` at 300 s |
+| nothing — a **failing case** whose attempts are 35–37 s each | `_02…/aggregate/delete_select_02` (4, 14), `_02…/aggregate/delete_select_02_5` (14) | five NOKs, no warning |
+
+- **A lock cycle.** One client's statement waits on the other's, then the other's waits on the first, and the
+  case waits for the second one blocked — in three of the four before `MC: pause for deadlock resolution;`,
+  in `delete_insert_12` with no pause. The server looks for cycles every second (`Run Deadlock interval = 1.00`
+  in the lock dump). The traces fit a detector that resolved the cycle before the controller saw the client
+  blocked: the client is ready, and in two of them it is ready with `Operation would have caused one or more
+  unique constraint violations` on the key the other client's rolled-back delete had removed.
+- **Nothing ordering the lock.** `db_trig_04`: C2's `DROP TRIGGER tt1_delete` is blocked on C1's; C1 commits,
+  and `MC: wait until C1 ready;` is followed at once by C3's insert into `tt1` and `MC: wait until C3 blocked;` —
+  nothing waits for C2 to have taken the lock C3 is to wait on. That is kind 2; the fix is a
+  `MC: wait until C2 ready;` before line 40. `create_multiple_index_02`: every lock in the dump at the failure is held by
+  one transaction (`Tran_index = 2`, among them a `SCH_M_LOCK` with count 9); which of the file's two
+  `wait until C2 blocked` gave up, and why, is **not determined** from the log.
+- **A lost race.** `update_update_17` sends C2's and C3's updates with no wait between them (kind 1). The trace
+  fits C3 having queued first: C1's commit releases it, C2 stays blocked behind it, and `wait until C2 ready`
+  never comes true.
+  `db_index_04` is the kind 2 case above. The two `insert_insert_01` are different: C2 and C3 are ordered by
+  their waits, both blocked on C1's key, and C1's `rollback` releases both — the case needs C2 to get the key.
+  **They hang under ctltool's controller too**: `full-2` spent 300 s on two attempts of each, `tk-full-1` on one
+  and three, `tk-full-p4` on one of each. No wait in the language can decide which of two released clients
+  goes first.
+- **Not a hang.** The two `delete_select_02` cases take 35–37 s an attempt when they pass as well — their
+  `MC: sleep` and `sleep()` calls — and failed all five; one is among the 25 of §7 and the other is in the same
+  document's later section.
+
+**So the corpus's longest case is not 502 s.** The longest case that passed on its first attempt is 64–67 s in
+every run — `_01_ReadCommitted/index_column/common_index/aggregate/max/delete_select_01_2.ctl`. What a hang
+costs is set by `runone.sh`'s attempts and `timeout3.sh`'s limit — five at 300 s here, 1,500 s for one slot —
+and no slot count changes it.
+
+**Fourteen slots cost each case 9%.** Without the hangs, case seconds rose from 9,101 at eight slots to 9,899 at
+fourteen, most of it outside the controller — the rest of `runone.sh`, its `sed`, `find`, `diff` and
+`clean.sh`, went from 1,239 s to 1,889 s — on sixteen processors. Wall still fell to 797 s: 36% below eight slots for 75% more slots.
+
+**What a slot costs in memory.** The fall in `MemAvailable` is 3–5% above the sum of the run's resident sizes,
+which does not see what the kernel holds for those processes, and it is the quantity a slot count is divided
+out of — so it is what `internal/sizing` records (ADR-020). Per slot the cost falls as slots are added, resident
+size 1,422 MB a slot at eight and 1,267 at fourteen, so a budget taken from an eight-slot run is careful at
+fourteen. At fourteen slots the machine kept 2,033 MB, just under the 2,048 MB `internal/sizing` reserves.
+
+## 9. What is left
 
 - The 25 are upstream's (`isolation-corpus-races.md`). Until they are fixed a whole-corpus run under this
   controller reports them, and `TESTKIT_ISOLATION_CTL` stays off by default.
+- The cases of §8 that hang and then pass on a later attempt are not in that report — rule 3 was run on failures
+  only — and cost wall time rather than verdicts. Two of the four groups are its kinds 1 and 2 and have the same
+  fixes; the lock-cycle group is a race with the deadlock detector, which a controller that looks sooner loses
+  less, not more; and the two `insert_insert_01` hang under ctltool's controller as well.
 - ADR-018's rule 3 was written when both runners used the same executor, so any separation meant the runner.
   It now separates a runner that is faster from a corpus that depends on the old speed. Whether the rule should
   say so is ADR-018's to decide, not this document's.

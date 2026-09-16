@@ -9,6 +9,8 @@ and says which corpus. It does not say how to *run* it, and at roughly 18
 seconds a case on each runner the whole corpus is somewhere between thirty and
 a hundred hours. That gap is what these four files fill.
 
+![How the whole corpus is compared: shards.sh cuts the corpus into shards, largest first; each shard runs on CTP and on testkit, with shard-clean.sh putting the tree back in between; compare.sh writes a report ending in COMPLETE clean or COMPLETE dirty, the unmatched lines go under NEW, and a completed shard is skipped on resume.](../../../assets/compare.svg)
+
 ```
 shards.sh       the corpus, cut into units of work and of resume
 shard.sh        one unit: run both runners, keep both trees, compare them

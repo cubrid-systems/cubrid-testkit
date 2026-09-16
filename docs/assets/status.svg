@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 556" width="880" height="556" font-family="Helvetica, Arial, sans-serif" role="img" aria-labelledby="status-title status-desc">
+<title id="status-title">Where each of the fourteen tasks stands</title>
+<desc id="status-desc">The fourteen tasks CTP accepts, in three states. Eight are still CTP's and run as a subprocess with argv and environment reproduced byte for byte: kcc, neis05, neis08, sql_by_cci, jdbc, ha_repl, cdc_repl and webconsole. Five run natively but only when a switch names their family: shell and rqg behind TESTKIT_NATIVE=shell, sql and medium behind TESTKIT_NATIVE=sql, isolation behind TESTKIT_NATIVE=isolation. One, unittest, runs natively with nothing to opt into. A gated task moves right when its comparison against CTP clears and never moves back; unittest is already there and no ADR gates it. The gates: shell and rqg are held by ADR-013, still open, with 3,216 cases judged at develop head and the full-corpus comparison not yet cleared; sql and medium passed ADR-017 with 17,459 result files and 2,762 record files byte-identical to CTP; isolation met ADR-018, with no runner difference at one slot or four, and runs four slots by default.</desc>
+<style>
+  .ttl{font-size:16px;font-weight:700;fill:#1f2937}
+  .sub{font-size:12px;fill:#6b7280}
+  .eye{font-size:8px;font-weight:700;fill:#6b7280;letter-spacing:1px}
+  .eye-g{font-size:8px;font-weight:700;fill:#1a7f37;letter-spacing:1px}
+  .eye-b{font-size:8px;font-weight:700;fill:#2563eb;letter-spacing:1px}
+  .name{font-size:12px;font-weight:700;fill:#1f2937}
+  .d{font-size:12px;fill:#6b7280}
+  .dk{font-size:12px;fill:#1f2937}
+  .m{font-size:12px;fill:#1f2937;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mb{font-size:12px;fill:#2563eb;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .mm{font-size:12px;fill:#6b7280;font-family:"SFMono-Regular",Menlo,Consolas,monospace}
+  .ok{font-size:11px;font-weight:700;fill:#1a7f37;letter-spacing:1px}
+  .open{font-size:11px;font-weight:700;fill:#9a6700;letter-spacing:1px}
+  .note{font-size:12px;fill:#9ca3af}
+  .wire{fill:none;stroke:#6b7280;stroke-width:1.2}
+</style>
+<defs>
+  <marker id="status-arrow" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6b7280"/></marker>
+</defs>
+<rect x="0" y="0" width="880" height="556" fill="#ffffff"/>
+
+<text class="ttl" x="24" y="32">Fourteen tasks, three states — and one switch between the second and the third</text>
+<text class="sub" x="24" y="52">A gated task moves right when its comparison against CTP clears, and never moves back. unittest is already there: no ADR gates it.</text>
+
+<!-- connectors first, so boxes sit on top -->
+<path class="wire" d="M264,206 H296" marker-end="url(#status-arrow)"/>
+<path class="wire" d="M584,206 H616" marker-end="url(#status-arrow)"/>
+
+<!-- still CTP's -->
+<rect x="24" y="116" width="240" height="180" rx="6" fill="#f9fafb" stroke="#9ca3af" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text class="eye" x="40" y="136">STILL CTP&#8217;S — SUBPROCESS</text>
+<text class="name" x="40" y="158">eight tasks, untouched</text>
+<text class="m" x="40" y="184">kcc · neis05 · neis08</text>
+<text class="m" x="40" y="202">sql_by_cci · jdbc</text>
+<text class="m" x="40" y="220">ha_repl · cdc_repl</text>
+<text class="m" x="40" y="238">webconsole</text>
+<text class="d" x="40" y="264">argv and env byte for byte</text>
+<text class="d" x="40" y="280">as CTP would have built them</text>
+
+<!-- native, behind a switch -->
+<rect x="312" y="116" width="272" height="180" rx="6" fill="#f0fdf4" stroke="#1a7f37" stroke-width="1.2"/>
+<text class="eye-g" x="328" y="136">NATIVE — BUT YOU MUST ASK FOR IT</text>
+<text class="name" x="328" y="158">five tasks, opt-in</text>
+<text class="m" x="328" y="184">shell · rqg</text>
+<text class="mm" x="328" y="200">TESTKIT_NATIVE=shell</text>
+<text class="m" x="328" y="226">sql · medium</text>
+<text class="mm" x="328" y="242">TESTKIT_NATIVE=sql</text>
+<text class="m" x="328" y="268">isolation</text>
+<text class="mm" x="328" y="284">TESTKIT_NATIVE=isolation</text>
+
+<!-- native by default -->
+<rect x="616" y="116" width="240" height="180" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="1.4"/>
+<text class="eye-b" x="632" y="136">NATIVE — NOTHING TO SET</text>
+<text class="name" x="632" y="158">one task, landed</text>
+<text class="m" x="632" y="184">unittest</text>
+<text class="d" x="632" y="212">No switch, no flag. It is</text>
+<text class="d" x="632" y="228">simply what runs, and the</text>
+<text class="d" x="632" y="244">output cannot tell you so.</text>
+<text class="d" x="632" y="272">This is where the other</text>
+<text class="d" x="632" y="288">five are headed.</text>
+
+<!-- the gate -->
+<rect x="24" y="324" width="832" height="168" rx="6" fill="#ffffff" stroke="#d1d5db" stroke-width="1"/>
+<text class="eye" x="40" y="344">WHAT EACH SWITCH IS WAITING FOR — THE GATE IS WHAT EARNS THE MOVE RIGHT</text>
+
+<text class="name" x="40" y="374">shell · rqg</text>
+<text class="mm" x="168" y="374">ADR-013</text>
+<text class="open" x="256" y="374">OPEN</text>
+<text class="d" x="336" y="374">3,216 cases judged at develop head, every one of the 32 failures attributed.</text>
+<text class="dk" x="336" y="390">The full-corpus comparison has not cleared. That is the gate.</text>
+
+<text class="name" x="40" y="422">sql · medium</text>
+<text class="mm" x="168" y="422">ADR-017</text>
+<text class="ok" x="256" y="422">PASSED</text>
+<text class="d" x="336" y="422">17,459 .result and 2,762 record files byte-identical to a clean CTP run.</text>
+
+<text class="name" x="40" y="454">isolation</text>
+<text class="mm" x="168" y="454">ADR-018</text>
+<text class="ok" x="256" y="454">MET</text>
+<text class="d" x="336" y="454">No runner difference at one slot or at four; four slots by default.</text>
+<text class="dk" x="336" y="470">CTP does not reproduce its own verdicts here: two CTP runs disagree on 7 of 6,772.</text>
+
+<text class="note" x="24" y="520">Seven further names — cci · dots · nbd · sysbench · tpcc · tpcw · ycsb — are ones CTP accepted and silently ignored.</text>
+<text class="note" x="24" y="536">They now say they are retired, and the next task still runs.</text>
+</svg>

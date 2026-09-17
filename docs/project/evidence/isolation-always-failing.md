@@ -5,7 +5,8 @@
   `category/isolation/05-when-a-case-fails.md` lists as "cases that fail everywhere" and this project had only
   said were "the engine's or the corpus's, not the runner's". One is an engine crash. Five are races in the
   case, four of them the same race. One is a race the runner decides, and this runner wins it.
-- **For:** upstream, except where it says otherwise.
+- **For:** upstream, except where it says otherwise. The crash of §1 is upstream's `CBRD-27407`, already
+  reported and still open; §2's four cases and §3 are the corpus's; §4 is this project's own.
 - **Trees:** engine `cubrid/cubrid` `f1ae86ff7` · cases `cubrid/cubrid-testcases` `6ab786aa9` · CTP
   `cubrid/cubrid-testtools` `a1bec87`, in the `regr-iso` sandbox (`isolation-baseline.md` §1).
 - **How:** `always-fail.sh` — each case alone, three times under ctltool's `qactl` and three under testkit's
@@ -77,10 +78,22 @@ under `$ctlpath`, `$CUBRID` and the case directory, and for `FATAL ERROR` in `$C
 line. The case is reported as an ordinary diff, with no core and no fatal error — which is what
 `isolation-baseline.md` §4 recorded of it.
 
-**Not determined:** which engine change, if any, introduced it. `query_aggregate.cpp`'s last change is
-`7749f4ff8` (2026-09-09, *CBRD-27178 Improve SUM/AVG performance with a resident sum accumulator*), which
-edited the loop below the crashing line but not the line itself (`git blame`: `:2974` is from 2019). No older
-engine was built to compare.
+**Upstream knows: it is `CBRD-27407`, and it is not fixed.** QA reported it on 2026-09-10 from this very case,
+with the same stack and the same three frames. The ticket is *Confirmed*, *Unresolved*, targeted at guava. The
+reporter suspected `CBRD-27178` (`7749f4ff8`, which is why the blame above is worth recording: `:2974` is from
+2019 and that commit edited the loop below it, not the line); the assignee answered that the defect was already
+in develop and that `CBRD-27326` (`7355bcec7`, 2026-09-09, *Lower the parallel scan entry threshold to 4MB*)
+merely exposed it — the threshold change is in this build. **That explains the reductions above**: at 100,000
+rows a partition's scan is parallel and its worker's partial list is merged into the main one, which
+`qfile_copy_list_id` leaves closed with an emptied tuple descriptor; at 10,000 it is not parallel, and with no
+partitions there is no merge.
+
+The fix proposed for it — `#7917`, reopening the partial list in `qexec_groupby` before the main hash table is
+spilled into it — was **closed on 2026-09-15 without being merged**, and upstream `develop` at `9aabaa226`
+(2026-09-17) still does not contain it. So this case fails, and crashes a server, on develop today.
+
+**What this adds to the ticket:** the second client and the `reorganize partition` are not needed (§1's table),
+and CTP does not see the crash at all (below).
 
 ## 2. Four cases where two clients are released by one lock demotion
 

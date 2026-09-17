@@ -329,7 +329,8 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	defer stopBoard()
 	for i, s := range slots {
 		w := &worker{slot: s.Label, envID: envID, ch: s.Channel(), queue: queue, sink: sink, report: report,
-			opts: opts, board: board, meter: meter, crashes: map[string]bool{}}
+			opts: opts, board: board, meter: meter, ctltool: ctltool,
+			crashes: map[string]bool{}, cores: map[string]bool{}, fatals: map[string]int{}}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

@@ -43,12 +43,15 @@ func TestTheLastArgumentIsAClientProgramNotADatabase(t *testing.T) {
 }
 
 func TestOptionsAreReadAsContextReadThem(t *testing.T) {
+	// backup_core_file_yn is the one default that is not CTP's: `-n` turns off
+	// runone.sh's core check as well as its backup, and the check is this
+	// runner's own (ADR-021).
 	defaults := load(t, "")
-	if o := optionsOf(defaults); o.retries != 0 || o.timeout != "2147483647" || o.client != "qacsql" || !o.backupCore {
+	if o := optionsOf(defaults); o.retries != 0 || o.timeout != "2147483647" || o.client != "qacsql" || o.backupCore {
 		t.Errorf("defaults = %+v", o)
 	}
-	set := load(t, "testcase_retry_num=4\ntestcase_timeout_in_secs=300\nbackup_core_file_yn=no\ncubrid_testdb_name=mysql\n")
-	if o := optionsOf(set); o.retries != 4 || o.timeout != "300" || o.client != "qamysql" || o.backupCore {
+	set := load(t, "testcase_retry_num=4\ntestcase_timeout_in_secs=300\nbackup_core_file_yn=yes\ncubrid_testdb_name=mysql\n")
+	if o := optionsOf(set); o.retries != 4 || o.timeout != "300" || o.client != "qamysql" || !o.backupCore {
 		t.Errorf("configured = %+v", o)
 	}
 	if o := optionsOf(load(t, "testcase_retry_num=-3\n")); o.retries != 0 {

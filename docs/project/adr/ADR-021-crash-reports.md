@@ -29,19 +29,28 @@ against a database that has just recovered.
 
 ## Decision
 
-**A run looks for the engine's crash reports itself, and a new one fails the case it appeared under.**
+**A run looks for what a dying server leaves — itself — and anything new fails the case it appeared under. It
+does not copy the install into `$HOME` to do it.**
 
 - After every case — passing or failing, and in the place that owns the install, because a slot's `$CUBRID` is
-  an overlay of its own — the runner lists `$CUBRID/log/coredump/*.coredump` and takes what it has not seen
-  before. Nothing sweeps that directory between cases, so a report counts against the case that produced it and
-  no other.
+  an overlay of its own — the runner looks for **three** things and takes what is new since the case before it:
+  the engine's report under `$CUBRID/log/coredump`, a `core.*` file where the machine writes one (CTP's own
+  pattern), and `FATAL ERROR` lines gained in `$CUBRID/log`. Nothing sweeps those places between cases, so what
+  counts against a case is the increase and not the total — where CTP's check fired again for every case that
+  followed one.
 - A new report makes the case **NOK**, with a result line naming the report, the program and the first frame
   below the crash handler:
   `: NOK found crash report cub_server_20260917125012.888.coredump (cub_server ctldb, qdata_save_agg_hentry_to_list at query_aggregate.cpp:2974)`
 - The report is **copied into the run directory** (`crash/<case>.<report>`) before the slot closes, because the
   slot's overlay is thrown away with it, and the report is the only evidence left of a process that no longer
   exists. It is read through the channel rather than copied from the host: the path exists only inside that
-  slot's mount namespace.
+  slot's mount namespace. A **core file** is kept as its gdb stack in the same place, as sql already does: a
+  core is gigabytes, it belongs to a slot that is about to go, and the stack is what a reader needs.
+- **`~/error_backup` stops being written by default** (isolation). CTP's check and its backup are one switch:
+  `runone.sh -n` turns off both, and the backup stops the service and copies the whole install, per case that
+  finds something. The check is worth having; a copy of the install in `$HOME` is not something a run should do
+  unasked. So the runner passes `-n`, does the checking itself, and `backup_core_file_yn=yes` puts CTP's
+  behaviour back.
 - The run says so on standard error as well, so that a long run does not hide it until the end.
 - Anything unreadable — no install, no directory, an empty report — is **not** a crash. Reading the machine may
   not fail a case that otherwise passed.
@@ -60,8 +69,12 @@ question, and it needs no gdb: the engine has already written the stack.
 3. **A crash that CTP hid is now a first-class finding.** The reports are kept with the run, so the stack is in
    the results rather than in a directory that the next `clean.sh` may empty.
 4. **The check costs one `find` per case**, in the slot, over a directory that is empty on a healthy run.
-5. **It does not replace the core-file check.** Where a machine does write `core.*`, CTP's path still finds it
-   and sql still analyses it with gdb. The two answer the same question in different environments.
+5. **It replaces CTP's core-file check for isolation, and adds to it elsewhere.** isolation passes `-n`, so the
+   `core.*` and `FATAL ERROR` checks are this runner's too; sql and shell keep the ones they had and gain the
+   crash report. The core file itself is no longer preserved anywhere for isolation — its stack is. A run that
+   needs the core keeps it with `backup_core_file_yn=yes`.
+6. **One default now differs from CTP's.** `backup_core_file_yn` is `no` here and `yes` there. It changes what a
+   run writes into `$HOME`, not what it judges — except that the judging is now this runner's.
 
 ## Alternatives considered
 

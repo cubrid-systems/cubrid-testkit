@@ -114,11 +114,24 @@ drawing a conclusion about a case in the tables above.
 
 ## Cores and fatal errors
 
-A core file under `$ctlpath`, `$CUBRID` or the case's directory, or `FATAL ERROR` in `$CUBRID/log`, fails the case with
-`found core file on host …` or `found fatal error file on host …`, and `runone.sh` backs up the cores and a copy of the
-whole install into `~/error_backup/error_<version>_<timestamp>.tar.gz` before recreating `ctldb`. In a slot the backup
-is written to the slot's own directory and copied into the real `~/error_backup` when the slot closes; the run says so
-on standard error. `backup_core_file_yn=no` turns the check and the backup off.
+A core file under `$ctlpath`, `$CUBRID` or the case's directory, `FATAL ERROR` in `$CUBRID/log`, or a crash report the
+server wrote about its own death fails the case, and the run says so on standard error as it happens.
+
+**The check is this runner's, and `~/error_backup` is not written by default** ([ADR-021](../../project/adr/ADR-021-crash-reports.md)).
+CTP's own check and its backup are one switch — `runone.sh -n` turns off both — and its backup stops the service and
+copies the whole install into `~/error_backup/error_<version>_<timestamp>.tar.gz` for every case that finds something.
+This runner passes `-n` and looks for itself, after every case, in the slot that owns the install:
+
+| what it finds | what the case says | what is kept |
+|---|---|---|
+| `$CUBRID/log/coredump/*.coredump`, the engine's own report | `found crash report <file> (cub_server ctldb, <frame>)` | the report, in `current_runtime_logs/crash/` |
+| a `core.*` file (CTP's own pattern, less `core.log`) | `found core file <path>` | its gdb stack, in the same directory. The core itself stays where it fell and goes with the slot |
+| new `FATAL ERROR` lines in `$CUBRID/log` | `found fatal error in <file> (n line(s))` | the count; the log is the slot's |
+
+Only what is *new since the case before it* counts: nothing sweeps those places between cases, and a log that already
+held a fatal error would otherwise fail every case after the one that wrote it — which is what CTP's check did.
+
+`backup_core_file_yn=yes` puts CTP's behaviour back: its check, and the backup with it.
 
 **CTP's check misses a crash; this runner has its own.** CTP looks for files named `core.*` and for `FATAL ERROR`
 in `$CUBRID/log`. Where `/proc/sys/kernel/core_pattern` hands cores to a crash handler such as apport, a server that

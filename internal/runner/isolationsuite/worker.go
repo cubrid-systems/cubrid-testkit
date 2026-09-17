@@ -35,10 +35,15 @@ type worker struct {
 	opts   options
 	// board is the status page, or nil; every method on it tolerates nil.
 	board *status.Board
-	// crashes are the reports this slot's server has already been seen to leave.
-	// Nothing sweeps $CUBRID/log/coredump between cases, so a report counts
-	// against the case that produced it and no other.
+	// crashes, cores and fatals are what this slot has already been seen to
+	// leave. Nothing sweeps them between cases, so what counts against a case is
+	// what is new since the one before it.
 	crashes map[string]bool
+	cores   map[string]bool
+	fatals  map[string]int
+	// ctltool is the directory runone.sh works in, which is where a client's core
+	// lands; CTP looked there, in $CUBRID and in the case's own directory.
+	ctltool string
 	// meter takes what the next run on this machine is sized by, or is nil.
 	meter *sizing.Meter
 }
@@ -86,21 +91,12 @@ func (w *worker) one(ctx context.Context, ticket dispatch.Ticket) {
 		v = judge(out)
 		first = firstAttempt(out)
 	}
-	// A server that died of a signal leaves a report and no core file, and
-	// runone.sh's check cannot see it (ADR-021). Asked of every case, passing or
-	// failing: a crash is a failure whatever the diff said.
-	if crashes := coredump.Crashes(ctx, w.ch, os.Getenv("CUBRID"), w.crashes); len(crashes) > 0 {
-		v.ok, v.hasCore = false, true
-		for _, c := range crashes {
-			v.items = append(v.items, item("NOK", "found crash report "+c.String()))
-			if kept, err := coredump.Keep(ctx, w.ch, c, filepath.Join(w.sink.Dir(), "crash"), tc); err != nil {
-				fmt.Fprintf(os.Stderr, "[ERROR] %s: %v\n", w.slot, err)
-			} else {
-				fmt.Fprintf(os.Stderr, "[WARN] %s: the server left a crash report while %s ran: %s\n",
-					w.slot, tc, kept)
-			}
-		}
-	}
+	// What a dying server leaves, looked for here rather than by runone.sh: its
+	// own crash report, which CTP's check cannot see at all, and the core file
+	// and FATAL ERROR that CTP's check would have found at the price of copying
+	// the whole install into ~/error_backup (ADR-021). Asked of every case,
+	// passing or failing.
+	w.checkTheWreckage(ctx, tc, &v)
 	// Taken where CTP took it, before the diff.
 	elapsed := time.Since(start)
 	if w.meter != nil {
@@ -133,6 +129,42 @@ func (w *worker) one(ctx context.Context, ticket dispatch.Ticket) {
 		fmt.Printf("[ERROR] cannot record %s as finished: %v\n", tc, err)
 	}
 	w.queue.Complete(ticket, v.ok, v.hasCore)
+}
+
+// checkTheWreckage fails the case if this slot's install has anything new to say
+// about a server that died: a crash report, a core file, or FATAL ERROR in the
+// log. The report is kept whole and a core is kept as its stack -- a core is
+// gigabytes and goes with the slot, and the stack is what a reader needs.
+func (w *worker) checkTheWreckage(ctx context.Context, tc string, v *verdict) {
+	cubrid := os.Getenv("CUBRID")
+	dir := filepath.Join(w.sink.Dir(), "crash")
+
+	for _, c := range coredump.Crashes(ctx, w.ch, cubrid, w.crashes) {
+		v.ok, v.hasCore = false, true
+		v.items = append(v.items, item("NOK", "found crash report "+c.String()))
+		if kept, err := coredump.Keep(ctx, w.ch, c, dir, tc); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %s: %v\n", w.slot, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "[WARN] %s: the server left a crash report while %s ran: %s\n", w.slot, tc, kept)
+		}
+	}
+
+	for _, core := range coredump.Cores(ctx, w.ch, w.cores, cubrid, w.ctltool, filepath.Dir(tc)) {
+		v.ok, v.hasCore = false, true
+		v.items = append(v.items, item("NOK", "found core file "+core))
+		fmt.Fprintf(os.Stderr, "[WARN] %s: %s left a core at %s\n", w.slot, tc, core)
+		if kept, err := coredump.KeepStack(ctx, w.ch, core, dir, tc); err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] %s: no stack for %s: %v\n", w.slot, core, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "[INFO] %s: its stack is at %s\n", w.slot, kept)
+		}
+	}
+
+	for _, f := range coredump.Fatals(ctx, w.ch, cubrid, w.fatals) {
+		v.ok, v.hasCore = false, true
+		v.items = append(v.items, item("NOK", "found fatal error in "+f))
+		fmt.Fprintf(os.Stderr, "[WARN] %s: %s left a fatal error in %s\n", w.slot, tc, f)
+	}
 }
 
 func (w *worker) diff(ctx context.Context, tc string) string {

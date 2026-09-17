@@ -49,8 +49,10 @@ sh runone.sh  -r 5 /path/to/case.ctl 300 qacsql 2>&1
 5. **normalizes** a copy into `result/<name>.log` — fifteen `sed` steps ([writing a case](02-writing-a-case.md#answers));
 6. **judges**: `<name>.sh` if the case has one, otherwise `answer/<name>.answer*` in `ls` order, the first identical
    one winning — `flag: OK` or `flag: NOK`;
-7. **looks for cores** and `FATAL ERROR` in `$CUBRID/log`; if there are any, backs them up with the whole install into
-   `~/error_backup` and recreates `ctldb`;
+7. **looks for cores** and `FATAL ERROR` in `$CUBRID/log`, and for the crash report a dying server writes — the runner's
+   own check, which fails the case and keeps the report and a core's stack with the run
+   ([ADR-021](../../project/adr/ADR-021-crash-reports.md)). `backup_core_file_yn=yes` hands the check back to
+   `runone.sh`, which backs the cores up with the whole install into `~/error_backup` and recreates `ctldb`;
 8. **cleans**: kills leftover `sleep`, `qactl` and `qacsql` and the transactions still open, and drops the users, the
    tables with foreign keys, triggers, serials, functions (all but the `sleep` ones), procedures, views and tables in
    `ctldb`, through seventeen `csql` calls.

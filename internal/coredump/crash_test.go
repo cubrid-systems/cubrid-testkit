@@ -120,3 +120,64 @@ func TestKeepNamesTheCaseAndTheReport(t *testing.T) {
 		t.Error("an unreadable report should say so")
 	}
 }
+
+// chan2 answers whatever the script asks for, by prefix.
+type chan2 struct {
+	byPrefix map[string]string
+	ran      []string
+}
+
+func (c *chan2) Run(_ context.Context, script string) (tkexec.Result, error) {
+	c.ran = append(c.ran, script)
+	for p, out := range c.byPrefix {
+		if strings.HasPrefix(script, p) {
+			return tkexec.Result{Stdout: out}, nil
+		}
+	}
+	return tkexec.Result{}, nil
+}
+func (c *chan2) Put(context.Context, string, string) error { return nil }
+func (c *chan2) Get(context.Context, string, string) error { return nil }
+func (c *chan2) Describe() string                          { return "a test channel" }
+func (c *chan2) Close() error                              { return nil }
+
+// Cores are CTP's own pattern, and each one counts against one case.
+func TestCores(t *testing.T) {
+	ch := &chan2{byPrefix: map[string]string{"find": "/cubrid/core.123\n/cubrid/log/core.log\n"}}
+	seen := map[string]bool{}
+	got := Cores(context.Background(), ch, seen, "/cubrid", "/ctltool", "")
+	if len(got) != 1 || got[0] != "/cubrid/core.123" {
+		t.Fatalf("got %v, want the one core", got)
+	}
+	if again := Cores(context.Background(), ch, seen, "/cubrid"); len(again) != 0 {
+		t.Errorf("the same core came back: %v", again)
+	}
+	if !strings.Contains(ch.ran[0], "'/cubrid' '/ctltool'") || strings.Contains(ch.ran[0], "''") {
+		t.Errorf("searched %q; an empty directory should not be searched", ch.ran[0])
+	}
+	if n := len(Cores(context.Background(), ch, seen)); n != 0 {
+		t.Errorf("no directories should find nothing, got %d", n)
+	}
+}
+
+// A log is appended to and never emptied, so what belongs to this case is what
+// the count gained -- not the total, which CTP reported again for every case
+// after the first.
+func TestFatalsReportTheIncreaseOnly(t *testing.T) {
+	ch := &chan2{byPrefix: map[string]string{"grep": "/cubrid/log/server.err:2\n/cubrid/log/other.err:0\n"}}
+	counts := map[string]int{}
+	got := Fatals(context.Background(), ch, "/cubrid", counts)
+	if len(got) != 1 || !strings.Contains(got[0], "server.err") || !strings.Contains(got[0], "2 line(s)") {
+		t.Fatalf("got %v, want server.err's two lines", got)
+	}
+	if again := Fatals(context.Background(), ch, "/cubrid", counts); len(again) != 0 {
+		t.Errorf("the same lines came back: %v", again)
+	}
+	ch.byPrefix["grep"] = "/cubrid/log/server.err:5\n"
+	if more := Fatals(context.Background(), ch, "/cubrid", counts); len(more) != 1 || !strings.Contains(more[0], "3 line(s)") {
+		t.Errorf("got %v, want the three it gained", more)
+	}
+	if none := Fatals(context.Background(), ch, "", counts); len(none) != 0 {
+		t.Errorf("no install is nothing to read: %v", none)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
@@ -162,3 +163,95 @@ func frameOf(line string) (string, bool) {
 }
 
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// Cores are the core files under the directories given that seen does not
+// already hold: CTP's own pattern (`core.*`, less `core.log`), which is what
+// runone.sh's check looked for before this runner took the check over
+// (ADR-021).
+//
+// Where a machine writes cores, they are worth a stack and not a copy: Analyze
+// reads one in the place that holds it, and the stack goes to the results. The
+// core itself stays where it fell, and goes with the slot.
+func Cores(ctx context.Context, ch exec.Channel, seen map[string]bool, dirs ...string) []string {
+	var quoted []string
+	for _, d := range dirs {
+		if strings.TrimSpace(d) != "" {
+			quoted = append(quoted, shellQuote(d))
+		}
+	}
+	if len(quoted) == 0 {
+		return nil
+	}
+	res, err := ch.Run(ctx, "find "+strings.Join(quoted, " ")+` -name 'core.*' -type f 2>/dev/null | sort`)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, path := range strings.Split(strings.TrimSpace(res.Output()), "\n") {
+		if path = strings.TrimSpace(path); path == "" || seen[path] {
+			continue
+		}
+		// core.log is the engine's log, and CTP's check excluded it by name.
+		if filepath.Base(path) == "core.log" {
+			continue
+		}
+		seen[path] = true
+		found = append(found, path)
+	}
+	return found
+}
+
+// Fatals are the log files under cubridDir/log holding more "FATAL ERROR" lines
+// than counts has recorded, and the number they have gained. A log is appended
+// to and never emptied between cases, so what makes this a finding about this
+// case is the increase and not the total -- where CTP's check fired again for
+// every case that followed one (runone.sh:189).
+func Fatals(ctx context.Context, ch exec.Channel, cubridDir string, counts map[string]int) []string {
+	if strings.TrimSpace(cubridDir) == "" {
+		return nil
+	}
+	res, err := ch.Run(ctx, "grep -rc 'FATAL ERROR' "+shellQuote(filepath.Join(cubridDir, "log"))+" 2>/dev/null")
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, line := range strings.Split(strings.TrimSpace(res.Output()), "\n") {
+		path, n, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			continue
+		}
+		now, err := strconv.Atoi(strings.TrimSpace(n))
+		if err != nil || now <= counts[path] {
+			continue
+		}
+		gained := now - counts[path]
+		counts[path] = now
+		found = append(found, fmt.Sprintf("%s (%d line(s))", filepath.Base(path), gained))
+	}
+	return found
+}
+
+// KeepStack writes a core's stack into dir, named for the case and the core, and
+// returns where it landed. The core stays where it fell: it is gigabytes, it
+// belongs to a slot that is about to go, and what a reader needs from it is the
+// stack. gdb runs in the place that holds the core, for the same reason.
+func KeepStack(ctx context.Context, ch exec.Channel, core, dir, caseName string) (string, error) {
+	s, err := Analyze(ctx, ch, core)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := strings.TrimSuffix(filepath.Base(caseName), filepath.Ext(caseName))
+	local := filepath.Join(dir, name+"."+filepath.Base(core)+".stack")
+	f, err := os.Create(local)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	if err := Report(f, filepath.Dir(core), []Stack{s}); err != nil {
+		return "", err
+	}
+	return local, nil
+}

@@ -18,7 +18,7 @@ The conf is CTP's flat `isolation.conf`: `key=value`, `#` comments, `${VAR}` exp
 | `testcase_timeout_in_secs` | 2147483647 | `timeout3.sh`'s bound on one attempt's `qactl`. CTP's shipped conf says 300 |
 | `testcase_retry_num` | 0 | attempts `runone.sh` makes after the first; it stops at the first pass. CTP's shipped conf says 4 |
 | `testcase_exclude_from_file` | none | one file of path fragments, `#` and `--` for comments. **Each entry excludes the first case whose path contains it, and only that one.** A file that is not there stops the run — CTP read it as an empty list and ran everything |
-| `backup_core_file_yn` | yes | `no` passes `-n`: no core check and no backup in `~/error_backup` |
+| `backup_core_file_yn` | **no** (CTP's default is yes) | `yes` gives CTP's behaviour: `runone.sh` checks for cores itself and backs up the cores and a copy of the whole install into `~/error_backup`. Unset, the runner passes `-n` and does the checking itself, keeping the crash report and a core's stack with the run and writing no backup ([ADR-021](../../project/adr/ADR-021-crash-reports.md)) |
 | `cubrid_testdb_name` | cubrid | the client program, despite the name: `cubrid` is `qacsql`, `mysql` is `qamysql`, anything else makes `runone.sh` refuse the case |
 | `test_category` | isolation | what feedback prints. The run directory is `result/isolation` whatever it says |
 | `test_continue_yn` | no | resume: `dispatch_tc_ALL.txt` less every `dispatch_tc_FIN_*.txt`, appending to the logs |

@@ -113,9 +113,14 @@ type options struct {
 
 func optionsOf(cfg *conf.Config) options {
 	o := options{
-		timeout:    cfg.GetOr("testcase_timeout_in_secs", strconv.Itoa(1<<31-1)),
-		client:     clientFor(cfg.GetOr("cubrid_testdb_name", "")),
-		backupCore: cfg.Bool("backup_core_file_yn", true),
+		timeout: cfg.GetOr("testcase_timeout_in_secs", strconv.Itoa(1<<31-1)),
+		client:  clientFor(cfg.GetOr("cubrid_testdb_name", "")),
+		// CTP's default is yes, and this runner's is no: `-n` turns off
+		// runone.sh's check *and* its backup, and the check is this runner's own
+		// now (ADR-021). What the backup did -- copy the whole install and tar it
+		// into ~/error_backup, per case, after stopping the service -- is not a
+		// default anyone asked for. backup_core_file_yn=yes asks for it back.
+		backupCore: cfg.Bool("backup_core_file_yn", false),
 	}
 	if v := cfg.GetOr("testcase_retry_num", "0"); v != "" {
 		n, err := strconv.Atoi(strings.TrimSpace(v))

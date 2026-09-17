@@ -27,13 +27,13 @@ For engine developers and QA. Part of
 ```bash
 go build -o bin/testkit ./cmd/testkit
 
-CUBRID=/path/to/install scripts/sizing.sh          # once, to size the run
 TESTKIT_CONTAIN=1 TESTKIT_NATIVE=shell testkit shell -c shell.conf
 ```
 
-That is the `shell` suite, run natively, in slots. Drop `TESTKIT_NATIVE` and the same command hands
-the task to CTP instead — the same invocation either way, which is what lets the two be compared at
-all. Whether the output then matches is not claimed here; it is [gated](#what-runs-where), family by
+That is the `shell` suite, run natively, in slots — as many as this machine has measured it can
+hold ([below](#using-it)), and `testkit sizing shell` says what it would take and why. Drop
+`TESTKIT_NATIVE` and the same command hands the task to CTP instead — the same invocation either
+way, which is what lets the two be compared at all. Whether the output then matches is not claimed here; it is [gated](#what-runs-where), family by
 family.
 
 **What you need:**
@@ -81,6 +81,7 @@ This is the one place the migration's state is recorded; everything else in this
 | `shell` · `rqg` | natively behind `TESTKIT_NATIVE=shell` | [ADR-013](docs/project/adr/ADR-013-regression-equivalence.md) — gate **open** |
 | `sql` · `medium` | natively behind `TESTKIT_NATIVE=sql` | [ADR-017](docs/project/adr/ADR-017-sql-equivalence.md) — gate **passed** |
 | `isolation` | natively behind `TESTKIT_NATIVE=isolation`, `runone.sh` still executing every case | [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md) — gate **met** |
+| `isolation`, with its controller too | `TESTKIT_ISOLATION_CTL=1` as well: testkit's own controller in place of ctltool's `qactl`, keeping `qacsql` and `runone.sh`. 15.7% faster over the whole corpus | [ADR-019](docs/project/adr/ADR-019-isolation-controller.md) — gate **does not pass**: 25 cases whose answers record the order `qactl`'s pauses produced. Off until they are fixed upstream |
 | `kcc` `neis05` `neis08` `sql_by_cci` `ha_repl` `cdc_repl` `jdbc` `webconsole` — and any family above whose switch is unset | CTP, as a subprocess, unchanged | — |
 
 `TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of them.
@@ -123,6 +124,12 @@ TESTKIT_NATIVE=shell testkit shell -c shell.conf
 Task names are matched case-insensitively. A name that is not a task prints help and skips that
 task only — the tasks after it still run. `CTP_HOME` comes from the environment if it is set,
 otherwise from the parent of the binary.
+
+Three names are not tasks. `testkit sizing [suite] [mode]` prints what this machine would run at
+once and the runs it read to decide, and runs nothing ([below](#using-it)); `isolation-ctl` and
+`isolation-ctl-install` are the isolation controller and its installer, which a run invokes for
+itself and which are documented in
+[ADR-019](docs/project/adr/ADR-019-isolation-controller.md).
 
 The runner runs on **one machine** ([ADR-014](docs/project/adr/ADR-014-one-machine.md)): local by
 default, and a remote machine over SSH is still one machine. RMI worker mode is retired and asking
@@ -238,11 +245,17 @@ and reaches the shell as 255; it will not be tidied into `1`.
 
 **The freeze preserves what CTP did, not what CTP got wrong.** Where a behaviour is plainly
 unintended and reproducing it would make someone trust something false, it is fixed and the decision
-recorded. Three so far: the requirements check now actually fails on a missing command — it used to
+recorded. Four so far: the requirements check now actually fails on a missing command — it used to
 match csh's wording and so reported `PASS` for everything absent; `dos2unix` is off the checked
 list, because no answer file in the corpus has a CRLF — though CTP's `init.sh` still calls it, so a
-machine without it gets a stand-in (`internal/contain/dos2unix.go`); and a build with no commit
-suffix is now just its version instead of `11.2.0.0000) (64bit release build for linux_gnu`.
+machine without it gets a stand-in (`internal/contain/dos2unix.go`); a build with no commit
+suffix is now just its version instead of `11.2.0.0000) (64bit release build for linux_gnu`; and a
+server that dies of a signal now **fails its case**
+([ADR-021](docs/project/adr/ADR-021-crash-reports.md)). CTP looks for `core.*` files and for
+`FATAL ERROR`, and on a machine that hands cores to a crash handler there is neither — so a case
+that killed a server was reported as an ordinary diff, which is how one of them passed unnoticed
+through six whole-corpus runs. The run reads the report the engine writes itself, keeps it with the
+results, and no longer copies the whole install into `~/error_backup` to do it.
 
 ### What is out of scope
 
@@ -287,7 +300,8 @@ behind would otherwise hand it to whichever runner goes second.
 
 **Corrections are recorded where the mistake was made** — the CLI survey that justified the project,
 the freeze specification, the corpus counts, the first difference this runner was wrongly cleared
-of, and 27 more found while measuring sql, medium and isolation under CTP before rewriting them
+of, and 33 more found while measuring sql, medium and isolation under CTP — and reading `qactl` —
+before rewriting them
 ([`project/evidence/spec-corrections.md`](docs/project/evidence/spec-corrections.md)).
 
 ## Layout
@@ -298,13 +312,16 @@ cmd/testkit/             the entry point
 internal/                cli · conf · registry · dispatch · runshell · exec · result · feedback ·
                          topology · runner (legacy, shellsuite, sqlsuite, isolationsuite) ·
                          contain (namespaces per slot) · plan (case durations) ·
-                         patch (per-case patches) · coredump (a crashed case's stack) ·
+                         patch (per-case patches) · sizing (how many slots, from what this
+                         machine measured) · coredump (a dead server's stack, and the crash
+                         report it wrote itself) · ctl (the isolation controller) ·
                          status (the progress page)
 overrides/               what this run does differently from the corpus as it stands
   patches/               fixes carried for the corpus until upstream takes them
   machine-exclusions/    cases this machine cannot run, each with the reason and what ends it
-scripts/sizing.sh        how many slots, which disk, and how big a ceiling, for this machine
-                         (`scripts/sizing.sh sql <conf>` for the sql family)
+scripts/sizing.sh        what this machine measures — the disk, the cores — and how big a shell
+                         ceiling to ask for. The slot count is the run's own (ADR-020):
+                         `testkit sizing <suite>` prints that decision
 extensions/              separate repositories testkit will drive
   cubrid-sqlancer/       submodule — a SQLancer provider for CUBRID
 docs/

@@ -39,6 +39,9 @@ type work struct {
 // error.
 func (w *work) loop(ctx context.Context, name string, p place, q *dispatch.Queue, x Executor) error {
 	cores := map[string]bool{}
+	// Nothing sweeps $CUBRID/log/coredump between cases, so each report counts
+	// against the case that produced it and no other.
+	crashes := map[string]bool{}
 	for {
 		t, ok := q.ClaimFor(name, dispatch.LaneAny)
 		if !ok {
@@ -83,6 +86,22 @@ func (w *work) loop(ctx context.Context, name string, p place, q *dispatch.Queue
 				if found := newCores(ctx, p, cores); len(found) > 0 {
 					c.HasCore = true
 					w.coreErr(ctx, p, t.Case, found)
+				}
+			}
+			// Asked of every case and not only a failing one: a server that died
+			// of a signal leaves a report and no core file, and a case whose
+			// answer still matched would otherwise carry a dead server silently
+			// (ADR-021).
+			for _, cr := range coredump.Crashes(ctx, p.Channel(), os.Getenv("CUBRID"), crashes) {
+				c.OK, c.HasCore = false, true
+				if c.Err == nil {
+					c.Err = fmt.Errorf("the server left a crash report: %s", cr)
+				}
+				if kept, err := coredump.Keep(ctx, p.Channel(), cr, filepath.Join(w.rec.Root(), "crash"), t.Case); err != nil {
+					fmt.Fprintf(os.Stderr, "[ERROR] %s: %v\n", name, err)
+				} else {
+					fmt.Fprintf(os.Stderr, "[WARN] %s: the server left a crash report while %s ran: %s\n",
+						name, t.Case, kept)
 				}
 			}
 		}

@@ -3,9 +3,12 @@ package isolationsuite
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-testkit/internal/coredump"
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
@@ -32,6 +35,10 @@ type worker struct {
 	opts   options
 	// board is the status page, or nil; every method on it tolerates nil.
 	board *status.Board
+	// crashes are the reports this slot's server has already been seen to leave.
+	// Nothing sweeps $CUBRID/log/coredump between cases, so a report counts
+	// against the case that produced it and no other.
+	crashes map[string]bool
 	// meter takes what the next run on this machine is sized by, or is nil.
 	meter *sizing.Meter
 }
@@ -78,6 +85,21 @@ func (w *worker) one(ctx context.Context, ticket dispatch.Ticket) {
 		lines = append(lines, out)
 		v = judge(out)
 		first = firstAttempt(out)
+	}
+	// A server that died of a signal leaves a report and no core file, and
+	// runone.sh's check cannot see it (ADR-021). Asked of every case, passing or
+	// failing: a crash is a failure whatever the diff said.
+	if crashes := coredump.Crashes(ctx, w.ch, os.Getenv("CUBRID"), w.crashes); len(crashes) > 0 {
+		v.ok, v.hasCore = false, true
+		for _, c := range crashes {
+			v.items = append(v.items, item("NOK", "found crash report "+c.String()))
+			if kept, err := coredump.Keep(ctx, w.ch, c, filepath.Join(w.sink.Dir(), "crash"), tc); err != nil {
+				fmt.Fprintf(os.Stderr, "[ERROR] %s: %v\n", w.slot, err)
+			} else {
+				fmt.Fprintf(os.Stderr, "[WARN] %s: the server left a crash report while %s ran: %s\n",
+					w.slot, tc, kept)
+			}
+		}
 	}
 	// Taken where CTP took it, before the diff.
 	elapsed := time.Since(start)

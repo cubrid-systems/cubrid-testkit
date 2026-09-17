@@ -3,11 +3,14 @@ package shellsuite
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-testkit/internal/coredump"
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
@@ -16,7 +19,6 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/sizing"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
-	"path/filepath"
 )
 
 // Worker runs cases on one instance, one at a time, until the queue is empty.
@@ -49,12 +51,15 @@ type Worker struct {
 	Plan *plan.Record
 	// Meter takes what the next run on this machine is sized by (ADR-020). Nil
 	// when the run is not sizing itself.
-	Meter   *sizing.Meter
-	Channel exec.Channel
-	Queue   *dispatch.Queue
-	Sink    *result.Sink
-	Report  feedback.Feedback
-	Options CaseOptions
+	Meter *sizing.Meter
+	// seenCrashes are the crash reports this slot's install has already been
+	// seen to hold; nothing sweeps them between cases.
+	seenCrashes map[string]bool
+	Channel     exec.Channel
+	Queue       *dispatch.Queue
+	Sink        *result.Sink
+	Report      feedback.Feedback
+	Options     CaseOptions
 	// Patches are the corpus changes this run carries. Nil is the ordinary case.
 	Patches *patch.Set
 	// Logs keeps what a case wrote, so a failure can be diagnosed without running
@@ -153,6 +158,18 @@ func (w *Worker) Run(ctx context.Context) error {
 		if w.tookTooLong() {
 			v.Success = false
 			v.Items = append(v.Items, resultItem("NOK", "timeout"))
+		}
+		// A server that died of a signal leaves a report and no core file, which
+		// CTP's own check cannot see (ADR-021).
+		for _, cr := range coredump.Crashes(ctx, w.Channel, os.Getenv("CUBRID"), w.crashes()) {
+			v.Success, v.HasCore = false, true
+			v.Items = append(v.Items, resultItem("NOK", "found crash report "+cr.String()))
+			if kept, err := coredump.Keep(ctx, w.Channel, cr, filepath.Join(w.Sink.Dir(), "crash"), ticket.Case); err != nil {
+				w.log("[ERROR] " + err.Error())
+			} else {
+				fmt.Fprintf(os.Stderr, "[WARN] %s: the server left a crash report while %s ran: %s\n",
+					w.SlotID, ticket.Case, kept)
+			}
 		}
 		// Here and nowhere else. RestoreScript runs at the *start* of a case, so
 		// what this one wrote is still on the machine until the next case claims
@@ -428,6 +445,14 @@ func (w *Worker) diskSpace(ctx context.Context) {
 // log collects a line, and while a case is running it collects rather than
 // writes. The case's whole trace goes out at once in flush, because slots make
 // the worker log something more than one worker appends to.
+// crashes is the set of reports already counted against an earlier case.
+func (w *Worker) crashes() map[string]bool {
+	if w.seenCrashes == nil {
+		w.seenCrashes = map[string]bool{}
+	}
+	return w.seenCrashes
+}
+
 func (w *Worker) log(line string) {
 	w.mu.Lock()
 	if w.buffering {

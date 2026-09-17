@@ -111,15 +111,15 @@ var shipped = map[Suite]int{
 //	sql        four: the slot cost above was measured there.
 //	medium     one: 12.6 s of cases against a 26 s slot start (category/sql §5).
 //	shell      one: nothing is known about the slot until a run has measured it.
-// Suites are the names a suite can be asked for by.
-var Suites = []Suite{Isolation, SQL, Medium, Shell}
-
 var start = map[Suite]int{
 	Isolation: 4,
 	SQL:       4,
 	Medium:    1,
 	Shell:     1,
 }
+
+// Suites are the names a suite can be asked for by.
+var Suites = []Suite{Isolation, SQL, Medium, Shell}
 
 // Engine is what the server is configured to hold. A slot is a floor plus these
 // two, so a record taken with other values is adjusted rather than discarded.

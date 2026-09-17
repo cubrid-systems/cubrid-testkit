@@ -120,10 +120,23 @@ whole install into `~/error_backup/error_<version>_<timestamp>.tar.gz` before re
 is written to the slot's own directory and copied into the real `~/error_backup` when the slot closes; the run says so
 on standard error. `backup_core_file_yn=no` turns the check and the backup off.
 
-**The check can miss a crash.** It looks for files named `core.*` and for `FATAL ERROR` in `$CUBRID/log`. Where
-`/proc/sys/kernel/core_pattern` hands cores to a crash handler such as apport, a server that dies of a signal leaves
-no `core.*` and no `FATAL ERROR` — only its own call stack in `$CUBRID/log/coredump/cub_server_<timestamp>.coredump`
-and, in the case's result, `the server seems to have died`. That is what
+**CTP's check misses a crash; this runner has its own.** CTP looks for files named `core.*` and for `FATAL ERROR`
+in `$CUBRID/log`. Where `/proc/sys/kernel/core_pattern` hands cores to a crash handler such as apport, a server that
+dies of a signal leaves no `core.*` and no `FATAL ERROR` — only its own call stack in
+`$CUBRID/log/coredump/cub_server_<timestamp>.coredump`. That is what
 `partition_table/range/dml_ddl/reorganization_select_01` does on this machine
-([`isolation-always-failing.md`](../../project/evidence/isolation-always-failing.md) §1). When a case's result says
-a transaction was aborted by server failure, look in that directory before believing the diff.
+([`isolation-always-failing.md`](../../project/evidence/isolation-always-failing.md) §1), and under CTP it is
+reported as an ordinary diff.
+
+After every case this runner reads that directory itself, and **a report it has not seen before fails the case**
+([ADR-021](../../project/adr/ADR-021-crash-reports.md)):
+
+```
+[NOK] …/reorganization_select_01.ctl
+ : NOK found crash report cub_server_20260917125012.888.coredump
+   (cub_server ctldb, qdata_save_agg_hentry_to_list at query_aggregate.cpp:2974)
+```
+
+The report is copied into `current_runtime_logs/crash/<case>.<report>` before the slot closes — a slot's install
+is an overlay that goes with it — and the run says so on standard error as well. A case that passes under CTP and
+crashes a server fails here, which is a verdict difference this project chooses to have.

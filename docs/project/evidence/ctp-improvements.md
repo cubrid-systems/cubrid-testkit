@@ -316,6 +316,26 @@ declared call printed 43 lines where `qactl` printed 126; the 83 missing lines a
 **What it is worth.** Nothing in wall time. It decides whether the diagnostic a failing isolation case leaves
 behind is the lock table or a fraction of it, and today that is decided by chance.
 
+## J. The core check cannot see a server that died of a signal *(all suites)*
+
+**Measured.** A case is judged to have crashed by looking for files named `core.*` and for `FATAL ERROR` in the
+log — `runone.sh`'s `checkCoreAndFatalError` (`runone.sh:185-193`), CQT's `getCoreFiles`, shell's
+`do_check_more_errors`. Where `/proc/sys/kernel/core_pattern` hands cores to a crash handler such as apport
+there is no `core.*`, and a SIGSEGV writes no `FATAL ERROR`. The engine always writes its own report —
+`crash_handler` (`server.c:222`) prints the stack to `$CUBRID/log/coredump/<program>_<when>.coredump` — and
+nothing looks there.
+
+`_01_ReadCommitted/partition_table/range/dml_ddl/reorganization_select_01` kills `cub_server` on every attempt
+on this engine (upstream `CBRD-27407`). Six whole-corpus runs — two under CTP, four here — reported it as an
+ordinary diff failure while the reports sat in that directory
+(`evidence/isolation-always-failing.md` §1).
+
+**The fix is one more place to look**, beside the two that are already looked at, and to treat a new report as
+a core. The reports are also worth keeping with the results: the directory is inside whatever install the case
+ran against, and the next run's clean empties it.
+
+**What it is worth.** A case that crashes a server is reported as one. Nothing in wall time.
+
 ## What this runner does about each
 
 | | CTP today | here |
@@ -330,3 +350,4 @@ behind is the lock table or a fraction of it, and today that is decided by chanc
 | G | one node, serial | slots on one machine, with a status page and a duration plan |
 | H | 100 ms per client at the end of every case | gone: the controller is testkit's (ADR-019), and it reaps first. The four-line patch is still worth sending, for everyone who runs CTP |
 | I | one argument, and what it prints is chance | declared with two, called with 0 (`internal/ctl/native/qablocked.c`) |
+| J | `core.*` and `FATAL ERROR` only | `$CUBRID/log/coredump/*.coredump` is read after every case, a new report fails the case, and the report is kept with the run (ADR-021) |

@@ -46,6 +46,25 @@ func (h *Home) Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// ParseText reads a configuration that did not come from a file.
+//
+// One caller: a topology described by an external provisioner arrives as the
+// text a subprocess printed (internal/sandbox), and writing it to a file to read
+// it back would put a temporary path in Path() where a reader expects the name
+// of the thing that produced it. name is what Path() reports and is used in
+// errors; it is never opened.
+//
+// Substitution is the same as a file's, so ${HOME} and ${CTP_HOME} mean what
+// they mean everywhere else.
+func ParseText(name, text, ctpHome string) (*Config, error) {
+	cfg, err := parse(strings.NewReader(text), ctpHome)
+	if err != nil {
+		return nil, fmt.Errorf("configuration %s: %w", name, err)
+	}
+	cfg.path = name
+	return cfg, nil
+}
+
 func parse(r io.Reader, ctpHome string) (*Config, error) {
 	cfg := &Config{values: map[string]string{}}
 	sc := bufio.NewScanner(r)

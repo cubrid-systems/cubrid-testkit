@@ -2,3 +2,7 @@
 	path = extensions/cubrid-sqlancer
 	url = https://github.com/cubrid-systems/cubrid-sqlancer.git
 	branch = main
+[submodule "extensions/cluster-sandbox"]
+	path = extensions/cluster-sandbox
+	url = https://github.com/cubrid-systems/cubrid-cluster-sandbox.git
+	branch = main

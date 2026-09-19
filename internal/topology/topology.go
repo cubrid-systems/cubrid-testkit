@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 )
@@ -145,16 +146,60 @@ func From(cfg *conf.Config) ([]*Instance, error) {
 	out := make([]*Instance, 0, len(ordered))
 	for _, id := range ordered {
 		inst := &Instance{ID: id, roles: map[string]map[string]string{}}
+		// Roles first, so a role the instance says nothing about still carries
+		// its default.* properties.
 		for _, role := range Roles {
-			merged := cfg.Prefixed("default." + role)
-			for k, v := range cfg.Prefixed(fmt.Sprintf("env.instance%d.%s", id, role)) {
-				merged[k] = v
+			inst.roles[role] = merge(cfg, id, role)
+		}
+		// Then any role the configuration actually uses that the list does not
+		// name. Roles cannot be exhaustive and was never meant to be: CTP's own
+		// conf/ha_repl.conf says "A master can have multiple slaves, for
+		// instance, slave1, slave2", so the count is the configuration's and the
+		// names go up from there. Read off the keys, a numbered slave is a role
+		// like any other; enumerated in a list, the second one disappears
+		// silently -- which is how it was found.
+		for _, role := range namedRoles(cfg, id) {
+			if _, known := inst.roles[role]; !known {
+				inst.roles[role] = merge(cfg, id, role)
 			}
-			inst.roles[role] = merged
 		}
 		out = append(out, inst)
 	}
 	return out, nil
+}
+
+// merge is a role's properties: the defaults, with the instance's own on top.
+func merge(cfg *conf.Config, id int, role string) map[string]string {
+	merged := cfg.Prefixed("default." + role)
+	for k, v := range cfg.Prefixed(fmt.Sprintf("env.instance%d.%s", id, role)) {
+		merged[k] = v
+	}
+	return merged
+}
+
+// namedRoles is every role this instance's own keys mention, sorted.
+//
+// A role is the segment after env.instance<id>. and before the property, so
+// `env.instance1.slave2.ssh.host` is the role `slave2`. A key with nothing after
+// the role names no property and is not a role's key.
+func namedRoles(cfg *conf.Config, id int) []string {
+	prefix := fmt.Sprintf("env.instance%d.", id)
+	seen := map[string]bool{}
+	for _, k := range cfg.Keys() {
+		rest, ok := strings.CutPrefix(k, prefix)
+		if !ok {
+			continue
+		}
+		if role, _, ok := strings.Cut(rest, "."); ok && role != "" {
+			seen[role] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for r := range seen {
+		out = append(out, r)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func firstNonEmpty(values ...string) string {

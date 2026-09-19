@@ -23,6 +23,37 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 
 **번호 공간 주의.** `E8` 은 축 8 *Hybrid CI 통합* 메타 자리로 예약되어 있다. E9 가 E8 을 건너뛴 것은 결번이 아니라 이 예약 때문이다.
 
+---
+
+## E-번호가 아닌 것 — `extensions/cluster-sandbox`
+
+`extensions/` 아래 submodule 이지만 **카탈로그의 항목이 아니다.** E1~E10 은 전부
+*테스트 능력* — 새 오라클, 새 케이스 포맷, 새 생성기 — 이고, `cubrid-cluster-sandbox`
+는 **환경 제공자**다. 무엇을 검증하는지가 아니라 어디서 도는지를 바꾼다.
+
+E-번호를 주면 두 가지가 틀어진다. 착수 순서를 정하는 §6a 사다리에 "먼저 해야 하는
+인프라"가 경쟁 항목으로 끼어들고, **여러 항목의 공통 의존**이라는 사실이 표에서
+사라진다. 로드맵이 이미 세 군데에서 그 의존을 적고 있다 — E4(분산 isolation)의 경계,
+E7(workload)의 경계, 사다리 순위 6(recovery/crash).
+
+그리고 그 앞에 strangler-fig 쪽 의존이 둘 더 있다. `ha_repl` task 와 HA shell suite
+는 master/slave 토폴로지가 없어 지금까지 돌지 못했고(ADR-013 이 HA 트리 367 케이스를
+증거에서 제외한다), 그 토폴로지를 **러너가 만들면 안 된다**는 것이 ADR-014 다:
+
+> **HA is not an exception.** The system under test has a topology; the runner does
+> not have a fleet.
+
+그래서 `cluster-sandbox` 를 쓰는 것은 ADR-014 를 우회하는 게 아니라 **지키는 방법**이다.
+토폴로지를 세우는 일은 저쪽에 있고, 이쪽은 그 위에서 케이스를 돌린다.
+
+| | |
+|---|---|
+| 저장소 | `cubrid-systems/cubrid-cluster-sandbox` (public) |
+| 위치 | `extensions/cluster-sandbox` — submodule, `bot/bump-cluster-sandbox` 가 포인터를 따라 올린다 |
+| 통합 형태 | subprocess + `--json` 아티팩트 (ADR-001 Consequence 4). 링크하지 않는다 |
+| 이쪽 코드 | `internal/sandbox` — Channel 하나와 topology provider 하나 |
+| 기록 | **ADR-022 (미작성)** — 이 표가 그 자리를 지킨다 |
+
 **착수 순서는 이 표가 정하지 않는다.** fuzzing 계열(E3·E5·E9)과 미등록 후보 2건의 우선순위는 ROADMAP **§6a 사다리** 가 단일 출처다.
 
 ---

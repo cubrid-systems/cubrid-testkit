@@ -1,0 +1,180 @@
+# cubrid-cluster-sandbox 의 main 이 움직이면 이 저장소의 submodule 포인터를 올리는 PR 을 연다.
+#
+# 트리거 3종:
+#   repository_dispatch — cubrid-cluster-sandbox 가 push 직후 보내는 신호 (즉시)
+#   workflow_dispatch   — 수동
+#   schedule            — 신호가 유실돼도 하루 한 번은 따라잡는다
+#
+# PR 이 열려 있는 동안 cubrid-cluster-sandbox 의 main 이 더 움직이면, 새 PR 을 열지 않고
+# 같은 브랜치 위에 커밋을 쌓는다. 열린 PR 이 없으면 (첫 실행이거나 이전 PR 이
+# 머지·클로즈됐으면) main 에서 브랜치를 새로 시작한다.
+#
+# 필요한 secret: SUBMODULE_PAT — sqlancer 워크플로와 같은 것을 쓴다.
+#   scope: 이 저장소 contents/PR 쓰기
+#
+#   sqlancer 쪽과 사유가 다르다. cubrid-cluster-sandbox 는 **public** 이므로 submodule
+#   읽기에는 GITHUB_TOKEN 으로 충분하다. PAT 가 필요한 이유는 하나뿐이다 —
+#   GITHUB_TOKEN 으로 연 PR 은 이 저장소의 다른 워크플로(build.yml)를 트리거하지
+#   않는다. 검사가 돌지 않는 PR 은 사람이 읽고 승인해야 할 것을 하나 더 만든다.
+name: Bump cubrid-cluster-sandbox submodule
+
+on:
+  repository_dispatch:
+    types: [cluster-sandbox-updated]
+  workflow_dispatch:
+  schedule:
+    - cron: '43 6 * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-cluster-sandbox-submodule
+  cancel-in-progress: false
+
+env:
+  BRANCH: bot/bump-cluster-sandbox
+  SUBMODULE: extensions/cluster-sandbox
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail early when the secret is missing
+        env:
+          PAT: ${{ secrets.SUBMODULE_PAT }}
+        run: |
+          if [ -z "${PAT:-}" ]; then
+            echo "::error::secret SUBMODULE_PAT 이 없다 — 이 저장소 contents/PR 쓰기 권한을 가진 PAT 를 등록하라. GITHUB_TOKEN 으로 연 PR 은 build.yml 을 트리거하지 않는다."
+            exit 1
+          fi
+
+      - name: Checkout with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.SUBMODULE_PAT }}
+
+      - name: Pick the working branch
+        id: br
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
+        run: |
+          set -euo pipefail
+          git config user.name  "cubrid-systems-bot"
+          git config user.email "bot@users.noreply.github.com"
+
+          pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$pr" ] && git rev-parse --verify --quiet "origin/$BRANCH" >/dev/null; then
+            # 열린 PR 이 있다 — 그 브랜치 위에 쌓는다
+            git checkout --quiet -B "$BRANCH" "origin/$BRANCH"
+            git submodule update --init --recursive "$SUBMODULE"
+            echo "on branch $BRANCH (PR #$pr 위에 누적)"
+          else
+            # 열린 PR 이 없다 — main 에서 새로 시작한다
+            pr=""
+            git checkout --quiet -B "$BRANCH" origin/main
+            git submodule update --init --recursive "$SUBMODULE"
+            echo "on branch $BRANCH (main 에서 새로 시작)"
+          fi
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      - name: Advance the submodule pointer
+        id: upd
+        run: |
+          set -euo pipefail
+          # main 의 포인터 — PR 전체 델타의 기준. gitlink 라 submodule 내용 없이도 읽힌다.
+          base="$(git rev-parse "origin/main:$SUBMODULE")"
+
+          cd "$SUBMODULE"
+          git fetch --quiet origin main
+          old="$(git rev-parse HEAD)"
+          new="$(git rev-parse origin/main)"
+          if [ "$old" = "$new" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "already at $new"
+            exit 0
+          fi
+          git checkout --quiet --detach "$new"
+
+          {
+            echo "changed=true"
+            echo "base=$base"
+            echo "old=$old"
+            echo "new=$new"
+            echo "short=$(git rev-parse --short "$new")"
+          } >> "$GITHUB_OUTPUT"
+
+          # 이번 실행에서 새로 얹히는 커밋 — 커밋 메시지용
+          {
+            echo 'inc<<SUBMODULE_INC'
+            git log --no-merges --format='- %s (%h)' "$old..$new" | head -40
+            echo 'SUBMODULE_INC'
+          } >> "$GITHUB_OUTPUT"
+
+          # main 의 포인터부터의 전체 델타 — PR 본문용.
+          # base 가 도달 불가일 수 있다 (cubrid-cluster-sandbox 히스토리 리라이트). 그때는 안내만 남긴다.
+          git fetch --quiet origin "$base" 2>/dev/null || true
+          {
+            echo 'log<<SUBMODULE_LOG'
+            if git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+              git log --no-merges --format='- %s (%h)' "$base..$new" | head -60
+            else
+              echo "- main 의 이전 포인터 \`$base\` 를 해석할 수 없다 — cubrid-cluster-sandbox 히스토리가 리라이트됐다. 이 PR 이 포인터를 되돌려 놓는다."
+            fi
+            echo 'SUBMODULE_LOG'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit and push
+        if: steps.upd.outputs.changed == 'true'
+        env:
+          PR: ${{ steps.br.outputs.pr }}
+          OLD: ${{ steps.upd.outputs.old }}
+          NEW: ${{ steps.upd.outputs.new }}
+          SHORT: ${{ steps.upd.outputs.short }}
+          INC: ${{ steps.upd.outputs.inc }}
+        run: |
+          set -euo pipefail
+          git add "$SUBMODULE"
+          git commit \
+            -m "chore(submodule): bump cubrid-cluster-sandbox to ${SHORT}" \
+            -m "$INC" \
+            -m "봇 커밋 — cubrid-cluster-sandbox 의 main 이 ${OLD:0:7} 에서 ${NEW:0:7} 로 움직여 submodule 포인터를 따라 올린다."
+          if [ -n "${PR:-}" ]; then
+            # 열린 PR 위에 쌓는다 — force 하지 않는다
+            git push origin "$BRANCH"
+          else
+            # main 에서 새로 시작 — 남아 있던 옛 봇 브랜치를 대체한다
+            git push --force-with-lease origin "$BRANCH"
+          fi
+
+      - name: Open or refresh the pull request
+        if: steps.upd.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULE_PAT }}
+          PR: ${{ steps.br.outputs.pr }}
+          BASE: ${{ steps.upd.outputs.base }}
+          NEW: ${{ steps.upd.outputs.new }}
+          SHORT: ${{ steps.upd.outputs.short }}
+          LOG: ${{ steps.upd.outputs.log }}
+        run: |
+          set -euo pipefail
+          title="chore(submodule): bump cubrid-cluster-sandbox to ${SHORT}"
+          {
+            printf '%s\n\n' 'cubrid-cluster-sandbox 의 `main` 이 움직여 submodule 포인터를 올린다.'
+            printf '`%s` → `%s`\n\n' "${BASE:0:7}" "${NEW:0:7}"
+            printf '%s\n\n' '## 변경 내용'
+            printf '%s\n\n' "$LOG"
+            printf '%s\n' '---'
+            printf '%s\n' '자동 생성 — `.github/workflows/bump-cluster-sandbox-submodule.yml`.'
+            printf '%s\n' '이 PR 이 열려 있는 동안 cubrid-cluster-sandbox 의 `main` 이 더 움직이면 새 PR 을 열지 않고 이 PR 에 커밋이 쌓인다.'
+          } > pr-body.md
+          if [ -n "${PR:-}" ]; then
+            gh pr edit "$PR" --title "$title" --body-file pr-body.md
+            echo "PR #$PR 갱신 — 커밋을 쌓았다"
+          else
+            gh pr create --base main --head "$BRANCH" --title "$title" --body-file pr-body.md
+          fi
+          rm -f pr-body.md

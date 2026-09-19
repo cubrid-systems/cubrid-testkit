@@ -98,3 +98,35 @@ func TestNoInstanceKeysMeansNoInstances(t *testing.T) {
 		t.Errorf("got %d instances, want none", len(insts))
 	}
 }
+
+// A role the fixed list does not name is still a role. CTP's own
+// conf/ha_repl.conf says "A master can have multiple slaves, for instance,
+// slave1, slave2", so the count is the configuration's -- and a list that
+// enumerated them would drop the second one without saying anything.
+func TestANumberedSlaveIsARoleLikeAnyOther(t *testing.T) {
+	cfg := load(t, "env.instance1.master.ssh.host=m\n"+
+		"env.instance1.slave1.ssh.host=s1\n"+
+		"env.instance1.slave2.ssh.host=s2\n"+
+		"default.slave2.ssh.port=2222\n")
+	insts, err := From(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(insts) != 1 {
+		t.Fatalf("got %d instances", len(insts))
+	}
+	for role, want := range map[string]string{"master": "m", "slave1": "s1", "slave2": "s2"} {
+		if got := insts[0].Role(role)["ssh.host"]; got != want {
+			t.Errorf("role %s: got %q want %q", role, got, want)
+		}
+	}
+	// And a default carries onto a role the list does not name, the same way it
+	// does onto one it does.
+	if got := insts[0].Role("slave2")["ssh.port"]; got != "2222" {
+		t.Errorf("default on a numbered role: got %q", got)
+	}
+	// A role nobody mentioned is still empty rather than missing.
+	if got := insts[0].Role("slave3"); len(got) != 0 {
+		t.Errorf("slave3: got %v", got)
+	}
+}

@@ -326,6 +326,9 @@ scripts/sizing.sh        what this machine measures — the disk, the cores — 
                          `testkit sizing <suite>` prints that decision
 extensions/              separate repositories testkit will drive
   cubrid-sqlancer/       submodule — a SQLancer provider for CUBRID
+  cluster-sandbox/       submodule — the tool that provisions the multi-node
+                         topologies HA testing needs. `internal/sandbox` drives
+                         it as a subprocess and reads its JSON
 docs/
   assets/                the diagrams these pages use
   category/              how to run each test category, and what to set

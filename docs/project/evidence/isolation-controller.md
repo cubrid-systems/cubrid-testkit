@@ -414,7 +414,7 @@ fourteen. At fourteen slots the machine kept 2,033 MB, just under the 2,048 MB `
 
 - The 25 are the corpus's, and **revised 2026-09-19**: they are not waited on. This said "until they are fixed"
   upstream, which put a gate here behind someone else's review queue. They are carried as patches instead
-  (`overrides/patches/isolation`, `case_patch_dir`), as shell's and sql's corpus problems already were — ADR-018
+  (`cubrid-testkit-patches/isolation`, `case_patch_dir`), as shell's and sql's corpus problems already were — ADR-018
   consequences 6 and 7. Six are written; the other twenty-two need an answer re-recorded from a run, because their
   fix adds a statement that prints. `TESTKIT_ISOLATION_CTL` stays off until those are written and this gate has
   been run on the patched corpus.

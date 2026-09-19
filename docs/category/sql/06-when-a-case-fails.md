@@ -80,7 +80,7 @@ case that read what an earlier case left changes its verdict with it. What that 
 | `-1071 Too many session variables` | CUBRID holds twenty per connection, and cases before this one left theirs |
 | a `Query Plan:` or `Trace Statistics:` block missing | what a trace prints depends on the server's state, and sometimes on nothing the case controls |
 
-Measured, with the patches this repository ships: **0 to 2 cases of 17,459 per six-slot run**, against
+Measured, with the patch set applied: **0 to 2 cases of 17,459 per six-slot run**, against
 0 to 2 per run for CTP by itself at the same pins. The families that could be fixed are fixed; what
 is left is in [what is unstable](#what-is-unstable-at-the-moment).
 
@@ -91,7 +91,7 @@ there, a run can carry it:
 
 ```
 [sql]
-case_patch_dir=/path/to/cubrid-testkit/patches/sql
+case_patch_dir=/path/to/cubrid-testkit-patches/sql
 ```
 
 The patches are unified diffs, one per case, applied before the first case and reverted at the end —
@@ -101,7 +101,9 @@ nobody asked. What was patched is written to `patched.txt` in the result tree, a
 output, and shown on the page: a verdict from patched source is a claim about the patched case.
 
 The principle behind every one of them is the same — **a case says what it needs and cleans up what
-it leaves** — and [`overrides/patches/README.md`](../../../overrides/patches/README.md) says what each does and why. To
+it leaves** — and the README in
+[cubrid-testkit-patches](https://github.com/cubrid-systems/cubrid-testkit-patches) (private)
+says what each does and why. To
 write one: fix the case in a copy of the corpus, run it, take the `.result` it produces as the new
 answer rather than writing one by hand, and diff both files with paths relative to the case
 directory.

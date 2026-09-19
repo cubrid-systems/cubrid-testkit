@@ -190,12 +190,12 @@ func mustModuleRoot(t *testing.T) string {
 	return p[:strings.LastIndex(p, "/")]
 }
 
-// $USER said hgryoo while every process in the namespace ran as root, so every
+// $USER said the outside user while every process in the namespace ran as root, so every
 // `ps -u $USER` in the corpus silently matched nothing -- including the one in
 // _37_cubrid/_02_server, which printed "cubrid server start: success" and then
 // "DB testdb can't start!" on the next line.
 func TestInsideSaysWhoTheProcessesActuallyAre(t *testing.T) {
-	got := inside([]string{"PATH=/bin", "USER=hgryoo", "HOME=/home/hgryoo", "LOGNAME=hgryoo"})
+	got := inside([]string{"PATH=/bin", "USER=qa", "HOME=/home/qa", "LOGNAME=qa"})
 	var user, logname, home int
 	for _, kv := range got {
 		switch {
@@ -206,7 +206,7 @@ func TestInsideSaysWhoTheProcessesActuallyAre(t *testing.T) {
 			}
 		case strings.HasPrefix(kv, "LOGNAME="):
 			logname++
-		case kv == "HOME=/home/hgryoo":
+		case kv == "HOME=/home/qa":
 			home++
 		}
 	}

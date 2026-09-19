@@ -269,7 +269,7 @@ if [ "$family" = sql ]; then
   say "  [sql]"
   say "  # parallel_slots unset: the runner sizes it from this machine's own runs (ADR-020)."
   say "  # This machine's figures above suggest about ${slots}; testkit sizing sql says what a run will take."
-  say "  case_patch_dir=<this repository>/patches/sql"
+  say "  case_patch_dir=<a cubrid-testkit-patches checkout>/sql"
   say ""
   say "  TESTKIT_NATIVE_SQL=1 TESTKIT_CONTAIN=1"
   [ -n "$best_dir" ] && say "  TESTKIT_SLOT_ROOT=${best_dir}   # ${best_ms} ms a synchronous write, the fastest of those tried"

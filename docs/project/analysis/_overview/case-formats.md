@@ -1,9 +1,9 @@
 # Case Formats — testcases 레포 케이스 파일 포맷 분포
 
 **Source repos:**
-- `/home/hgryoo/dev/cubrid-testcases` (public — sql, medium, isolation, tool)
-- `/home/hgryoo/dev/cubrid-testcases-private-ex` (private extension — shell, shell_heavy, shell_perf, scripts)
-- `/home/hgryoo/dev/cubrid-testcases-private` (private — HA, interface, longcase, manually, random_query_generator, shell_ext)
+- `cubrid-testcases` (public — sql, medium, isolation, tool)
+- `cubrid-testcases-private-ex` (private extension — shell, shell_heavy, shell_perf, scripts)
+- `cubrid-testcases-private` (private — HA, interface, longcase, manually, random_query_generator, shell_ext)
 
 또한 CTP 레포 안의 다음 디렉터리가 *케이스 실행 시 원격 환경에 배치되어야* 하는 자산:
 - `cubrid-testtools/CTP/isolation/ctltool/` — isolation .ctl 케이스의 native 실행기 + runone.sh

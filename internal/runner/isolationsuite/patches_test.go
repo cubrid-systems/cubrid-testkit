@@ -2,6 +2,7 @@ package isolationsuite
 
 import (
 	"context"
+	"errors"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -110,6 +111,9 @@ func TestTheShippedIsolationPatchesApplyToTheCorpus(t *testing.T) {
 		corpus = root
 	}
 	pdir, perr := patch.Shipped("isolation")
+	if errors.Is(perr, patch.ErrNoPatchSet) {
+		t.Skip("set TESTKIT_PATCHES to a cubrid-testkit-patches checkout")
+	}
 	if perr != nil {
 		t.Fatal(perr)
 	}

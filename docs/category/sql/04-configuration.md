@@ -75,7 +75,7 @@ For a 30 GB, 16-core machine whose fast disk is `/data`:
 ```
 [sql]
 parallel_slots=6
-case_patch_dir=/path/to/cubrid-testkit/patches/sql
+case_patch_dir=/path/to/cubrid-testkit-patches/sql
 status_http=on
 ```
 

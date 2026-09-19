@@ -197,7 +197,7 @@ wait at line 37 naming C2.** (`full-1` failed it too, differently: a catalog lis
 **Revised 2026-09-19.** This section said the switch stays off *until upstream fixes the cases*, which made a gate
 here wait on someone else's review queue. It does not any more: the fixes are carried in this repository as
 patches, the way shell's and sql's corpus problems already were, and ADR-018 consequences 6 and 7 say so. What
-`overrides/patches/isolation` holds is written to be sent upstream as it stands, and the pull request that lands
+`cubrid-testkit-patches/isolation` holds is written to be sent upstream as it stands, and the pull request that lands
 one deletes its patch — the run then refuses the case, which is how this repository finds out (ADR-013's rule,
 applied here).
 

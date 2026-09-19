@@ -93,7 +93,7 @@ differ" is a quantity with nothing to compare it to.
 
 **A patched case is judged, and named** — added 2026-09-19. Some cases cannot pass on this machine for
 reasons that are neither runner's: they assume `$CUBRID` sits under `$HOME`, that `[common]` is empty,
-that the linker resolves libraries in an order it has not for years. `overrides/patches/shell` carries
+that the linker resolves libraries in an order it has not for years. `cubrid-testkit-patches/shell` carries
 the 48 diffs that fix them, and **the gate is run on the patched corpus**.
 
 Where the patch is applied is the decision, not whether. `evidence/compare/shard.sh` puts it in the
@@ -149,7 +149,7 @@ Excluded from the evidence, each with a reason:
 5. **A shard that differs owes a self-check before its differences are reported** — added 2026-09-08.
    The comparison harness produces the difference; the self-check decides whether it is about the
    runners. Reporting one without the other is what the first 217-case run did.
-6. **The patch set is part of the evidence** — added 2026-09-19. `overrides/patches/shell` is pinned by
+6. **The patch set is part of the evidence** — added 2026-09-19. `cubrid-testkit-patches/shell` is pinned by
    the run that used it: the report's `PATCHED` block lists every case, and a patch that stops applying
    stops the shard rather than the case, because upstream having moved is a thing to find out about
    rather than compare past. Sending these diffs upstream is a separate track and not a precondition of

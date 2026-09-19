@@ -177,7 +177,9 @@ JUnit report and a `.result` beside every case; [`category/sql/`](docs/category/
 them.
 
 One file is this runner's own, and it is absent unless it has something to say: `patched.txt`, the
-cases that did not run as the corpus has them. See [`overrides/patches/README.md`](overrides/patches/README.md).
+cases that did not run as the corpus has them. The patches themselves are in
+[cubrid-testkit-patches](https://github.com/cubrid-systems/cubrid-testkit-patches), which is
+private, and its README says what each one is for.
 
 ## The categories
 

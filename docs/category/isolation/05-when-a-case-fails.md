@@ -114,7 +114,7 @@ same kind and passes when it is run alone. Point `case_patch_dir` at them and ea
 statement it was missing:
 
 ```
-case_patch_dir=/path/to/cubrid-testkit/overrides/patches/isolation
+case_patch_dir=/path/to/cubrid-testkit-patches/isolation
 ```
 
 The run then says so — on standard output before the first case, on the page's finished table, and in `patched.txt`

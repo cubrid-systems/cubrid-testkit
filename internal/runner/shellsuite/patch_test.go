@@ -1,6 +1,7 @@
 package shellsuite
 
 import (
+	"errors"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -68,6 +69,9 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 		t.Skipf("no shell tree under %s", root)
 	}
 	pdir, perr := patch.Shipped("shell")
+	if errors.Is(perr, patch.ErrNoPatchSet) {
+		t.Skip("set TESTKIT_PATCHES to a cubrid-testkit-patches checkout")
+	}
 	if perr != nil {
 		t.Fatal(perr)
 	}

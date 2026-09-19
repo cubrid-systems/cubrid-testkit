@@ -19,7 +19,7 @@
 #   WRAP          optional command to run each runner under -- in practice the
 #                 namespace wrapper. Both runners must get the same one, or the
 #                 comparison is not one.
-#   PATCHES       optional directory of case patches, overrides/patches/shell.
+#   PATCHES       optional directory of case patches, cubrid-testkit-patches/shell.
 #                 Applied to the corpus here, before either runner, and taken
 #                 out after both.
 #
@@ -77,7 +77,7 @@ results=$CTP_HOME/result/shell/current_runtime_logs
 #
 # A patch is named for its case's path under the corpus with two segments taken
 # out: the "cases" every case sits in, and a file name that repeats its
-# directory (overrides/patches/README.md). Putting the separators back and
+# directory (the patch set's README). Putting the separators back and
 # adding cases/ recovers the directory the runner applies it in. Where one
 # directory holds two cases the name keeps the case's own last segment, so that
 # is the second candidate. A name that matches neither is a patch for some other

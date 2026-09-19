@@ -115,5 +115,5 @@ sed -i '/^[[:space:]]*db_volume_size[[:space:]]*=/d;/^[[:space:]]*log_volume_siz
 ```
 
 `case_patch_dir` applies it into the overlay, `cubrid.conf` is restored before every case, so it
-reaches nothing else, and the corpus on disk is unchanged. See
-[`../../../overrides/patches/README.md`](../../../overrides/patches/README.md).
+reaches nothing else, and the corpus on disk is unchanged. The patch set and its README are in
+[cubrid-testkit-patches](https://github.com/cubrid-systems/cubrid-testkit-patches), which is private.

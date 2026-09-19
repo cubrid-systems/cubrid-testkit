@@ -140,7 +140,7 @@ func inContainer() bool {
 // inside is the environment as it is true in the namespace rather than outside
 // it.
 //
-// $USER said hgryoo while every process in the namespace ran as root, and 23 of
+// $USER said the user outside while every process in the namespace ran as root, and 23 of
 // the corpus's 24 uses of $USER are a process or IPC filter -- `ps -u $USER`,
 // `ipcs | grep $USER`, `ps -ef | grep $USER`. All of them silently matched
 // nothing. Seven cases failed on it directly: _37_cubrid/_01_service,
@@ -148,7 +148,7 @@ func inContainer() bool {
 // _35_cub_js/bug_xdbms212 and _36_cub_master/bug_xdbms40 -- exactly the set of
 // cases in the corpus that select processes by user. _02_server printed
 // "cubrid server start: success" and then "DB testdb can't start!" on the next
-// line, because `ps -u hgryoo` could not see the server it had just started.
+// line, because `ps -u <that user>` could not see the server it had just started.
 //
 // CTP's own cleanup is on the same list (init.sh kills by `ps -u $USER` and
 // sweeps broker segments by `ipcs | grep $USER`), so it has been finding nothing

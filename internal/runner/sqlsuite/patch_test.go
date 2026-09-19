@@ -2,6 +2,7 @@ package sqlsuite
 
 import (
 	"context"
+	"errors"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -116,6 +117,9 @@ func TestTheShippedSQLPatchesApplyToTheCorpus(t *testing.T) {
 		t.Skipf("no sql tree under %s", root)
 	}
 	pdir, perr := patch.Shipped("sql")
+	if errors.Is(perr, patch.ErrNoPatchSet) {
+		t.Skip("set TESTKIT_PATCHES to a cubrid-testkit-patches checkout")
+	}
 	if perr != nil {
 		t.Fatal(perr)
 	}

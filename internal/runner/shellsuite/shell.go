@@ -880,7 +880,8 @@ func (s *Shell) caseList(ctx context.Context, ch exec.Channel, sink *result.Sink
 	// reason. The corpus's own daily_regression list is upstream's judgement
 	// about a case; a list of cases this machine cannot run is a fact about the
 	// machine, and it has to be readable and deletable on its own -- see
-	// overrides/machine-exclusions/README.md. CTP took a single path and that still works.
+	// machine-exclusions/README.md in cubrid-testkit-patches. CTP took a single
+	// path and that still works.
 	if files := ExcludeFiles(cfg.GetOr("testcase_exclude_from_file", "")); len(files) > 0 {
 		var patterns []string
 		for _, file := range files {

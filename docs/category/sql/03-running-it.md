@@ -46,7 +46,7 @@ need_make_locale=yes
 [sql]
 parallel_slots=6
 status_http=on
-case_patch_dir=/path/to/cubrid-testkit/patches/sql
+case_patch_dir=/path/to/cubrid-testkit-patches/sql
 
 [sql/cubrid.conf]
 data_buffer_size=512M

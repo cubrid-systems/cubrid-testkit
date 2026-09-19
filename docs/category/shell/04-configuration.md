@@ -139,7 +139,7 @@ scenario_ram_mb=18432
 scenario_ram_high_water=80
 case_plan=/path/to/plan           # written on the first run, read on the next
 case_sizes=/path/to/sizes         # likewise
-case_patch_dir=/path/to/patches/shell
+case_patch_dir=/path/to/cubrid-testkit-patches/shell
 case_logs=fail                    # what a failed case wrote, kept
 status_http=on
 ```

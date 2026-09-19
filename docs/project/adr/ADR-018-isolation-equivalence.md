@@ -106,7 +106,7 @@ and seven that fail in every run.**
 5. **Parallel slots are compared to one slot by the same rules.** What a slot changes is order and load, which are the
    two things this corpus is already sensitive to.
 6. **A gate run with a replaced executor is run on the patched corpus** — added 2026-09-19. Rule 3a names the
-   cases the corpus owns; `overrides/patches/isolation` carries them as diffs and a run applies them through
+   cases the corpus owns; `cubrid-testkit-patches/isolation` carries them as diffs and a run applies them through
    `case_patch_dir`, so the controller is measured against cases that order what they print. This is ADR-013's
    arrangement for shell (*"A patched case is judged, and named"*): the patched set is listed where the verdict
    is, and a patch that stops applying stops the run rather than the case.

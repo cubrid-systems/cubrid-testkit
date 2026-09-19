@@ -28,7 +28,7 @@ export COMPARE_ENV=/path/to/env.sh     # CTP_HOME, CUBRID, JAVA_HOME, PATH, ...
 export TESTKIT=/path/to/testkit
 export CONF=/path/to/shell.conf        # scenario= is replaced per shard
 export WRAP=/path/to/in-ns.sh          # optional, and in practice required
-export PATCHES=/path/to/overrides/patches/shell   # optional; see below
+export PATCHES=/path/to/cubrid-testkit-patches/shell   # optional; see below
 
 ./shards.sh "$CORPUS" 250 | while read -r n path; do
   ./shard.sh "$path" /somewhere/out
@@ -49,7 +49,7 @@ To compare two trees you already have, without running anything:
 
 ## The corpus both runners read
 
-`PATCHES` is `overrides/patches/shell`, and `shard.sh` applies it **to the
+`PATCHES` is `cubrid-testkit-patches/shell`, and `shard.sh` applies it **to the
 corpus**, before CTP runs, and takes it out after testkit has. Not through
 testkit's own `case_patch_dir`, which the generated conf drops: that key would
 patch one side and not the other, and every patched case would come back as a
@@ -64,7 +64,7 @@ runner happens to read is the form that does not.
 What this buys is that the gate can be run at all on a machine that is not the
 one the corpus was written on. The 48 patches are cases that assume `$CUBRID`
 sits under `$HOME`, that `[common]` is empty, that the linker resolves libraries
-in an order it has not for years (`overrides/patches/README.md`). Without them
+in an order it has not for years (the patch set's README). Without them
 those cases fail on both sides, for the same reason, and a comparison of two
 identical failures is a comparison of nothing. With them the report says so in
 its own block:

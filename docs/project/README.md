@@ -41,6 +41,7 @@
   - [regression-shell](evidence/regression-shell.md) · [parallel-shell](evidence/parallel-shell.md) — shell
   - [sql-baseline](evidence/sql-baseline.md) · [sql-native](evidence/sql-native.md) · [regression-sql](evidence/regression-sql.md) — sql·medium (ADR-017 게이트 포함)
   - [isolation-baseline](evidence/isolation-baseline.md) — isolation (ADR-018 게이트 포함)
+  - [ha-topology](evidence/ha-topology.md) — sandbox 쌍 위에서 러너가 도는 것, 그리고 동결 HA 자산이 아직 요구하는 네 가지 (ADR-022)
   - [compare/](evidence/compare/README.md) — 정규화 후 비교하는 방법 (ADR-013)
 
 돌리는 사람을 위한 문서는 한 단계 위에 있다.

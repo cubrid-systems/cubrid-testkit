@@ -52,7 +52,7 @@ E7(workload)의 경계, 사다리 순위 6(recovery/crash).
 | 위치 | `extensions/cluster-sandbox` — submodule, `bot/bump-cluster-sandbox` 가 포인터를 따라 올린다 |
 | 통합 형태 | subprocess + `--json` 아티팩트 (ADR-001 Consequence 4). 링크하지 않는다 |
 | 이쪽 코드 | `internal/sandbox` — Channel 하나와 topology provider 하나 |
-| 기록 | **ADR-022 (미작성)** — 이 표가 그 자리를 지킨다 |
+| 기록 | [ADR-022](../../project/adr/ADR-022-topology-provider.md) — 확정 (2026-09-20) |
 
 **착수 순서는 이 표가 정하지 않는다.** fuzzing 계열(E3·E5·E9)과 미등록 후보 2건의 우선순위는 ROADMAP **§6a 사다리** 가 단일 출처다.
 

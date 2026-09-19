@@ -53,7 +53,7 @@ shell/init_path/run_shell.sh ──▶ shell.main.RunShellMain                  
 | 구 클래스 | 축 | 신 컴포넌트 |
 |---|---|---|
 | `Deploy` · `DeployOneNode` | T/O 혼재 | `runner/shellsuite/deploy` — 인스턴스 파라미터를 `ini.sh` 로 conf 에 반영, `~/.CUBRID_SHELL_FM` 스냅샷. **`deploy_ctp`(CTP 자기 업그레이드)와 `deploy_build`(`run_cubrid_install`)는 축 O — 제외** (2026-09-02). 어떤 빌드를 언제 설치할지는 운영 결정이고, 러너는 이미 설치된 빌드를 시험한다 |
-| `DeployHA` | T | 동상. ⚠️ **이식하되 미검증** — HA 트리 162 케이스는 master/slave 토폴로지가 없어 회귀 증거에서 제외된다 (ADR-013). `evidence/regression-shell.md` 에 미검증으로 명시할 것 |
+| `DeployHA` | T | **미이식 (2026-09-20 정정)** — 이 표는 "이식하되 미검증" 이라 적었으나 `internal/` 에 `HA.properties` 를 쓰는 코드는 없었다. 케이스 수도 162 가 아니라 **367** 이다(`evidence/spec-corrections.md`). 하는 일은 `$init_path/HA.properties` 에 master/slave 주소와 포트·SHM id 를 쓰는 것뿐이고, 실제 HA 구성은 케이스가 `make_ha.sh` 로 한다. 토폴로지는 ADR-022 가 정한 대로 `cubrid-cluster-sandbox` 또는 두 대 경로에서 오고, 이 클래스의 Go 판은 그 위에 얹힌다 |
 | **`TestCaseGithub` · `TestCaseSVN`** | **O — 제외 (2026-09-02)** | 케이스 코퍼스를 언제 갱신할지는 운영 결정이다. 단 `testcase_update_yn=yes` 는 **실패**시킨다 — 갱신을 요청했는데 조용히 안 되면 낡은 케이스로 통과했다는 거짓 신호가 난다 (`migration-exclusions.md` §2a) |
 
 ### 3-3. dispatch/ · main/ — 13 클래스

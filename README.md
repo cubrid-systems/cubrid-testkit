@@ -81,7 +81,7 @@ This is the one place the migration's state is recorded; everything else in this
 | `shell` · `rqg` | natively behind `TESTKIT_NATIVE=shell` | [ADR-013](docs/project/adr/ADR-013-regression-equivalence.md) — gate **open** |
 | `sql` · `medium` | natively behind `TESTKIT_NATIVE=sql` | [ADR-017](docs/project/adr/ADR-017-sql-equivalence.md) — gate **passed** |
 | `isolation` | natively behind `TESTKIT_NATIVE=isolation`, `runone.sh` still executing every case | [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md) — gate **met** |
-| `isolation`, with its controller too | `TESTKIT_ISOLATION_CTL=1` as well: testkit's own controller in place of ctltool's `qactl`, keeping `qacsql` and `runone.sh`. 15.7% faster over the whole corpus | [ADR-019](docs/project/adr/ADR-019-isolation-controller.md) — gate **does not pass**: 25 cases whose answers record the order `qactl`'s pauses produced. Off until they are fixed upstream |
+| `isolation`, with its controller too | `TESTKIT_ISOLATION_CTL=1` as well: testkit's own controller in place of ctltool's `qactl`, keeping `qacsql` and `runone.sh`. 15.7% faster over the whole corpus | [ADR-019](docs/project/adr/ADR-019-isolation-controller.md) — gate **does not pass**: 27 cases whose answers record the order `qactl`'s pauses produced. Six are carried as patches here; the rest need an answer re-recorded, and the gate is then run on the patched corpus ([ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md) 3a, 6) |
 | `kcc` `neis05` `neis08` `sql_by_cci` `ha_repl` `cdc_repl` `jdbc` `webconsole` — and any family above whose switch is unset | CTP, as a subprocess, unchanged | — |
 
 `TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of them.
@@ -296,7 +296,9 @@ opt-in when the comparison clears over the *whole* corpus
 ([ADR-013](docs/project/adr/ADR-013-regression-equivalence.md)) — too many hours to run by hand, so
 [`project/evidence/compare/`](docs/project/evidence/compare/README.md) runs it shard by shard, with
 `shard-clean.sh` putting the tree back between the two runs because a case that leaves a database
-behind would otherwise hand it to whichever runner goes second.
+behind would otherwise hand it to whichever runner goes second. The 48 cases that cannot pass on any
+machine but the one they were written on are patched **in the corpus**, before either runner, so both
+read the same source and the report names which they were.
 
 **Corrections are recorded where the mistake was made** — the CLI survey that justified the project,
 the freeze specification, the corpus counts, the first difference this runner was wrongly cleared

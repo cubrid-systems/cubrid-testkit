@@ -21,6 +21,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/dispatch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/feedback"
+	"github.com/cubrid-systems/cubrid-testkit/internal/patch"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
@@ -239,6 +240,51 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	}
 	fmt.Printf("The Number of Test Case : %d\n", len(cases))
 
+	// ---- patches --------------------------------------------------------------
+	// The corpus changes this run carries and does not own, as sql does it:
+	// applied once before the first case and reverted at the end, never per case.
+	// Two reasons, and either alone would decide it. The slots share the tree --
+	// with scenario_disk each has a layer over it, and a patch applied after a
+	// layer exists lands in one slot's upper directory instead of the tree every
+	// slot reads. And a `.ctl` is read by the controller when the case starts, so
+	// there is no moment inside a case at which patching it would mean anything.
+	//
+	// Before the deploy, so that a patch that will not apply costs the second it
+	// takes to find out rather than the databases the deploy has already made.
+	corpus := scenario
+	if !filepath.IsAbs(corpus) {
+		corpus = filepath.Join(os.Getenv("HOME"), corpus)
+	}
+	// A case is recorded relative to $HOME when the corpus is under it, which is
+	// CTP's form and what the dispatch files keep (cases.go, resolveScenario). A
+	// patch is found by where the file is, so the lookup is done on absolute
+	// paths and the records keep the name they had.
+	absCases := make([]string, len(cases))
+	for i, c := range cases {
+		absCases[i] = c
+		if !filepath.IsAbs(c) {
+			absCases[i] = filepath.Join(os.Getenv("HOME"), c)
+		}
+	}
+	patches, err := patch.Load(cfg.GetOr("case_patch_dir", ""), corpus, ".ctl", absCases)
+	if err != nil {
+		return quit("%v", err)
+	}
+	for _, line := range patches.Describe() {
+		fmt.Println(line)
+	}
+	if err := applyPatches(ctx, here, patches, absCases); err != nil {
+		return quit("%v", err)
+	}
+	// Registered before the slots are opened, so it runs after they are closed:
+	// reverting under a live overlay would change the tree a slot is reading.
+	defer putPatchesBack(here, patches, absCases)
+	// Beside the records it is about to write, rather than at the end: a run that
+	// dies still says which of its verdicts are about a patched case.
+	if err := patches.Report(sink.Dir()); err != nil {
+		fmt.Fprintf(os.Stderr, "[WARN] cannot record what was patched: %v\n", err)
+	}
+
 	// ---- slots ----------------------------------------------------------------
 	// Every slot gets ctltool's directory behind an overlay of its own: runone.sh
 	// runs `make clean qactl qacsql` there, and keeps .test.log, runone.log and
@@ -255,10 +301,6 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	meter := sizing.StartMeter(sampleEvery, nil)
 	defer meter.Stop()
 	ctltool := filepath.Join(req.Home.Path, "isolation", "ctltool")
-	corpus := scenario
-	if !filepath.IsAbs(corpus) {
-		corpus = filepath.Join(os.Getenv("HOME"), corpus)
-	}
 	onDisk := cfg.Bool("scenario_disk", false)
 	guards := guardsFor(os.Getenv("HOME"), os.Getenv("CUBRID"))
 	if guards.cubridLog != "" {
@@ -327,6 +369,14 @@ func (r *Isolation) Run(ctx context.Context, req runner.Request) error {
 	opts := optionsOf(cfg)
 	board, stopBoard := openBoard(cfg, cases, slots, onDisk, filepath.Join(sink.Dir(), "feedback.log"), buildID, plan.Why)
 	defer stopBoard()
+	// A verdict from patched source is a claim about the patched case and not
+	// about the corpus, so every place the page shows a verdict shows that too.
+	// The patches went in before the slots, so every one of them is known here.
+	for i, c := range cases {
+		if pf := patches.For(absCases[i]); pf != "" {
+			board.Patched(c, pf)
+		}
+	}
 	for i, s := range slots {
 		w := &worker{slot: s.Label, envID: envID, ch: s.Channel(), queue: queue, sink: sink, report: report,
 			opts: opts, board: board, meter: meter, ctltool: ctltool,

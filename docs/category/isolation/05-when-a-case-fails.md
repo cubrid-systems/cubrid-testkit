@@ -6,6 +6,7 @@
 - [Lines that are not the failure](#lines-that-are-not-the-failure)
 - [Cases that fail everywhere](#cases-that-fail-everywhere)
 - [Cases that CTP does not reproduce](#cases-that-ctp-does-not-reproduce)
+- [Cases that pass because the controller is slow](#cases-that-pass-because-the-controller-is-slow)
 - [Running one case again](#running-one-case-again)
 - [Cores and fatal errors](#cores-and-fatal-errors)
 
@@ -93,6 +94,36 @@ runner:
 - `_06_features/cbrd_22705_online_index_parallel/create_ddl/show_001`
 
 A failure among these is not evidence about the change under test until it fails alone as well.
+
+## Cases that pass because the controller is slow
+
+These fail only with `TESTKIT_ISOLATION_CTL=1`, the controller of
+[ADR-019](../../project/adr/ADR-019-isolation-controller.md). A default run uses ctltool's `qactl` and never sees
+them.
+
+The case gives two clients statements in a row with no `MC: wait until …` between them, and the answer records the
+order that `qactl`'s two fixed 100 ms sleeps happened to produce. It is not a property of the database, and it is
+not a defect in either controller: the faster one sends the second statement when the script says to send it, which
+is immediately. Twenty-seven cases are like this, each one failing alone, every attempt.
+
+The tell is a failure whose diff holds **the same lines in another order**, or a `wait until C<n> blocked` that ends
+`ERROR! Client <n> is ready.` and dumps the lock table.
+
+Five of the twenty-seven are carried as patches, and so is `_01_ReadCommitted/catalog/db_index_04`, which is the
+same kind and passes when it is run alone. Point `case_patch_dir` at them and each case runs with the ordering
+statement it was missing:
+
+```
+case_patch_dir=/path/to/cubrid-testkit/overrides/patches/isolation
+```
+
+The run then says so — on standard output before the first case, on the page's finished table, and in `patched.txt`
+in the result directory. A verdict from a patched case is a claim about the patched case, not about the corpus.
+
+The other twenty-two are not written yet. Twenty-one need their answers re-recorded, because the fix is a client
+taking its snapshot in a statement of its own and such a statement prints; the twenty-second turns on which of two
+clients the engine releases first. Why each one fails, and the line it turns on, is in
+[`project/evidence/isolation-corpus-races.md`](../../project/evidence/isolation-corpus-races.md).
 
 ## Running one case again
 

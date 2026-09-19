@@ -91,6 +91,27 @@ difference means anything -- 24 new lines in `feedback.log` against 2,874 betwee
 the four files that carry verdicts identical even across runs. Without that number, "2,874 lines
 differ" is a quantity with nothing to compare it to.
 
+**A patched case is judged, and named** — added 2026-09-19. Some cases cannot pass on this machine for
+reasons that are neither runner's: they assume `$CUBRID` sits under `$HOME`, that `[common]` is empty,
+that the linker resolves libraries in an order it has not for years. `overrides/patches/shell` carries
+the 48 diffs that fix them, and **the gate is run on the patched corpus**.
+
+Where the patch is applied is the decision, not whether. `evidence/compare/shard.sh` puts it in the
+**tree**, before CTP runs and out again after testkit has, and drops `case_patch_dir` from the conf it
+generates. A patch is a diff against a case; which runner executes the patched case is not part of it.
+Left to the conf key only testkit reads, one side would run patched source and the other would not, and
+every patched case would come back as a difference between the runners — a difference the harness would
+be reporting about itself.
+
+Unpatched, these cases fail on **both** sides for the same reason, so they compare clean and the gate
+would pass with them in. Nothing about equivalence is lost by leaving them broken; what is lost is the
+corpus. A case that fails for the machine exercises neither runner, and 3,452 cases of which some number
+were never executed is not the number this gate claims.
+
+So the patched set is named where the verdict is: the report carries a `PATCHED` block with the count and
+the case names, and the evidence quotes it. A verdict from patched source is not the same claim as a
+verdict about the corpus, and a gate that cannot list which is which is not a gate.
+
 **Corpus.** The exit evidence runs the whole shell corpus — `cubrid-testcases-private-ex/shell`,
 3,452 cases. The development loop uses `_01_utility` (217 cases) as a smoke set: deterministic,
 low external dependency, and chosen for a reason that can be stated.
@@ -128,3 +149,9 @@ Excluded from the evidence, each with a reason:
 5. **A shard that differs owes a self-check before its differences are reported** — added 2026-09-08.
    The comparison harness produces the difference; the self-check decides whether it is about the
    runners. Reporting one without the other is what the first 217-case run did.
+6. **The patch set is part of the evidence** — added 2026-09-19. `overrides/patches/shell` is pinned by
+   the run that used it: the report's `PATCHED` block lists every case, and a patch that stops applying
+   stops the shard rather than the case, because upstream having moved is a thing to find out about
+   rather than compare past. Sending these diffs upstream is a separate track and not a precondition of
+   this gate — a case fixed upstream deletes its patch, and the gate is run again on a corpus with one
+   fewer.

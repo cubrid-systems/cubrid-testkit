@@ -26,6 +26,7 @@ The conf is CTP's flat `isolation.conf`: `key=value`, `#` comments, `${VAR}` exp
 | `parallel_slots` | sized | cases at once, each slot with its own `ctldb`. Unset, the runner takes the smallest of what memory holds at what a slot cost in this machine's runs (1,750 MB until it has run the corpus), one per CPU, four on a first run and twice the most run since, and the count where more slots were measured not to pay; it says what it chose on standard error. A value is used as written; `1` runs serially, as CTP does ([running it](03-running-it.md#slots)) |
 | `parallel` | measured | how an unset `parallel_slots` is sized: `conservative` doubles the budget and does not grow; `aggressive` takes 0.8 of it, grows four times and ignores the knee. Anything else is `measured`, with a warning ([ADR-020](../../project/adr/ADR-020-sizing.md)) |
 | `scenario_disk` | no | puts the cases tree behind an overlay per slot, so `result/` and `<name>.result` are not written into it |
+| `case_patch_dir` | off | corpus changes this run carries, applied before the first case and reverted at the end. A case whose answer records how slow `qactl` is fails under any controller that is not — see [when a case fails](05-when-a-case-fails.md#cases-that-pass-because-the-controller-is-slow). Unset, nothing is patched, which is the right default for a run whose job is to report the corpus as it stands |
 | `status_http` | off | the status page: `on`, a port, or `host:port` |
 
 ## Engine parameters

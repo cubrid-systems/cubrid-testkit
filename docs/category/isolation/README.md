@@ -11,7 +11,7 @@ the runner's. These documents are the as-built guide.
 | **[2. Writing a case](02-writing-a-case.md)** | the `.ctl` language, where answers live, and what a case should not rely on |
 | **[3. Running it](03-running-it.md)** | from an install and a corpus to a verdict, and what a run leaves behind |
 | **[4. Configuration](04-configuration.md)** | every key and switch the runner reads |
-| **[5. When a case fails](05-when-a-case-fails.md)** | reading a verdict, and the cases CTP cannot reproduce either |
+| **[5. When a case fails](05-when-a-case-fails.md)** | reading a verdict, the cases CTP cannot reproduce either, and the ones that pass only while the controller is slow |
 
 The design, the decisions and what was measured on the way are
 [`../../project/design/module-isolation.md`](../../project/design/module-isolation.md),

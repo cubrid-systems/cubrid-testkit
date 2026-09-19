@@ -115,10 +115,13 @@ func TestTheShippedSQLPatchesApplyToTheCorpus(t *testing.T) {
 	if _, err := os.Stat(sql); err != nil {
 		t.Skipf("no sql tree under %s", root)
 	}
-	pdir := filepath.Join("..", "..", "..", "patches", "sql")
+	pdir, perr := patch.Shipped("sql")
+	if perr != nil {
+		t.Fatal(perr)
+	}
 	entries, err := os.ReadDir(pdir)
 	if err != nil {
-		t.Skip("no patches directory")
+		t.Fatalf("no patch directory at %s: %v", pdir, err)
 	}
 
 	var n int

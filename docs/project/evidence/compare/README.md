@@ -9,7 +9,7 @@ and says which corpus. It does not say how to *run* it, and at roughly 18
 seconds a case on each runner the whole corpus is somewhere between thirty and
 a hundred hours. That gap is what these four files fill.
 
-![How the whole corpus is compared: shards.sh cuts the corpus into shards, largest first; each shard runs on CTP and on testkit, with shard-clean.sh putting the tree back in between; compare.sh writes a report ending in COMPLETE clean or COMPLETE dirty, the unmatched lines go under NEW, and a completed shard is skipped on resume.](../../../assets/compare.svg)
+![How the whole corpus is compared: shards.sh cuts the corpus into shards, largest first; each shard runs on CTP and on testkit inside one patched tree, the patches going in before CTP and out after testkit, with shard-clean.sh putting the tree back in between the two runners; compare.sh writes a report ending in COMPLETE clean or COMPLETE dirty and naming under PATCHED which cases did not run as the corpus has them, the unmatched lines go under NEW, and a completed shard is skipped on resume.](../../../assets/compare.svg)
 
 ```
 shards.sh       the corpus, cut into units of work and of resume
@@ -28,6 +28,7 @@ export COMPARE_ENV=/path/to/env.sh     # CTP_HOME, CUBRID, JAVA_HOME, PATH, ...
 export TESTKIT=/path/to/testkit
 export CONF=/path/to/shell.conf        # scenario= is replaced per shard
 export WRAP=/path/to/in-ns.sh          # optional, and in practice required
+export PATCHES=/path/to/overrides/patches/shell   # optional; see below
 
 ./shards.sh "$CORPUS" 250 | while read -r n path; do
   ./shard.sh "$path" /somewhere/out
@@ -45,6 +46,44 @@ To compare two trees you already have, without running anything:
 ```sh
 ./compare.sh <ctp-result-dir> <testkit-result-dir> [label]
 ```
+
+## The corpus both runners read
+
+`PATCHES` is `overrides/patches/shell`, and `shard.sh` applies it **to the
+corpus**, before CTP runs, and takes it out after testkit has. Not through
+testkit's own `case_patch_dir`, which the generated conf drops: that key would
+patch one side and not the other, and every patched case would come back as a
+difference between the runners — a difference the harness would be reporting
+about itself.
+
+The distinction the placement makes is the whole of it. A patch is a diff
+against a case, and which runner executes the patched case is not part of it.
+Putting it in the tree is the form that says so; leaving it to a conf key one
+runner happens to read is the form that does not.
+
+What this buys is that the gate can be run at all on a machine that is not the
+one the corpus was written on. The 48 patches are cases that assume `$CUBRID`
+sits under `$HOME`, that `[common]` is empty, that the linker resolves libraries
+in an order it has not for years (`overrides/patches/README.md`). Without them
+those cases fail on both sides, for the same reason, and a comparison of two
+identical failures is a comparison of nothing. With them the report says so in
+its own block:
+
+```
+PATCHED  2 case(s) ran against a patch, on both sides
+  _08_shard~_02_cubrid_broker01
+  _08_shard~_03_cubrid_broker02
+```
+
+**A patch that no longer applies stops the shard**, writes no report, and says
+which case — so the resumed loop comes back to it rather than past it. That is
+the signal upstream has moved and the patch should be deleted, and it is worth
+more than the shard: a shard that quietly compared the unpatched case would put
+a difference in the evidence that is about the patch set.
+
+Only the patches whose case is inside the shard are applied. The names are
+relative to the corpus root, which is the `scenario=` the template names — so
+`CONF` still has to point at the whole corpus even when a shard is one family.
 
 **Measure the corpus before judging the runners.** A case whose verdict one
 runner cannot reproduce against itself cannot be evidence that two runners

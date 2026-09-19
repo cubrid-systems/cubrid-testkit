@@ -192,11 +192,37 @@ a client with nothing outstanding. In all five attempts of the volatile run C3 w
 foreign key C2 had not yet dropped, and `MC: wait until C2 ready;` waited out the attempt. **The fix is the
 wait at line 37 naming C2.** (`full-1` failed it too, differently: a catalog listing in another order.)
 
-## What this runner does about it meanwhile
+## What this runner does about it
 
-`TESTKIT_ISOLATION_CTL` stays off. Without it a run is ADR-007's — ctltool's `qactl`, unchanged — so nothing in
-CI moves while these cases say what they say. The controller is not wrong about them: it sends the second
-statement when the script says to send it, which is immediately.
+**Revised 2026-09-19.** This section said the switch stays off *until upstream fixes the cases*, which made a gate
+here wait on someone else's review queue. It does not any more: the fixes are carried in this repository as
+patches, the way shell's and sql's corpus problems already were, and ADR-018 consequences 6 and 7 say so. What
+`overrides/patches/isolation` holds is written to be sent upstream as it stands, and the pull request that lands
+one deletes its patch — the run then refuses the case, which is how this repository finds out (ADR-013's rule,
+applied here).
+
+Six are carried today. Each is an ordering statement, or an answer the corpus already has and never finished, and
+**none of them changes what the case prints** — which is why they could be written from the case's own text:
+
+| case | the change |
+|---|---|
+| `_01_ReadCommitted/catalog/db_index_key_04` | `:55` the wait names **C2** |
+| `_01_ReadCommitted/catalog/db_index_04` | `:37` the wait names **C2** |
+| `_02_RepeatableRead/index_column/common_index/aggregate/select_select_01` | `:33` `MC: wait until C1 ready;` between the two deletes |
+| `_04_RepeatableRead_ReadCommitted/index_column/common_index/groupby/delete_select_06` | `:32` `MC: sleep 1;` becomes `MC: wait until C2 ready;` |
+| `_06_features/cbrd_22705_online_index_parallel/…/groupby/delete_select_06` | the same line, the same fix |
+| `_04_RepeatableRead_ReadCommitted/…/unique_with_key/update_insert_01_1_complex` | `.answer1` gets `public.` in front of its two class names |
+
+**The other twenty-two are not written, and the reason is the same for twenty-one of them.** Kind 3's fix is for
+the client to take its snapshot in a statement of its own, and a statement of its own prints — so the answer
+changes and has to be re-recorded from a run. A `.ctl` patched without its answer fails the case for a new reason,
+which is worse than leaving it. The twenty-second is `trigger_update_11`, whose two moved lines belong to clients
+that are blocked on each other: which the engine releases first is not settled by the case's text.
+
+`TESTKIT_ISOLATION_CTL` therefore stays off, but for a different reason than before — not until upstream moves,
+until the remaining answers are re-recorded and ADR-019's gate has been run on the patched corpus. The controller
+was never wrong about these cases: it sends the second statement when the script says to send it, which is
+immediately.
 
 ## Why this is worth fixing upstream rather than working around
 

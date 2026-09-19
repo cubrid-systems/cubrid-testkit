@@ -67,9 +67,12 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 	if _, err := os.Stat(shell); err != nil {
 		t.Skipf("no shell tree under %s", root)
 	}
-	pdir := filepath.Join("..", "..", "..", "patches", "shell")
+	pdir, perr := patch.Shipped("shell")
+	if perr != nil {
+		t.Fatal(perr)
+	}
 	if _, err := os.Stat(pdir); err != nil {
-		t.Skip("no patches directory")
+		t.Fatalf("no patch directory at %s: %v", pdir, err)
 	}
 
 	var n int

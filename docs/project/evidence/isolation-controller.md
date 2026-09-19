@@ -412,12 +412,17 @@ fourteen. At fourteen slots the machine kept 2,033 MB, just under the 2,048 MB `
 
 ## 9. What is left
 
-- The 25 are upstream's (`isolation-corpus-races.md`). Until they are fixed a whole-corpus run under this
-  controller reports them, and `TESTKIT_ISOLATION_CTL` stays off by default.
+- The 25 are the corpus's, and **revised 2026-09-19**: they are not waited on. This said "until they are fixed"
+  upstream, which put a gate here behind someone else's review queue. They are carried as patches instead
+  (`overrides/patches/isolation`, `case_patch_dir`), as shell's and sql's corpus problems already were — ADR-018
+  consequences 6 and 7. Six are written; the other twenty-two need an answer re-recorded from a run, because their
+  fix adds a statement that prints. `TESTKIT_ISOLATION_CTL` stays off until those are written and this gate has
+  been run on the patched corpus.
 - The cases of §8 that hang and then pass on a later attempt are not in that report — rule 3 was run on failures
   only — and cost wall time rather than verdicts. Two of the four groups are its kinds 1 and 2 and have the same
   fixes; the lock-cycle group is a race with the deadlock detector, which a controller that looks sooner loses
   less, not more; and the two `insert_insert_01` hang under ctltool's controller as well.
 - ADR-018's rule 3 was written when both runners used the same executor, so any separation meant the runner.
-  It now separates a runner that is faster from a corpus that depends on the old speed. Whether the rule should
-  say so is ADR-018's to decide, not this document's.
+  It now separates a runner that is faster from a corpus that depends on the old speed. **Decided 2026-09-19**:
+  ADR-018 rule 3a says which is which, and the `.ctl` decides — a separation is charged to the runner only where
+  the case orders what it prints.

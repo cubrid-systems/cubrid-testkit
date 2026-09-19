@@ -54,6 +54,26 @@ A native isolation run is equivalent to CTP when, over the whole corpus and with
 3. **A disagreement on a reproduced verdict is rerun before it is judged**: the case alone, three times under each
    runner. It is a difference in the runner only if the runners separate — one of them passes all three and the other
    fails all three. Otherwise it is a case CTP does not reproduce either, and it is reported with the unstable ones.
+3a. **What a separation means depends on whether both sides ran the same executor** — added 2026-09-19.
+   Rule 3 was written under ADR-007, where `runone.sh` and ctltool execute every case on both sides. The
+   executor being common, the only thing left that could separate two runners was the runner, and
+   *separation* and *runner difference* were one sentence. Under ADR-019 they are not. A controller
+   without `qactl`'s two fixed 100 ms sleeps sends a client its next statement when the script says to,
+   and a case that never ordered what its clients print then fails every attempt — three of three, which
+   is what rule 3 calls a runner difference.
+
+   So the rule says which it is, and the `.ctl` decides: **a separation is charged to the runner only
+   where the case orders what it prints.** Where the case leaves two clients' output unordered and the
+   answer records the order one controller happened to produce, the separation is the corpus's and is
+   recorded as such — the 25 found at four slots and two more at eight and fourteen, each with its fix,
+   in `evidence/isolation-corpus-races.md`. Everything else is the runner's, as before: a wrong verdict,
+   a file written differently, a wait that a case with its waits in place still fails.
+
+   This is not a softer grade, and it fails closed. The reading is made from the case's own text, not
+   from the result, and a case that cannot be shown to leave its output unordered counts against the
+   runner. What it stops doing is judging a controller by whether it reproduces another controller's
+   latency.
+
 4. **Results follow verdicts**: where both runners pass a case, its normalized result matches one of the case's answers
    under each; where both fail it, the results are reported, not compared, because a failing interleaving is the part
    that varies.
@@ -85,6 +105,16 @@ and seven that fail in every run.**
    hours.
 5. **Parallel slots are compared to one slot by the same rules.** What a slot changes is order and load, which are the
    two things this corpus is already sensitive to.
+6. **A gate run with a replaced executor is run on the patched corpus** — added 2026-09-19. Rule 3a names the
+   cases the corpus owns; `overrides/patches/isolation` carries them as diffs and a run applies them through
+   `case_patch_dir`, so the controller is measured against cases that order what they print. This is ADR-013's
+   arrangement for shell (*"A patched case is judged, and named"*): the patched set is listed where the verdict
+   is, and a patch that stops applying stops the run rather than the case.
+7. **Sending those diffs upstream is a separate track** — added 2026-09-19. It was not, and saying so is the
+   change: `evidence/isolation-corpus-races.md` and ADR-019 both held the controller off *until upstream fixed
+   the cases*, which makes a gate here wait on someone else's review queue. A patch carried in this repository
+   closes the gate; the pull request that deletes the patch is its own piece of work, and the patch deleting
+   itself is how this repository finds out it landed.
 
 ## Alternatives considered
 

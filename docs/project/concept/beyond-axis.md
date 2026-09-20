@@ -1018,6 +1018,19 @@ case-seconds; a second off all 3,444 is nearly an hour of serial work.
 | Not yet | 3's second cluster, which needs finding before it can be costed |
 | Evidence | this run's `case_plan`, which is the first per-case duration record for the whole corpus and the input every one of these needs |
 
+### B-T15. HA that tests what breaks HA — **blocked**
+
+| | |
+|---|---|
+| Blocked on | T: the two-machine baseline for the 373 frozen HA cases, which does not exist yet |
+| Improves on | T: the `HA/shell` corpus and `make_ha.sh` |
+| Today | measured over all 373 cases (`design/module-ha.md` §3). **No fault is ever injected into the network** — `iptables` 0 files, `ip route` 0, `tc qdisc` 0; every fault is `kill -9` or `hb stop`, so a node is stopped and never merely unreachable. **no case waits on or asserts `to_be_active` or `to_be_standby`** — the one appearance anywhere in the tree is a byte inside a recorded `hb status` answer file — though the field's tracker records a failover stopping in one for hours. **The three parameters that decide switchover appear in 0 files**, and `cluster-sandbox` measured their behaviour not to be the documented arithmetic. And synchronisation is the clock: **244 of 373 cases sleep, 726 times, 20,370 seconds — 5h39m** — which is both the cost and the correctness bug, since a sleep that is too short fails for a reason that is not the engine's and one that is too long passes without waiting. **And the corpus already ships the fix it does not use**: `wait_for_slave` writes a marker row on the master and polls the slave until it arrives, and 136 cases call it while 244 sleep |
+| Beyond | seven properties, specified in `design/module-ha.md` §4: a wait that is a poll on state; role transitions whose intermediate states are observable; partition as a producible fault, with the mechanism named; split brain reachable on purpose and a verdict when it is not; divergence detected by the data rather than by the engine's own gauges; the switchover parameters as test inputs with a distribution rather than a number; and a case that cannot silently pass |
+| Evidence | declared in advance, per property, in §4 — each row says what result would show it worked. The headline one: the corpus's 20,370 seconds fall to what the engine actually takes, with no verdict changing |
+| Why it is axis B and not a port | **copying this would lock the weakness in.** CTP's HA testing establishes that replication copies rows and that a stopped node is noticed. Neither is where CUBRID's HA defects have been |
+| Switchable off | the frozen 373 keep running as they are, on the two-machine path, unchanged. Everything here is either a new case outside the corpus or a property of the runner around it (§5) |
+| Depends on | ADR-022 for the pair, and on `cluster-sandbox`'s fault verbs for P3–P6 — not built here |
+
 ### B-T4. A verdict that says why — **idea**
 
 | | |

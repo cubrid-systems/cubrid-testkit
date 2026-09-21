@@ -59,6 +59,33 @@ func (c *Conversion) convertCreate(stmt string) (string, bool) {
 	if !isCreateTable(stmt) || strings.Contains(strings.ToUpper(stmt), "PRIMARY KEY") {
 		return stmt, false
 	}
+	// A subclass inherits its parent's columns, including the key this
+	// conversion gave the parent, so it must not be given one of its own --
+	// and its positional inserts carry the parent's columns first, which the
+	// parent's entry alone cannot say.
+	//
+	// Found by the counter rather than by thinking: `select * from sub_t1`
+	// was the one read agreeing about nothing that `--[er]` did not explain,
+	// and the reason was that this conversion had broken the case.
+	if parent := subclassOf(stmt); parent != "" {
+		inherited, ok := c.cols[strings.ToLower(parent)]
+		if !ok {
+			return stmt, false // the parent was not converted, so nothing changes
+		}
+		table := tableNameOf(stmt)
+		if table == "" {
+			return stmt, false
+		}
+		own := []string{}
+		if open := indexAtDepth(stmt, '(', 0); open >= 0 {
+			inner := stmt[open+1:]
+			if close := indexAtDepth(inner, ')', 0); close >= 0 {
+				own = columnNames(inner[:close])
+			}
+		}
+		c.cols[strings.ToLower(table)] = append(append([]string{}, inherited...), own...)
+		return stmt, false
+	}
 	open := indexAtDepth(stmt, '(', 0)
 	if open < 0 {
 		return stmt, false // CREATE TABLE ... AS SELECT has no column list
@@ -213,6 +240,30 @@ func splitTopLevel(s string) []string {
 		out = append(out, s[start:start+i])
 		start += i + 1
 	}
+}
+
+// subclassOf is the parent named by `... AS SUBCLASS OF <name>`, or "".
+func subclassOf(stmt string) string {
+	r := []rune(stmt)
+	for i := 0; i < len(r); {
+		kw, n := wordAt(r, i)
+		if n == 0 {
+			i++
+			continue
+		}
+		if kw == "SUBCLASS" {
+			j := skipSpace(r, i+n)
+			if w, wn := wordAt(r, j); w == "OF" {
+				j = skipSpace(r, j+wn)
+				if _, nn := wordAt(r, j); nn > 0 {
+					return strings.Trim(string(r[j:j+nn]), "[]\"`")
+				}
+			}
+			return ""
+		}
+		i = skipSpace(r, i+n)
+	}
+	return ""
 }
 
 func isCreateTable(stmt string) bool {

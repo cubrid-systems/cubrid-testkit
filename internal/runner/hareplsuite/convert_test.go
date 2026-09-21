@@ -101,3 +101,33 @@ func TestConversionLeavesTheseAlone(t *testing.T) {
 		}
 	}
 }
+
+// A subclass inherits the key the conversion gave its parent, so it must not
+// be given one of its own -- and its positional inserts carry the parent's
+// columns first, which only the parent's entry can say.
+func TestConversionHandlesASubclass(t *testing.T) {
+	c := NewConversion()
+	c.Apply("create class t1 (name varchar(20), age integer)")
+
+	got, changed := c.Apply("create class sub_t1 as subclass of t1(gender char(1))")
+	if changed {
+		t.Errorf("a subclass must not be given a second key: %q", got)
+	}
+
+	ins, changed := c.Apply("insert into sub_t1 values('Sun', 26, 'f')")
+	if !changed {
+		t.Fatal("the subclass's positional insert was left to break on the inherited key")
+	}
+	if ins != "insert into sub_t1 (name, age, gender) values('Sun', 26, 'f')" {
+		t.Errorf("got %q", ins)
+	}
+}
+
+func TestSubclassOfNamesTheParent(t *testing.T) {
+	if got := subclassOf("create class s as subclass of p(g char(1))"); got != "p" {
+		t.Errorf("got %q", got)
+	}
+	if got := subclassOf("create table t(i int)"); got != "" {
+		t.Errorf("an ordinary table has no parent, got %q", got)
+	}
+}

@@ -148,6 +148,11 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		fmt.Printf("  %-15s %s%s\n", r.Outcome, rel, detailSuffix(r))
 	}
 
+	if keepDir != "" {
+		if err := keepEmptyAgreements(keepDir, results); err != nil {
+			fmt.Printf("  ! could not record the empty agreements: %v\n", err)
+		}
+	}
 	report(results)
 	if leftovers > 0 {
 		fmt.Printf("  %d case(s) started from a state a reset could not clear\n", leftovers)
@@ -165,6 +170,23 @@ func detailSuffix(r Result) string {
 		return "  <- " + r.Detail
 	}
 	return ""
+}
+
+// keepEmptyAgreements writes down which reads agreed about nothing.
+func keepEmptyAgreements(dir string, results []Result) error {
+	var b strings.Builder
+	for _, r := range results {
+		for _, stmt := range r.Empty {
+			fmt.Fprintf(&b, "%s\t%s\n", r.Case, stmt)
+		}
+	}
+	if b.Len() == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "empty-agreements.tsv"), []byte(b.String()), 0o644)
 }
 
 // report prints the tally. There is no comparison against CTP here and none is
@@ -189,7 +211,7 @@ func report(results []Result) {
 		stmts += r.Statements
 		cmp += r.Compared
 	}
-	var skipped, unordered, converted, failed, empty, objs, kdup, knull int
+	var skipped, unordered, converted, failed, empty, objs, kdup, knull, expected int
 	for _, r := range results {
 		skipped += r.Unreplicated
 		unordered += r.Unordered
@@ -199,6 +221,7 @@ func report(results []Result) {
 		objs += r.ObjectDomain
 		kdup += r.KeyDuplicate
 		knull += r.KeyNull
+		expected += r.EmptyExpected
 	}
 	fmt.Printf("  %d statement(s), %d read(s) compared, %d skipped for want of a primary key, %d agreeing only as a set\n",
 		stmts, cmp, skipped, unordered)
@@ -213,7 +236,11 @@ func report(results []Result) {
 		fmt.Printf(" (%d on a generated primary key, %d on a NOT NULL constraint)", kdup, knull)
 	}
 	fmt.Println()
-	fmt.Printf("  %d of the agreeing read(s) returned no rows on the master either\n", empty)
+	fmt.Printf("  %d of the agreeing read(s) returned no rows on the master either", empty)
+	if empty > 0 {
+		fmt.Printf(" (%d of them in a case the corpus marks --[er])", expected)
+	}
+	fmt.Println()
 	fmt.Printf("  waited      %s in total, never slept\n", waited.Round(time.Millisecond))
 	if by[Differ] > 0 {
 		fmt.Println("\nthe pair disagreed with itself on:")

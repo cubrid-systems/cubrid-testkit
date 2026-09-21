@@ -85,6 +85,13 @@ type Result struct {
 	Tables []string
 	// Kept is where both answers were written, when they differed.
 	Kept string
+	// Empty is the reads that agreed on nothing, in the case's own words.
+	Empty []string
+	// ErrorCase says the corpus marked this case as one whose statements are
+	// meant to be refused, and EmptyExpected counts the empty agreements that
+	// follow from that.
+	ErrorCase     bool
+	EmptyExpected int
 	// Differing names the first read that disagreed, and the node it
 	// disagreed on.
 	Differing string
@@ -186,6 +193,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 		res.Detail = "the case opens a block whose END never comes, so the rest of the file would run as one statement"
 		return res
 	}
+	res.ErrorCase = IsErrorCase(sql)
 	stmts := Statements(sql)
 	if len(stmts) == 0 {
 		res.Outcome, res.Detail = NoData, "the case has no statement"
@@ -312,6 +320,14 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 				// the number says how much of "same" rests on nothing.
 				if noRows(want[i]) {
 					res.EmptyAgreement++
+					if res.ErrorCase {
+						res.EmptyExpected++
+					}
+					// Kept so the number can be read rather than guessed at.
+					// "110 reads agreed about nothing" is a fact about the
+					// corpus, and which reads they were is the part that says
+					// whether anything can be done about it.
+					res.Empty = append(res.Empty, firstLine(stmt))
 				}
 				continue
 			}
@@ -552,4 +568,21 @@ func noRows(block string) bool {
 	b := Normalise(block)
 	return strings.TrimSpace(b) == "" || strings.Contains(b, "There are no results.") ||
 		strings.Contains(b, "0 rows selected") || strings.Contains(b, "0 row selected")
+}
+
+// IsErrorCase reports whether the corpus marked this case as one whose point
+// is that the engine refuses something.
+//
+// The `sql` corpus writes `--[er]` in a case's first-line comment when the
+// case is about an error, and 2,911 of them do
+// (category/sql/02-writing-a-case.md). Such a case converts to an ha_repl
+// case whose reads return nothing on both nodes -- which is agreement, and
+// which establishes nothing, and which is **not** a defect in the conversion
+// or in the pair.
+//
+// It matters because "110 reads agreed about nothing" is two different
+// populations. The ones in an error case are the corpus working as written.
+// The rest are the ones worth looking at.
+func IsErrorCase(sql string) bool {
+	return strings.Contains(sql, "--[er]")
 }

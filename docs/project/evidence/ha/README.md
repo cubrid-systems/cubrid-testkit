@@ -10,6 +10,11 @@
 
 ## Findings from this directory
 
+- [ha-repl-wide-sample](ha-repl-wide-sample.md) — **2026-09-22.** 131 cases, two runs, identical
+  verdicts: 119 same, 1 differ, 765 reads compared. **110 of the agreeing reads returned no rows
+  on the master either**, so the suite establishes less than the tally suggests. The one
+  difference is a trigger's owner, changed by a method call rather than by DDL.
+
 - [object-domain-not-replicated](object-domain-not-replicated.md) — **2026-09-21.** A column whose
   type is another class holds a value on the master and a stored NULL on the slave. **A known
   constraint, undocumented**, which is why it is written here: the suite met it six times as a

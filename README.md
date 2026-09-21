@@ -136,7 +136,9 @@ run invokes for itself and which are documented in
 
 `check-cases` needs no engine, no database and no containment — it reads text. Against the shell
 corpus it finds **seven misspelt verdict calls and three self-comparisons** in 3,475 cases, and
-against the HA corpus one in 373 (`design/module-ha.md` P7).
+against the HA corpus one in 373 (`design/module-ha.md` P7). Those eleven are staged as patches
+rather than fixed here, because the corpus is not this repository's — the patch set's own README
+has them case by case, and the runbook for clearing them upstream.
 
 The runner runs on **one machine** ([ADR-014](docs/project/adr/ADR-014-one-machine.md)): local by
 default, and a remote machine over SSH is still one machine. RMI worker mode is retired and asking

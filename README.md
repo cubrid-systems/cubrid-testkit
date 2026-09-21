@@ -125,11 +125,18 @@ Task names are matched case-insensitively. A name that is not a task prints help
 task only — the tasks after it still run. `CTP_HOME` comes from the environment if it is set,
 otherwise from the parent of the binary.
 
-Three names are not tasks. `testkit sizing [suite] [mode]` prints what this machine would run at
-once and the runs it read to decide, and runs nothing ([below](#using-it)); `isolation-ctl` and
-`isolation-ctl-install` are the isolation controller and its installer, which a run invokes for
-itself and which are documented in
+Four names are not tasks. `testkit sizing [suite] [mode]` prints what this machine would run at
+once and the runs it read to decide, and runs nothing ([below](#using-it));
+`testkit check-cases <scenario> [<init_path>]` reads a corpus and reports the cases that **cannot
+fail** — a misspelt `write_nok`, a comparison of a file against itself, a case with no route to a
+failure at all — and exits 1 when it finds one, so it can gate a branch of the cases; and
+`isolation-ctl` and `isolation-ctl-install` are the isolation controller and its installer, which a
+run invokes for itself and which are documented in
 [ADR-019](docs/project/adr/ADR-019-isolation-controller.md).
+
+`check-cases` needs no engine, no database and no containment — it reads text. Against the shell
+corpus it finds **seven misspelt verdict calls and three self-comparisons** in 3,475 cases, and
+against the HA corpus one in 373 (`design/module-ha.md` P7).
 
 The runner runs on **one machine** ([ADR-014](docs/project/adr/ADR-014-one-machine.md)): local by
 default, and a remote machine over SSH is still one machine. RMI worker mode is retired and asking

@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-testkit/internal/casecheck"
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
@@ -71,6 +72,12 @@ func main() {
 	// sizing says what this machine would run at once, and on what evidence.
 	if len(os.Args) > 1 && os.Args[1] == "sizing" {
 		os.Exit(sizingCmd(os.Args[2:]))
+	}
+	// check-cases reads a corpus and reports the cases that cannot fail. It runs
+	// no case, so it needs no engine, no database and no containment -- which is
+	// why it goes here rather than through run().
+	if len(os.Args) > 1 && os.Args[1] == "check-cases" {
+		os.Exit(checkCasesCmd(os.Args[2:]))
 	}
 
 	// Containment happens before anything else or it happens to a process that
@@ -670,4 +677,54 @@ func native(family string) bool {
 		}
 	}
 	return false
+}
+
+// checkCasesCmd is `testkit check-cases <scenario> <init_path>`.
+//
+// Both paths are arguments rather than configuration. The corpus is often a
+// checkout that no conf points at yet -- this is the check somebody runs on a
+// branch of the cases before proposing it -- and the helper library is read
+// rather than assumed for the reason ReadHelpers gives.
+func checkCasesCmd(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "usage: testkit check-cases <scenario> [<init_path>]")
+		fmt.Fprintln(os.Stderr, "  init_path defaults to $CTP_HOME/shell/init_path")
+		return 2
+	}
+	scenario := args[0]
+	initPath := ""
+	if len(args) > 1 {
+		initPath = args[1]
+	} else if home := os.Getenv("CTP_HOME"); home != "" {
+		initPath = filepath.Join(home, "shell", "init_path")
+	}
+	if initPath == "" {
+		fmt.Fprintln(os.Stderr, "testkit check-cases: no helper library. Pass one, or set CTP_HOME")
+		return 2
+	}
+	h, err := casecheck.ReadHelpers(initPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "testkit check-cases: %v\n", err)
+		return exitEnvironment
+	}
+	rep, err := casecheck.Walk(scenario, h)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "testkit check-cases: %v\n", err)
+		return exitEnvironment
+	}
+	for _, f := range rep.Findings {
+		fmt.Println(f)
+	}
+	fmt.Printf("\n%d case(s) read against %d helper(s), %d of which can report a failure\n",
+		rep.Cases, len(h.All), len(h.Failing))
+	fmt.Printf("cannot fail: %d   misspelt verdict: %d   self-comparison: %d\n",
+		rep.Count(casecheck.RuleCannotFail),
+		rep.Count(casecheck.RuleMisspeltVerdict),
+		rep.Count(casecheck.RuleSelfComparison))
+	// A finding is a defect in a case, so the command that found one says so in
+	// its status: this is meant to be run from CI over a corpus branch.
+	if len(rep.Findings) > 0 {
+		return 1
+	}
+	return 0
 }

@@ -226,11 +226,37 @@ it with a sleep (§3-1), so when the setup transition has not finished, the stea
 that follows is measuring nothing and says so with a green verdict. *Timing the transition, and
 asserting on the states it passed through*, is group B.
 
-**P7 — A case cannot silently pass.**
+**P7 — A case cannot silently pass. — built, 2026-09-21**
 Every case must be capable of failing. Checked mechanically, not by review: a case whose failure
 path is unreachable — a misspelt `write_nok`, a comparison whose inputs are always identical — is a
-defect in the case. §2-4 is one instance; nothing currently looks for more. It needs the corpus and
-nothing else — no machine, no pair, no provisioner.
+defect in the case. §2-4 was one instance found by hand; nothing looked for more.
+
+`testkit check-cases <scenario> [<init_path>]` now does. It reads the helper library to find which
+helpers can put NOK into a result — transitively, because 169 HA cases reach their verdict only
+through `compare_result_between_files` — and then reads each case for three things: no route to NOK
+at all, a call one typo away from a verdict helper and defined nowhere, and a comparison of
+something against itself. It runs no case and needs no engine.
+
+**What it found on its first run:**
+
+| | HA corpus (373) | shell corpus (3,475) |
+|---|---:|---:|
+| cannot fail at all | 0 | 0 |
+| misspelt verdict call | **1** | **7** |
+| self-comparison | 0 | **3** |
+
+Every one was read back against the source. The typos are all the same shape — `wirte_nok`,
+`write_no`, `test_exec_commanr`, `compare_result_between_file` — and all but one sit in the `else`
+branch of an `if`, which is to say **in the only line that would have reported the failure**. The
+three self-comparisons are `plan.result` against `plan.result`, `group_concat_max_len.result`
+against itself where its four sibling lines each compare a result against an answer, and
+`test.answer` against `test.answer` in a case whose own comment says *"this result is not same as
+the previous one. We expect they are same."*
+
+The check earned its keep during development too: its first version matched identifiers anywhere and
+reported `db_stats=` (an assignment) and `exec_csql.exp` (a filename). Both are regression tests now.
+Reporting a typo is an accusation, so that rule reads command position only and under-approximates;
+*can this case fail* over-approximates, because the safe direction is opposite for each.
 
 ### Group B — the topology is the subject
 

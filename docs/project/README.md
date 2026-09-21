@@ -42,6 +42,7 @@
   - [regression-shell](evidence/regression-shell.md) · [parallel-shell](evidence/parallel-shell.md) — shell
   - [sql-baseline](evidence/sql-baseline.md) · [sql-native](evidence/sql-native.md) · [regression-sql](evidence/regression-sql.md) — sql·medium (ADR-017 게이트 포함)
   - [isolation-baseline](evidence/isolation-baseline.md) — isolation (ADR-018 게이트 포함)
+  - [ha/p1-sleep-to-wait](evidence/ha/p1-sleep-to-wait.md) — **P1 실측** (2026-09-21). sleep 7줄을 `wait_for_slave` 로: 판정 4개 그대로, run 389s → 316s. wait 은 회당 1.3초
   - [ha/](evidence/ha/README.md) — **HA 기준선: 아직 측정 안 됨.** 하네스와 선결 조건 점검(`preflight.sh`), 그리고 왜 이것이 먼저인가
   - [ha-topology](evidence/ha-topology.md) — sandbox 쌍 위에서 러너가 도는 것, 그리고 동결 HA 자산이 아직 요구하는 네 가지 (ADR-022)
   - [compare/](evidence/compare/README.md) — 정규화 후 비교하는 방법 (ADR-013)

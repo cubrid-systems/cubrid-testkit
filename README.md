@@ -17,7 +17,7 @@ For engine developers and QA. Part of
 | [Quick start](#quick-start) | build it and run a suite |
 | [What runs where](#what-runs-where) | which of the fourteen tasks is native yet, and what each gate needs |
 | [Using it](#using-it) | the command line, the tasks, `run-shell`, and what a run leaves behind |
-| [The categories](#the-categories) | the as-built guide for `shell`, `sql` and `isolation` |
+| [The categories](#the-categories) | the as-built guide for `shell`, `sql`, `isolation` and the two HA suites |
 | [How it works](#how-it-works) | routing, the shim, the three decisions that are the whole design, and the frozen surface |
 | [Why you can trust it](#why-you-can-trust-it) | what each gate has actually produced, family by family |
 | [Layout](#layout) | the repository, and where to start reading |
@@ -193,13 +193,16 @@ private, and its README says what each one is for.
 ## The categories
 
 Each family has an as-built guide — the stages, every configuration key with what it costs, how to
-run it on a host and in Docker, and how to read a failure.
+run it on a host and in Docker, and how to read a failure. The two HA guides are shorter, and
+deliberately: the parts that are not built are named rather than described.
 
 | | |
 |---|---|
 | **[`category/shell/`](docs/category/shell/README.md)** | the task this project rewrote first, and the one with options: parallel slots on one machine, a corpus that cleans itself up, per-case patches, a progress page, and the memory ceiling that fails a run when it is sized wrong |
 | **[`category/sql/`](docs/category/sql/README.md)** | `sql` and `medium` — the stages and the executor, what parallel buys and what it costs on the machine you have, and how to read a failure that is the corpus's order rather than the engine's |
 | **[`category/isolation/`](docs/category/isolation/README.md)** | the stages and what `runone.sh` does with a case, the `.ctl` language as `qactl` reads it, every key, and the cases CTP cannot reproduce either |
+| **[`category/ha-shell/`](docs/category/ha-shell/README.md)** | the `shell` task against a pair — what it establishes, the verbs a case gets, and the three rules the frozen corpus breaks |
+| **[`category/ha-repl/`](docs/category/ha-repl/README.md)** | the `sql` corpus converted to a pair oracle — what the conversion changes, and what stops being worth writing |
 | **[`category/extensions/`](docs/category/extensions/README.md)** | testing axes CTP never had — E1–E10 over eight axes: sqllogictest, SQLancer, SQLsmith, distributed isolation, parser and storage fuzzing, differential, workload, XASL fixtures |
 
 ## How it works

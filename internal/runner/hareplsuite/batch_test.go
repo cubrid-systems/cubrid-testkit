@@ -105,3 +105,48 @@ func TestSegmentsAlternateBetweenWritesAndReads(t *testing.T) {
 		}
 	}
 }
+
+// A prelude shifts every statement's line, and the line is how its answer is
+// found again. Off by one here attributes the prelude's own output to the
+// case's first read.
+func TestAPreludeShiftsTheLinesAndIsNotIndexed(t *testing.T) {
+	b := newBatchWith(
+		[]string{"call login ('u1') on class db_user"},
+		[]string{"select 1", "select 2"},
+	)
+	if len(b.line) != 2 {
+		t.Fatalf("the prelude must not be indexed: %v", b.line)
+	}
+	if b.line[0] != 2 || b.line[1] != 3 {
+		t.Fatalf("want lines [2 3], got %v\nscript:\n%s", b.line, b.script)
+	}
+	lines := strings.Split(b.script, "\n")
+	if !strings.HasPrefix(lines[b.line[0]-1], "select 1") {
+		t.Errorf("line %d is %q", b.line[0], lines[b.line[0]-1])
+	}
+}
+
+// Session state dies with the csql process, so what has to be replayed is
+// what the session held -- and only that. Replaying a write would run it
+// twice.
+func TestIsSessionStatementNamesOnlyWhatTheSessionHolds(t *testing.T) {
+	for _, s := range []string{
+		"call login ('u1') on class db_user",
+		"CALL LOGIN ('dba') ON CLASS db_user",
+		"set system parameters 'create_table_reuseoid=no'",
+	} {
+		if !IsSessionStatement(s) {
+			t.Errorf("not recognised as session state: %q", s)
+		}
+	}
+	for _, s := range []string{
+		"insert into t values(1)",
+		"select * from t",
+		"create table t(i int)",
+		"call change_trigger_owner ('t', 'u1') on class db_root",
+	} {
+		if IsSessionStatement(s) {
+			t.Errorf("a statement that changes the database was taken for session state: %q", s)
+		}
+	}
+}

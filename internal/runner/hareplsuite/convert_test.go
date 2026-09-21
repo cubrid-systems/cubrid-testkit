@@ -131,3 +131,21 @@ func TestSubclassOfNamesTheParent(t *testing.T) {
 		t.Errorf("an ordinary table has no parent, got %q", got)
 	}
 }
+
+// A case that writes nothing was never going to put a row in front of the
+// pair, so its reads agreeing on nothing is the case working as written.
+func TestIsDatalessSeparatesAPlanTestFromADataTest(t *testing.T) {
+	plan := "CREATE TABLE t_a(col_a INT);\nCREATE TABLE t_b(col_a INT);\nSELECT a.col_a FROM t_a a, t_b b;"
+	if !IsDataless(plan) {
+		t.Error("a case with no DML was taken for one that writes")
+	}
+	for _, s := range []string{
+		"create table t(i int); insert into t values(1); select * from t;",
+		"update t set i = 2",
+		"DELETE FROM t",
+	} {
+		if IsDataless(s) {
+			t.Errorf("a case that writes was taken for a plan test: %q", s)
+		}
+	}
+}

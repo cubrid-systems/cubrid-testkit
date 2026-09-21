@@ -238,7 +238,7 @@ func report(results []Result) {
 	fmt.Println()
 	fmt.Printf("  %d of the agreeing read(s) returned no rows on the master either", empty)
 	if empty > 0 {
-		fmt.Printf(" (%d of them in a case the corpus marks --[er])", expected)
+		fmt.Printf(" (%d in a case that was never going to show a row)", expected)
 	}
 	fmt.Println()
 	fmt.Printf("  waited      %s in total, never slept\n", waited.Round(time.Millisecond))

@@ -43,17 +43,31 @@ The fifteen skips were cases whose text contained `create trigger`, `create proc
 blocks instead of refusing them recovered all fifteen — **and one of them is where the single
 difference comes from**, which is the argument for having bothered.
 
-## The 110 is the number to read twice
+## The 100 is the number to read twice
 
-Of 765 reads the two nodes agreed on, **110 agreed about nothing**: the master returned no rows
+Of 765 reads the two nodes agreed on, **100 agreed about nothing**: the master returned no rows
 either. Two empty answers are equal, so they count as agreement and they establish nothing.
 
-They are the corpus's own, not the conversion's — measured on
-`_06_manipulation/_04_insert`, the count does not move between a run with the conversion and one
-without. A case that creates a table, inserts into it, reads it back and drops it leaves a great
-many reads whose answer is empty by the time this suite asks.
+It was 110 before session state was replayed into each batch. Ten of them were a case saying
+`call login ('u1') on class db_user` and then reading its own table — every batch is a new csql
+process, so the read was running as dba and finding nothing. That one was the runner's and is
+fixed.
 
-So the honest reading of "119 same" is: 765 reads compared, 655 of them about something.
+What the other hundred are, as far as static reading goes:
+
+| | |
+|---|---:|
+| a case that writes no rows at all — a plan or catalog test | 17 |
+| a case that writes, but whose particular read is empty | 83 |
+
+The second group is a read after the case's own DELETE, a filter that matches nothing, a table
+the case emptied. Chasing it further statically has stopped paying: what matters is that the
+number is reported, so **"119 same" reads honestly as 765 reads compared, 665 of them about
+something.**
+
+In `_06_manipulation/_04_insert` the same number is 6 of 33, and all six are cases the corpus
+marks `--[er]` — a convention `_33_elderberry` does not use at all, which is why the split is
+made two ways.
 
 ## The one difference: a trigger's owner
 

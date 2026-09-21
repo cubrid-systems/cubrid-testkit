@@ -36,15 +36,37 @@ var resultMarker = regexp.MustCompile(`^=== <Result of [^>]*Command in Line (\d+
 type batch struct {
 	script string
 	// line is the 1-based line each statement starts on inside the script,
-	// which is what csql's result marker reports.
+	// which is what csql's result marker reports. Only the statements the
+	// caller asked for are indexed; a prelude is not.
 	line []int
 }
 
 // newBatch lays statements out one after another, recording where each begins.
-func newBatch(stmts []string) batch {
+func newBatch(stmts []string) batch { return newBatchWith(nil, stmts) }
+
+// newBatchWith puts a prelude in front of the statements, unindexed.
+//
+// Every batch is a new csql process, so session state does not survive the
+// boundary -- and the boundary is where the oracle needs it, between a write
+// and the read that follows. A case that says `call login ('u1') on class
+// db_user` and then reads its own table was therefore reading as dba, and
+// finding nothing: 110 reads in `_33_elderberry` agreed about nothing and
+// this is a large part of why.
+//
+// Replaying the session statements in front of each batch is what a single
+// long-lived session would have given, without giving up the boundary. They
+// are idempotent -- a login and a parameter set both just take effect again
+// -- and they are not indexed, so a result they produce is not mistaken for
+// a statement's answer.
+func newBatchWith(prelude, stmts []string) batch {
 	var b strings.Builder
-	lines := make([]int, len(stmts))
 	at := 1
+	for _, s := range prelude {
+		b.WriteString(s)
+		b.WriteString(";\n")
+		at += strings.Count(s, "\n") + 1
+	}
+	lines := make([]int, len(stmts))
 	for i, s := range stmts {
 		lines[i] = at
 		b.WriteString(s)
@@ -52,6 +74,23 @@ func newBatch(stmts []string) batch {
 		at += strings.Count(s, "\n") + 1
 	}
 	return batch{script: b.String(), line: lines}
+}
+
+// IsSessionStatement reports whether a statement's effect belongs to the csql
+// session rather than to the database, and so has to be replayed in every
+// batch that follows it.
+//
+// Two of them, both in this corpus and both measured to matter: `call login
+// (...) on class db_user`, which decides who the following statements are,
+// and `set system parameters '...'`, which a case uses to make a class
+// referable before it can hold an object domain at all.
+func IsSessionStatement(stmt string) bool {
+	s := strings.ToLower(strings.TrimSpace(stmt))
+	if strings.HasPrefix(s, "set system parameters") {
+		return true
+	}
+	return strings.HasPrefix(s, "call login") ||
+		(strings.HasPrefix(s, "call ") && strings.Contains(s, " login ") && strings.Contains(s, "db_user"))
 }
 
 // run sends the batch to a node and returns each statement's result block,

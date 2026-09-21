@@ -87,9 +87,9 @@ type Result struct {
 	Kept string
 	// Empty is the reads that agreed on nothing, in the case's own words.
 	Empty []string
-	// ErrorCase says the corpus marked this case as one whose statements are
-	// meant to be refused, and EmptyExpected counts the empty agreements that
-	// follow from that.
+	// ErrorCase says this case was never going to put a row in front of the
+	// pair -- the corpus marked it `--[er]`, or it writes no data at all --
+	// and EmptyExpected counts the empty agreements that follow from that.
 	ErrorCase     bool
 	EmptyExpected int
 	// Differing names the first read that disagreed, and the node it
@@ -193,7 +193,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 		res.Detail = "the case opens a block whose END never comes, so the rest of the file would run as one statement"
 		return res
 	}
-	res.ErrorCase = IsErrorCase(sql)
+	res.ErrorCase = IsErrorCase(sql) || IsDataless(sql)
 	stmts := Statements(sql)
 	if len(stmts) == 0 {
 		res.Outcome, res.Detail = NoData, "the case has no statement"
@@ -202,6 +202,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 
 	master := p.MasterChannel()
 	conv := NewConversion()
+	var prelude []string
 	dirty, keysStale := false, true
 	var noKey, withObject []string
 	seen := map[string]bool{}
@@ -224,7 +225,12 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 					}
 				}
 			}
-			out, _, err := newBatch(list).runRaw(ctx, master, p.DB)
+			for _, st := range list {
+				if IsSessionStatement(st) {
+					prelude = append(prelude, st)
+				}
+			}
+			out, _, err := newBatchWith(prelude, list).runRaw(ctx, master, p.DB)
 			if err != nil {
 				res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
 				return res
@@ -279,7 +285,9 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 			}
 		}
 
-		b := newBatch(seg.stmts)
+		// The reads carry the prelude too, and so does the slave's copy: a
+		// read has to run as the user the case logged in as, on both nodes.
+		b := newBatchWith(prelude, seg.stmts)
 		want, _, err := b.run(ctx, master, p.DB)
 		if err != nil {
 			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
@@ -585,4 +593,26 @@ func noRows(block string) bool {
 // The rest are the ones worth looking at.
 func IsErrorCase(sql string) bool {
 	return strings.Contains(sql, "--[er]")
+}
+
+// IsDataless reports whether a case writes no rows at all.
+//
+// A large part of this corpus is about plans, syntax and the catalog rather
+// than about data: `cbrd_24082/outer_join.sql` creates two empty tables and
+// runs selects over them to check an optimiser decision. Its reads return
+// nothing on both nodes, which is agreement and establishes nothing -- and it
+// is the case working as written, not a defect in the conversion or the pair.
+//
+// Detected by the absence of any DML rather than by a marker, because the
+// `--[er]` convention is not used everywhere: in `_06_manipulation` it
+// explains six of seven empty agreements and in `_33_elderberry` it explains
+// none of a hundred.
+func IsDataless(sql string) bool {
+	low := strings.ToLower(sql)
+	for _, kw := range []string{"insert ", "insert\n", "update ", "delete ", "replace ", "load "} {
+		if strings.Contains(low, kw) {
+			return false
+		}
+	}
+	return true
 }

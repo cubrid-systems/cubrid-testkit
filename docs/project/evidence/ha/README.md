@@ -8,6 +8,14 @@
 
 ---
 
+## Findings from this directory
+
+- [object-domain-not-replicated](object-domain-not-replicated.md) — **2026-09-21.** A column whose
+  type is another class holds a value on the master and a stored NULL on the slave. Both rows
+  arrive, both tables have primary keys, `fail_counter` does not move and the applier logs nothing.
+  Isolated to four statements; the source explains it (replication carries the primary key and the
+  slave rebuilds the row from the master's heap image, in which an object reference is an OID).
+
 ## Why this is the first measurement
 
 Three separate pieces of work are waiting on one number nobody has.

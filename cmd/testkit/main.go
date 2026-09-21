@@ -35,6 +35,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
+	"github.com/cubrid-systems/cubrid-testkit/internal/runner/hareplsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/isolationsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
@@ -176,6 +177,14 @@ func run(args []string) int {
 	}
 	if native("isolation") {
 		reg.Register(isolationsuite.New())
+	}
+	// ha_repl is behind the same switch and for a different reason: there is no
+	// gate to clear, because there is nothing to clear it against. CTP reaches
+	// its nodes over SSH and a sandbox node runs no sshd, so the two runners
+	// cannot be pointed at the same pair and compared (ADR-022). What this one
+	// produces is the pair's own verdict, and it says so.
+	if native("ha_repl") {
+		reg.Register(hareplsuite.New())
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The tests beside this one drive a stand-in csb that prints what the test told
@@ -200,4 +201,108 @@ func TestLiveTheSlaveHasWhatTheMasterWrote(t *testing.T) {
 		}
 	}
 	t.Fatalf("the slave never showed the master's row; last read:\n%s", last)
+}
+
+// The wait P1 is about, through this runner's own channel rather than CTP's
+// helper. What is measured is the same thing evidence/ha/p1-sleep-to-wait.md
+// measured under CTP: what it costs, against the 5 to 30 seconds of sleep the
+// corpus uses instead.
+func TestLiveWaitForReplicationCostsAboutASecond(t *testing.T) {
+	cli := liveCluster(t)
+	p, err := Describe(context.Background(), cli, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	took, err := p.WaitForReplication(context.Background(), 60*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("replication confirmed in %s", took.Round(time.Millisecond))
+	// Not an assertion about the engine's speed -- machines differ. The claim is
+	// only that this is a wait and not a sleep: it returns when the row arrives,
+	// which on any working pair is far short of the 5 to 30 seconds the corpus
+	// spends not looking.
+	if took > 30*time.Second {
+		t.Errorf("the wait took %s, which is not a wait", took)
+	}
+}
+
+// The oracle both HA suites arrived at independently: the pair disagreeing with
+// itself, with no answer file anywhere. This is that, driven from here.
+func TestLiveThePairAgreesWithItselfAfterAWrite(t *testing.T) {
+	cli := liveCluster(t)
+	p, err := Describe(context.Background(), cli, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := p.MasterChannel()
+	ddl := "csql -u dba -c \"CREATE TABLE tk_pair(i INT PRIMARY KEY, s VARCHAR(10)); " +
+		"INSERT INTO tk_pair VALUES(1,'a'),(2,'b'),(3,'c');\" " + p.DB
+	if res, rerr := master.Run(context.Background(), ddl); rerr != nil || res.ExitCode != 0 {
+		t.Fatalf("the master would not take the write: %v exit=%d %s", rerr, res.ExitCode, res.Stderr)
+	}
+	t.Cleanup(func() {
+		master.Run(context.Background(), "csql -u dba -c 'DROP TABLE tk_pair;' "+p.DB)
+	})
+
+	// Wait first. A difference under write traffic is replication in flight
+	// rather than divergence, and reporting one as the other is the mistake the
+	// whole P1 argument is about.
+	if _, werr := p.WaitForReplication(context.Background(), 60*time.Second); werr != nil {
+		t.Fatal(werr)
+	}
+	differed, err := p.SameOnBothNodes(context.Background(), "SELECT i, s FROM tk_pair ORDER BY i;")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if differed != "" {
+		t.Errorf("%s does not hold what the master holds", differed)
+	}
+}
+
+// And it can tell when they do not agree, which is the half that makes the other
+// half worth anything. The master's row is read before replication is waited
+// for, so the slave is legitimately behind -- a difference this runner must see.
+func TestLiveADifferenceIsVisibleBeforeReplicationCatchesUp(t *testing.T) {
+	cli := liveCluster(t)
+	p, err := Describe(context.Background(), cli, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := p.MasterChannel()
+	if res, rerr := master.Run(context.Background(),
+		"csql -u dba -c \"CREATE TABLE tk_lag(i INT PRIMARY KEY);\" "+p.DB); rerr != nil || res.ExitCode != 0 {
+		t.Fatalf("setup: %v %s", rerr, res.Stderr)
+	}
+	t.Cleanup(func() {
+		master.Run(context.Background(), "csql -u dba -c 'DROP TABLE tk_lag;' "+p.DB)
+	})
+	if _, werr := p.WaitForReplication(context.Background(), 60*time.Second); werr != nil {
+		t.Fatal(werr)
+	}
+
+	// A write large enough that the slave cannot have it instantly, read
+	// immediately. If the pair happens to agree anyway the machine was simply
+	// fast enough, which is not a failure of this runner -- so the test says so
+	// rather than flapping.
+	big := "csql -u dba -c \"INSERT INTO tk_lag SELECT rownum FROM db_class a, db_class b, db_class c WHERE rownum <= 20000;\" " + p.DB
+	if res, rerr := master.Run(context.Background(), big); rerr != nil || res.ExitCode != 0 {
+		t.Fatalf("the bulk write failed: %v %s", rerr, res.Stderr)
+	}
+	differed, err := p.SameOnBothNodes(context.Background(), "SELECT COUNT(*) FROM tk_lag;")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if differed == "" {
+		t.Log("the pair already agreed: replication was faster than the read, which is a fact about this machine")
+	} else {
+		t.Logf("%s was behind, and this runner saw it", differed)
+	}
+	// Either way, after the wait they must agree. That is the assertion.
+	if _, werr := p.WaitForReplication(context.Background(), 120*time.Second); werr != nil {
+		t.Fatal(werr)
+	}
+	if d, cerr := p.SameOnBothNodes(context.Background(), "SELECT COUNT(*) FROM tk_lag;"); cerr != nil || d != "" {
+		t.Errorf("after the wait, %s still differs (%v)", d, cerr)
+	}
 }

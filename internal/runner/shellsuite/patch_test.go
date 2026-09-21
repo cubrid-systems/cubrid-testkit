@@ -68,7 +68,33 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 	if _, err := os.Stat(shell); err != nil {
 		t.Skipf("no shell tree under %s", root)
 	}
-	pdir, perr := patch.Shipped("shell")
+	checkPatchesAgainst(t, "shell", shell)
+}
+
+// The HA corpus is a second tree the same suite runs -- cubrid-testcases-private
+// HA/shell, against cubrid-testcases-private-ex shell -- so its patches are a
+// family of their own and need a guard of their own. Without one, the sentence
+// the patch set is written around ("when it lands upstream the patch stops
+// applying and the guard says so") is not true for these.
+func TestTheShippedHAPatchesApplyToTheCorpus(t *testing.T) {
+	root := os.Getenv("TESTKIT_HA_CORPUS")
+	if root == "" {
+		t.Skip("set TESTKIT_HA_CORPUS to a cubrid-testcases-private checkout")
+	}
+	ha := filepath.Join(root, "HA", "shell")
+	if _, err := os.Stat(ha); err != nil {
+		ha = root // already the HA/shell tree
+	}
+	if _, err := os.Stat(ha); err != nil {
+		t.Skipf("no HA/shell tree under %s", root)
+	}
+	checkPatchesAgainst(t, "ha", ha)
+}
+
+// checkPatchesAgainst is the guard itself, for one family over one corpus.
+func checkPatchesAgainst(t *testing.T, family, corpus string) {
+	t.Helper()
+	pdir, perr := patch.Shipped(family)
 	if errors.Is(perr, patch.ErrNoPatchSet) {
 		t.Skip("set TESTKIT_PATCHES to a cubrid-testkit-patches checkout")
 	}
@@ -85,7 +111,7 @@ func TestTheShippedPatchesApplyToTheCorpus(t *testing.T) {
 			return err
 		}
 		rel, _ := filepath.Rel(pdir, path)
-		caseScript := scriptFor(shell, strings.TrimSuffix(rel, ".patch"))
+		caseScript := scriptFor(corpus, strings.TrimSuffix(rel, ".patch"))
 		if _, serr := os.Stat(caseScript); serr != nil {
 			t.Errorf("%s patches a case that is not in the corpus: %s", rel, caseScript)
 			return nil

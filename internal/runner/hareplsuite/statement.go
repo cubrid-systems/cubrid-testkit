@@ -4,19 +4,22 @@ import "strings"
 
 // Statements splits a case into the statements csql would execute.
 //
-// Deliberately small, and it refuses rather than guesses. CTP has a real reader
-// for this (`TestReader.readOneStatement`); this one exists because the oracle
-// has to be applied *between* statements and a case is a file. What it handles
-// is a corpus of semicolon-terminated statements with string literals and
-// comments in them. What it does not handle is a body whose semicolons are not
-// terminators -- a PL/CSQL procedure, a trigger -- and Splittable says so
-// instead of producing fragments that would run as nonsense.
+// Deliberately small, and it refuses rather than guesses. It exists because
+// the oracle has to be applied *between* statements and a case is a file.
+//
+// It handles semicolon-terminated statements with string literals and comments
+// in them, and PL/CSQL block bodies, whose semicolons are not terminators. The
+// first version refused every case containing the words "create trigger",
+// which turned out to reject cases that split perfectly well: a trigger
+// without a block body is one statement, `create trigger t ... execute insert
+// into t2 values (obj.c1);`. Fifteen of 131 cases were skipped for that.
 func Statements(src string) []string {
 	var out []string
 	var cur strings.Builder
 	var quote rune
 	inLine, inBlock := false, false
 	prev := rune(0)
+	depth := 0 // open PL/CSQL blocks
 
 	flush := func() {
 		if s := strings.TrimSpace(cur.String()); s != "" {
@@ -24,7 +27,9 @@ func Statements(src string) []string {
 		}
 		cur.Reset()
 	}
-	for _, r := range src {
+	runes := []rune(src)
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
 		switch {
 		case inLine:
 			if r == '\n' {
@@ -44,7 +49,6 @@ func Statements(src string) []string {
 			quote = r
 			cur.WriteRune(r)
 		case r == '-' && prev == '-':
-			// The '-' already written belongs to the comment, not the statement.
 			s := cur.String()
 			cur.Reset()
 			cur.WriteString(strings.TrimSuffix(s, "-"))
@@ -55,8 +59,22 @@ func Statements(src string) []string {
 			cur.WriteString(strings.TrimSuffix(s, "/"))
 			inBlock = true
 		case r == ';':
-			flush()
+			if depth > 0 {
+				cur.WriteRune(r)
+			} else {
+				flush()
+			}
 		default:
+			if d, skip := blockDelta(runes, i); d != 0 {
+				depth += d
+				if depth < 0 {
+					depth = 0
+				}
+				cur.WriteString(string(runes[i : i+skip]))
+				i += skip - 1
+				prev = runes[i]
+				continue
+			}
 			cur.WriteRune(r)
 		}
 		prev = r
@@ -65,26 +83,81 @@ func Statements(src string) []string {
 	return out
 }
 
-// blockBodies are the constructs whose semicolons are not statement
-// terminators. A case containing one is not split.
-var blockBodies = []string{
-	"create procedure", "create function", "create or replace procedure",
-	"create or replace function", "create trigger", "create or replace trigger",
+// blockDelta reports whether a PL/CSQL block opens or closes at this position,
+// and how many runes the keyword took.
+//
+// BEGIN opens one. END closes one only when it ends the block rather than a
+// construct: `END IF`, `END LOOP`, `END CASE` and `END WHILE` are not block
+// ends, and neither is the END of a CASE expression, which is followed by
+// something other than a semicolon or a name. Getting this wrong in the
+// permissive direction would run half a procedure as a statement, so the rule
+// is written to close a block only when it can see the close.
+func blockDelta(r []rune, i int) (int, int) {
+	if i > 0 && isWordRune(r[i-1]) {
+		return 0, 0
+	}
+	if kw, n := wordAt(r, i); kw != "" {
+		switch kw {
+		case "BEGIN":
+			return 1, n
+		case "END":
+			next, _ := wordAt(r, skipSpace(r, i+n))
+			switch next {
+			case "IF", "LOOP", "CASE", "WHILE", "FOR":
+				return 0, 0
+			}
+			// `END;` or `END <name>;` closes the block. Anything else -- the
+			// END of a CASE expression -- does not.
+			j := skipSpace(r, i+n)
+			if j < len(r) && r[j] == ';' {
+				return -1, n
+			}
+			if next != "" {
+				k := skipSpace(r, j+len(next))
+				if k < len(r) && r[k] == ';' {
+					return -1, n
+				}
+			}
+		}
+	}
+	return 0, 0
+}
+
+func wordAt(r []rune, i int) (string, int) {
+	j := i
+	for j < len(r) && isWordRune(r[j]) {
+		j++
+	}
+	if j == i {
+		return "", 0
+	}
+	return strings.ToUpper(string(r[i:j])), j - i
+}
+
+func skipSpace(r []rune, i int) int {
+	for i < len(r) && (r[i] == ' ' || r[i] == '\t' || r[i] == '\n' || r[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+func isWordRune(r rune) bool {
+	return r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
 }
 
 // Splittable reports whether Statements can be trusted on this case.
 //
-// The safe direction is to under-claim: a case reported unsplittable is
-// skipped and named, which costs coverage. A case wrongly split runs
-// fragments, and the verdict that comes back is about nothing.
+// Now that blocks are tracked rather than refused, the only thing left to
+// refuse is a case the reader could not finish: a BEGIN whose END it never
+// saw. The last statement would then be the rest of the file, and running that
+// produces a verdict about nothing. The safe direction is still to under-claim.
 func Splittable(src string) bool {
-	low := strings.ToLower(src)
-	for _, b := range blockBodies {
-		if strings.Contains(low, b) {
-			return false
-		}
+	stmts := Statements(src)
+	if len(stmts) == 0 {
+		return true
 	}
-	return true
+	last := strings.ToUpper(stmts[len(stmts)-1])
+	return !strings.Contains(last, "BEGIN") || strings.Contains(last, "END")
 }
 
 // IsRead reports whether a statement's output is worth comparing across the

@@ -59,10 +59,13 @@ type Result struct {
 	Statements int
 	Compared   int
 	// Converted counts CREATE TABLE statements given a primary key they did
-	// not have, and WriteFailed the writes the engine refused. The second is
-	// how the first is kept honest.
+	// not have, and WriteFailed the writes the engine refused.
 	Converted   int
 	WriteFailed int
+	// EmptyAgreement counts reads the two nodes agreed on where the master
+	// itself returned no rows. Agreement about nothing is still agreement,
+	// and it is what a refused write leaves behind.
+	EmptyAgreement int
 	// Unordered counts reads whose answers were the same rows in a different
 	// order.
 	Unordered int
@@ -131,31 +134,25 @@ const Skipped Outcome = "skipped"
 // wrong, and from Skipped because the case ran.
 const Unreplicatable Outcome = "unreplicatable"
 
-// Unordered is a read whose two answers hold the same rows in a different
-// order. SQL does not promise an order without ORDER BY, so the two nodes are
-// both right and the comparison was never well defined. Reported rather than
-// dropped, because the number is what says how much of a corpus can be used
-// as a differential one at all.
-const Unordered Outcome = "unordered"
-
-// RunCase runs a case statement by statement and compares every read across
-// the pair.
+// RunCase runs a case and compares every read it makes across the pair.
 //
-// The first version of this compared the database *after* the case and found
-// almost nothing: 38 of 39 cases in `_06_manipulation/_04_insert` came back
-// "no data", because the corpus's shape is create, insert, select, **drop** --
-// by the end there is nothing left to disagree about. That is why CTP's
-// ha_repl compares per statement, and this now does the same.
+// The first version compared the database *after* the case and found almost
+// nothing: 38 of 39 cases in `_06_manipulation/_04_insert` came back "no
+// data", because the corpus's shape is create, insert, select, **drop** -- by
+// the end there is nothing left to disagree about. So the oracle is the case's
+// own SELECTs, run on both nodes.
 //
-// The oracle is therefore the case's own SELECTs, run on both nodes and
-// compared. The wait sits between a write and the next read and nowhere else:
-// waiting before every statement would cost a marker round trip per line, and
-// waiting never is the defect P1 is about.
+// The second version sent one statement per call and cost about a second each.
+// This one sends a run of statements at a time (batch.go), which is 6.7x on
+// the measurement there. The runs are not arbitrary: a case is writes, then
+// reads, then writes, and **the wait belongs between a write and the read that
+// follows it** and nowhere else. So the grouping the oracle needs and the
+// grouping that is fast are the same grouping.
 func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.Duration, keepDir string, addKey bool) Result {
 	res := Result{Case: name}
 	if !Splittable(sql) {
 		res.Outcome = Skipped
-		res.Detail = "the case carries a block body, whose semicolons are not statement terminators"
+		res.Detail = "the case opens a block whose END never comes, so the rest of the file would run as one statement"
 		return res
 	}
 	stmts := Statements(sql)
@@ -168,41 +165,40 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 	dirty, keysStale := false, true
 	var noKey []string
 	seen := map[string]bool{}
-	for _, stmt := range stmts {
+
+	for _, seg := range segments(stmts) {
 		if ctx.Err() != nil {
 			res.Outcome, res.Detail = CaseFailed, "interrupted"
 			return res
 		}
-		if isDirective(stmt) {
-			continue
-		}
-		res.Statements++
+		res.Statements += len(seg.stmts)
 
-		if addKey {
-			if converted, changed := AddPrimaryKey(stmt); changed {
-				stmt = converted
-				res.Converted++
+		if !seg.read {
+			list := make([]string, len(seg.stmts))
+			copy(list, seg.stmts)
+			if addKey {
+				for i := range list {
+					if converted, changed := AddPrimaryKey(list[i]); changed {
+						list[i] = converted
+						res.Converted++
+					}
+				}
 			}
-		}
-		out, err := master.Run(ctx, csql(p.DB, stmt))
-		if err != nil {
-			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
-			return res
-		}
-		if IsWrite(stmt) {
-			// A statement the engine refused changed nothing, so it owes the
-			// slave nothing. Marking dirty anyway would only cost a wait, but
-			// the exit code is the cheapest signal there is.
-			if out.ExitCode == 0 {
-				dirty, keysStale = true, true
-			} else {
-				// Counted because the conversion can cause this and the
-				// failure is silent where it matters: an INSERT the added key
-				// rejects leaves the table empty on both nodes, and two empty
-				// tables agree. A conversion that turns findings into refused
-				// writes would otherwise read as a conversion that works.
-				res.WriteFailed++
+			out, _, err := newBatch(list).runRaw(ctx, master, p.DB)
+			if err != nil {
+				res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
+				return res
 			}
+			// A batch reports one exit code for many statements, so refusals
+			// are counted from the output. They matter because the conversion
+			// can cause them and the failure is silent where it lands: an
+			// INSERT the added key rejects leaves the table empty on both
+			// nodes, and two empty tables agree.
+			res.WriteFailed += strings.Count(out, "ERROR: ")
+			// Over-claimed on purpose: an unnecessary wait costs a second,
+			// and a missed one compares a slave that was never given the
+			// chance to catch up.
+			dirty, keysStale = true, true
 			continue
 		}
 
@@ -215,9 +211,6 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 			}
 			dirty = false
 		}
-		// Which tables cannot replicate is a property of the database as it
-		// stands, so it is re-read after a write and not once per case: a case
-		// creates its tables as it goes.
 		if keysStale {
 			bare, kerr := tablesWithoutPrimaryKey(ctx, p)
 			if kerr != nil {
@@ -232,32 +225,56 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 				}
 			}
 		}
-		// A read that touches a table whose rows never arrive is not a
-		// comparison this suite can make, and forcing one would report CUBRID's
-		// HA design as this build's defect. A read that touches none of them --
-		// a catalog query, or a table that has a key -- is compared as normal.
-		// Name matching rather than parsing: it errs towards skipping, and the
-		// safe direction here is to compare less.
-		if mentionsAny(stmt, noKey) {
-			res.Unreplicated++
-			continue
-		}
-		res.Compared++
-		node, want, got, cerr := compareRead(ctx, p, stmt)
-		if cerr != nil {
-			res.Outcome, res.Detail = CaseFailed, cerr.Error()
+
+		b := newBatch(seg.stmts)
+		want, _, err := b.run(ctx, master, p.DB)
+		if err != nil {
+			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
 			return res
 		}
-		if node != "" {
-			if samePermutation(want, got) {
+		slave, serr := p.SlaveChannel(0)
+		if serr != nil {
+			res.Outcome, res.Detail = CaseFailed, serr.Error()
+			return res
+		}
+		got, _, gerr := b.run(ctx, slave, p.DB)
+		if gerr != nil {
+			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the slave could not be reached: %v", gerr)
+			return res
+		}
+
+		for i, stmt := range seg.stmts {
+			// A read that touches a table whose rows never arrive is not a
+			// comparison this suite can make; forcing one would report
+			// CUBRID's HA design as this build's defect.
+			if mentionsAny(stmt, noKey) {
+				res.Unreplicated++
+				continue
+			}
+			res.Compared++
+			if Normalise(want[i]) == Normalise(got[i]) {
+				// Two empty answers agree, and that is how a refused write
+				// looks from here: the rows never landed on either node. It
+				// is the conversion's quiet failure mode and the corpus's own
+				// negative cases both, so it is counted rather than judged --
+				// the number says how much of "same" rests on nothing.
+				if noRows(want[i]) {
+					res.EmptyAgreement++
+				}
+				continue
+			}
+			// The same rows in a different order is agreement. SQL promises
+			// no order without ORDER BY, so both nodes are right and the
+			// question this suite asks is answered yes.
+			if samePermutation(want[i], got[i]) {
 				res.Unordered++
 				continue
 			}
-			res.Outcome, res.Node = Differ, node
+			res.Outcome, res.Node = Differ, p.Slaves[0]
 			res.Differing = firstLine(stmt)
-			res.Detail = fmt.Sprintf("%s answered this read differently from the master, after replication was waited for", node)
+			res.Detail = fmt.Sprintf("%s answered this read differently from the master, after replication was waited for", p.Slaves[0])
 			if keepDir != "" {
-				if where, werr := keepDifference(keepDir, name, stmt, want, got, node); werr == nil {
+				if where, werr := keepDifference(keepDir, name, stmt, want[i], got[i], p.Slaves[0]); werr == nil {
 					res.Kept = where
 				}
 			}
@@ -265,12 +282,6 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 		}
 	}
 
-	if res.Compared == res.Unordered && res.Unordered > 0 {
-		res.Outcome = Unordered
-		res.Detail = fmt.Sprintf("%d read(s) returned the same rows in a different order, and none of them says ORDER BY",
-			res.Unordered)
-		return res
-	}
 	if res.Compared == 0 {
 		if res.Unreplicated > 0 {
 			res.Outcome = Unreplicatable
@@ -494,4 +505,14 @@ func bothSpellings(name string) []string {
 		out = append(out, name[i+1:])
 	}
 	return out
+}
+
+// noRows reports whether csql's answer held no data.
+//
+// Matched on csql's own sentence rather than on the absence of lines, because
+// a result block always carries a header and a separator.
+func noRows(block string) bool {
+	b := Normalise(block)
+	return strings.TrimSpace(b) == "" || strings.Contains(b, "There are no results.") ||
+		strings.Contains(b, "0 rows selected") || strings.Contains(b, "0 row selected")
 }

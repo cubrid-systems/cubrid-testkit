@@ -162,7 +162,7 @@ func report(results []Result) {
 	}
 	fmt.Println()
 	fmt.Printf("ha_repl: %d case(s)\n", len(results))
-	for _, o := range []Outcome{Same, Differ, Unordered, Unreplicatable, NoData, Skipped, WaitTimeout, CaseFailed} {
+	for _, o := range []Outcome{Same, Differ, Unreplicatable, NoData, Skipped, WaitTimeout, CaseFailed} {
 		if by[o] > 0 {
 			fmt.Printf("  %-15s %d\n", o, by[o])
 		}
@@ -172,19 +172,21 @@ func report(results []Result) {
 		stmts += r.Statements
 		cmp += r.Compared
 	}
-	var skipped, unordered, converted, failed int
+	var skipped, unordered, converted, failed, empty int
 	for _, r := range results {
 		skipped += r.Unreplicated
 		unordered += r.Unordered
 		converted += r.Converted
 		failed += r.WriteFailed
+		empty += r.EmptyAgreement
 	}
-	fmt.Printf("  %d statement(s), %d read(s) compared, %d skipped for want of a primary key, %d unordered\n",
+	fmt.Printf("  %d statement(s), %d read(s) compared, %d skipped for want of a primary key, %d agreeing only as a set\n",
 		stmts, cmp, skipped, unordered)
 	if converted > 0 {
 		fmt.Printf("  %d CREATE TABLE(s) given a primary key on their first column\n", converted)
 	}
 	fmt.Printf("  %d write(s) the engine refused\n", failed)
+	fmt.Printf("  %d of the agreeing read(s) returned no rows on the master either\n", empty)
 	fmt.Printf("  waited      %s in total, never slept\n", waited.Round(time.Millisecond))
 	if by[Differ] > 0 {
 		fmt.Println("\nthe pair disagreed with itself on:")

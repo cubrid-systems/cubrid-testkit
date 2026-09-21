@@ -26,18 +26,44 @@ select * from t;`
 	}
 }
 
-// The splitter refuses a block body rather than cutting it into fragments. It
-// is the difference between a case this suite skips and names, and a case it
-// runs as nonsense and reports a verdict about.
-func TestSplittableRefusesABodyWhoseSemicolonsAreNotTerminators(t *testing.T) {
-	for _, src := range []string{
-		"CREATE PROCEDURE p AS BEGIN null; END;",
-		"create or replace function f() return int as begin return 1; end;",
-		"CREATE TRIGGER tr BEFORE INSERT ON t EXECUTE print 'x';",
-	} {
-		if Splittable(src) {
-			t.Errorf("split was allowed on a block body: %q", src)
-		}
+// A block body is kept whole rather than cut into fragments, and a construct
+// that merely looks like one is not. The first version refused every case
+// whose text contained "create trigger", which skipped fifteen of 131 cases
+// that split perfectly well -- a trigger without a body is one statement.
+func TestStatementsKeepsABlockBodyWholeAndSplitsWhatIsNotOne(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"a procedure body", "CREATE PROCEDURE p AS BEGIN null; END;", 1},
+		{"a function body", "create or replace function f() return int as begin return 1; end;", 1},
+		{"a trigger with no body", "CREATE TRIGGER tr BEFORE INSERT ON t EXECUTE print 'x';", 1},
+		{"a trigger, then a statement",
+			"create trigger t1 after insert on a execute insert into b values (obj.c1);\nselect 1;", 2},
+		// END IF closes an IF, not the block. Counting it would end the
+		// procedure early and run its tail as a statement of its own.
+		{"END IF inside a body", "create procedure p as begin if x then null; end if; end;\nselect 2;", 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Statements(c.src)
+			if len(got) != c.want {
+				t.Fatalf("want %d statement(s), got %d: %q", c.want, len(got), got)
+			}
+			if !Splittable(c.src) {
+				t.Errorf("refused a case it read correctly: %q", c.src)
+			}
+		})
+	}
+}
+
+// What is left to refuse is a block whose END never came: the last statement
+// would be the rest of the file, and a verdict about that is a verdict about
+// nothing.
+func TestSplittableRefusesAnUnclosedBlock(t *testing.T) {
+	if Splittable("create procedure p as begin null;") {
+		t.Error("a block with no END was accepted")
 	}
 	if !Splittable("create table t(i int); insert into t values(1);") {
 		t.Error("an ordinary case was refused")

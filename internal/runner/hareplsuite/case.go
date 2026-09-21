@@ -119,7 +119,10 @@ const noPrimaryKeyQuery = "SELECT c.class_name FROM db_class c WHERE c.is_system
 // the rows, the slave has none, and the name in the statement is not the name
 // of the table that cannot replicate. Ten findings, one hole, no engine defect
 // among them.
-const viewsQuery = "SELECT vclass_name, vclass_def FROM db_vclass"
+// Joined against db_class so the catalog's own forty-odd views are not read
+// on every refresh, and not mistaken for something a case made.
+const viewsQuery = "SELECT v.vclass_name, v.vclass_def FROM db_class c, db_vclass v " +
+	"WHERE c.class_name = v.vclass_name AND c.is_system_class='NO'"
 const synonymsQuery = "SELECT synonym_name, target_name FROM db_synonym"
 
 // Skipped is a case this runner will not judge: its semicolons are not all
@@ -344,26 +347,6 @@ func parseTableList(s string) []string {
 		}
 	}
 	return out
-}
-
-// DropAll clears the database of user tables.
-//
-// Called between directories and not between cases, because the sql corpus's
-// own contract is that a directory is the unit whose cases may rely on each
-// other (category/sql/02-writing-a-case.md). Dropping per case would break
-// cases that are correct.
-func DropAll(ctx context.Context, p *sandbox.Pair) error {
-	tables, err := userTables(ctx, p)
-	if err != nil {
-		return err
-	}
-	for _, t := range tables {
-		q := fmt.Sprintf("csql -u dba -c %q %s", "DROP TABLE ["+t+"]", p.DB)
-		if _, rerr := p.MasterChannel().Run(ctx, q); rerr != nil {
-			return fmt.Errorf("dropping %s: %w", t, rerr)
-		}
-	}
-	return nil
 }
 
 // tablesWithoutPrimaryKey asks the master what a read must not touch: the

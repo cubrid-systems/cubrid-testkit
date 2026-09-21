@@ -42,6 +42,13 @@ const (
 	// rather than reinvented: it is the frozen surface (ADR-003) and it already
 	// means exactly this.
 	WaitKey = "ha_sync_detect_timeout_in_ms"
+	// ResetKey is when the database is emptied: before every case, which is
+	// what makes a run reproducible, or once per directory, which is the sql
+	// corpus's own contract that a directory is the unit whose cases may rely
+	// on each other. Per case by default -- a suite whose answer depends on
+	// what the previous case left cannot be used to judge anything, and the
+	// cases that genuinely share state are rare enough to be named.
+	ResetKey = "reset"
 	// AddKeyKey turns on the conversion: a CREATE TABLE with no primary key
 	// gets one on its first column, which is what CTP's own ha_repl migration
 	// has done since 2012. Off by default -- see Run.
@@ -82,6 +89,7 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	// Off by default: the unconverted run is the baseline the conversion has
 	// to be measured against, and a switch that is on by default hides it.
 	addKey := cfg.Bool(AddKeyKey, false)
+	resetEvery := strings.ToLower(strings.TrimSpace(cfg.GetOr(ResetKey, "case")))
 
 	c := sandbox.Bind(name)
 	if aerr := c.Available(ctx); aerr != nil {
@@ -111,18 +119,22 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 
 	var results []Result
 	lastDir := ""
+	leftovers := 0
 	for _, path := range cases {
 		if ctx.Err() != nil {
 			break
 		}
-		// The directory is the unit whose cases may rely on each other, so the
-		// database is cleared when the directory changes and never inside one.
-		if dir := filepath.Dir(path); dir != lastDir {
-			if derr := DropAll(ctx, pair); derr != nil {
-				fmt.Printf("  ! could not clear the database before %s: %v\n", dir, derr)
+		dir := filepath.Dir(path)
+		if resetEvery == "case" || dir != lastDir {
+			left, rerr := Reset(ctx, pair)
+			if rerr != nil {
+				fmt.Printf("  ! could not reset the database: %v\n", rerr)
+			} else if len(left) > 0 {
+				fmt.Printf("  ! %s\n", ResetNote(left))
+				leftovers++
 			}
-			lastDir = dir
 		}
+		lastDir = dir
 		sql, rerr := os.ReadFile(path)
 		if rerr != nil {
 			results = append(results, Result{Case: path, Outcome: CaseFailed, Detail: rerr.Error()})
@@ -135,6 +147,9 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	}
 
 	report(results)
+	if leftovers > 0 {
+		fmt.Printf("  %d case(s) started from a state a reset could not clear\n", leftovers)
+	}
 	return nil
 }
 

@@ -58,6 +58,11 @@ type Result struct {
 	// numbers are what says so.
 	Statements int
 	Compared   int
+	// Converted counts CREATE TABLE statements given a primary key they did
+	// not have, and WriteFailed the writes the engine refused. The second is
+	// how the first is kept honest.
+	Converted   int
+	WriteFailed int
 	// Unordered counts reads whose answers were the same rows in a different
 	// order.
 	Unordered int
@@ -146,7 +151,7 @@ const Unordered Outcome = "unordered"
 // compared. The wait sits between a write and the next read and nowhere else:
 // waiting before every statement would cost a marker round trip per line, and
 // waiting never is the defect P1 is about.
-func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.Duration, keepDir string) Result {
+func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.Duration, keepDir string, addKey bool) Result {
 	res := Result{Case: name}
 	if !Splittable(sql) {
 		res.Outcome = Skipped
@@ -173,6 +178,12 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 		}
 		res.Statements++
 
+		if addKey {
+			if converted, changed := AddPrimaryKey(stmt); changed {
+				stmt = converted
+				res.Converted++
+			}
+		}
 		out, err := master.Run(ctx, csql(p.DB, stmt))
 		if err != nil {
 			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
@@ -184,6 +195,13 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 			// the exit code is the cheapest signal there is.
 			if out.ExitCode == 0 {
 				dirty, keysStale = true, true
+			} else {
+				// Counted because the conversion can cause this and the
+				// failure is silent where it matters: an INSERT the added key
+				// rejects leaves the table empty on both nodes, and two empty
+				// tables agree. A conversion that turns findings into refused
+				// writes would otherwise read as a conversion that works.
+				res.WriteFailed++
 			}
 			continue
 		}
@@ -356,7 +374,7 @@ func tablesWithoutPrimaryKey(ctx context.Context, p *sandbox.Pair) ([]string, er
 		for _, row := range views {
 			name, def, ok := splitTwo(row)
 			if ok && mentionsAny(def, bare) {
-				bare = append(bare, name)
+				bare = append(bare, bothSpellings(name)...)
 			}
 		}
 	}
@@ -366,7 +384,7 @@ func tablesWithoutPrimaryKey(ctx context.Context, p *sandbox.Pair) ([]string, er
 		for _, row := range syns {
 			name, target, ok := splitTwo(row)
 			if ok && mentionsAny(target, bare) {
-				bare = append(bare, name)
+				bare = append(bare, bothSpellings(name)...)
 			}
 		}
 	}
@@ -458,4 +476,22 @@ func samePermutation(a, b string) bool {
 		}
 	}
 	return true
+}
+
+// bothSpellings is a catalog name and the name a statement is likely to use.
+//
+// db_vclass and db_synonym carry an owner-qualified name -- `u1.v1` -- and a
+// case says `select * from v1`, so matching only what the catalog returned
+// misses it. That was one of the two differences left after the view check
+// went in, and it was not the engine.
+//
+// Both are kept rather than only the tail: a case may qualify too, and an
+// extra name in this list costs a comparison that is skipped, which is the
+// cheap direction.
+func bothSpellings(name string) []string {
+	out := []string{name}
+	if i := strings.LastIndexByte(name, '.'); i >= 0 && i+1 < len(name) {
+		out = append(out, name[i+1:])
+	}
+	return out
 }

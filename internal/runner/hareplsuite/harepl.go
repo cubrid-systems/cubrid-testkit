@@ -42,6 +42,10 @@ const (
 	// rather than reinvented: it is the frozen surface (ADR-003) and it already
 	// means exactly this.
 	WaitKey = "ha_sync_detect_timeout_in_ms"
+	// AddKeyKey turns on the conversion: a CREATE TABLE with no primary key
+	// gets one on its first column, which is what CTP's own ha_repl migration
+	// has done since 2012. Off by default -- see Run.
+	AddKeyKey = "add_primary_key"
 )
 
 func clusterOf(cfgCluster string) string {
@@ -75,6 +79,9 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	name := clusterOf(cfg.GetOr(ClusterKey, ""))
 	scenario := cfg.GetOr("scenario", "")
 	wait := time.Duration(cfg.Int(WaitKey, 60000)) * time.Millisecond
+	// Off by default: the unconverted run is the baseline the conversion has
+	// to be measured against, and a switch that is on by default hides it.
+	addKey := cfg.Bool(AddKeyKey, false)
 
 	c := sandbox.Bind(name)
 	if aerr := c.Available(ctx); aerr != nil {
@@ -122,7 +129,7 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 			continue
 		}
 		rel, _ := filepath.Rel(scenario, path)
-		r := RunCase(ctx, pair, rel, string(sql), wait, keepDir)
+		r := RunCase(ctx, pair, rel, string(sql), wait, keepDir, addKey)
 		results = append(results, r)
 		fmt.Printf("  %-15s %s%s\n", r.Outcome, rel, detailSuffix(r))
 	}
@@ -165,13 +172,19 @@ func report(results []Result) {
 		stmts += r.Statements
 		cmp += r.Compared
 	}
-	var skipped, unordered int
+	var skipped, unordered, converted, failed int
 	for _, r := range results {
 		skipped += r.Unreplicated
 		unordered += r.Unordered
+		converted += r.Converted
+		failed += r.WriteFailed
 	}
 	fmt.Printf("  %d statement(s), %d read(s) compared, %d skipped for want of a primary key, %d unordered\n",
 		stmts, cmp, skipped, unordered)
+	if converted > 0 {
+		fmt.Printf("  %d CREATE TABLE(s) given a primary key on their first column\n", converted)
+	}
+	fmt.Printf("  %d write(s) the engine refused\n", failed)
 	fmt.Printf("  waited      %s in total, never slept\n", waited.Round(time.Millisecond))
 	if by[Differ] > 0 {
 		fmt.Println("\nthe pair disagreed with itself on:")

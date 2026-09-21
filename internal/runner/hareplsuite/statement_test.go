@@ -154,3 +154,18 @@ Program 'csql' (pid 11381) connected to database server 'pmha' on the host 'loca
 		t.Error("a csql diagnostic was taken for a table name")
 	}
 }
+
+// The catalog qualifies a view with its owner and a case does not, so a check
+// that matches only the catalog's spelling misses the view entirely.
+func TestBothSpellingsCoversTheQualifiedAndTheBareName(t *testing.T) {
+	got := bothSpellings("u1.v1")
+	if len(got) != 2 || got[0] != "u1.v1" || got[1] != "v1" {
+		t.Errorf("want [u1.v1 v1], got %v", got)
+	}
+	if got := bothSpellings("v1"); len(got) != 1 || got[0] != "v1" {
+		t.Errorf("an unqualified name has one spelling, got %v", got)
+	}
+	if got := bothSpellings("u1."); len(got) != 1 {
+		t.Errorf("a trailing dot is not a second name, got %v", got)
+	}
+}

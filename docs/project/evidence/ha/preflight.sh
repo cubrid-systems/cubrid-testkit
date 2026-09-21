@@ -30,9 +30,15 @@ ok()   { say "$1" "ok${2:+ — $2}"; }
 bad()  { say "$1" "NO${2:+ — $2}"; fail=$((fail+1)); }
 
 # on <host> <command> -- runs it there, quietly, and yields its stdout.
+#
+# The profile is sourced first, every time, because that is exactly what CTP
+# does: common/ShellInput.java prepends ". ~/.bash_profile" to every script it
+# sends. A check that looks without it is looking at a different machine than the
+# one the cases will run on -- which this script got wrong on its first run,
+# reporting a build and a JVM missing on a node that had both.
 on() {
   ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
-      -p "$port" "$user@$1" "$2" 2>/dev/null
+      -p "$port" "$user@$1" ". ~/.bash_profile >/dev/null 2>&1; $2" 2>/dev/null
 }
 
 echo "=== reachable ==="
@@ -47,24 +53,29 @@ echo
 echo "=== each node is a QA machine (ha-topology.md §3) ==="
 for h in "$master" "$slave"; do
   echo "-- $h"
-  v=$(on "$h" '. ~/.bash_profile >/dev/null 2>&1; cubrid_rel 2>/dev/null | head -1')
+  # cubrid_rel opens with a blank line, so the version is grepped rather than headed.
+  v=$(on "$h" 'cubrid_rel 2>/dev/null | grep -m1 CUBRID')
   [ -n "$v" ] && ok "a CUBRID build" "$v" || bad "a CUBRID build" "cubrid_rel says nothing"
 
-  j=$(on "$h" 'echo ${JAVA_HOME:-}')
-  [ -n "$j" ] && ok "JAVA_HOME" "$j" || bad "JAVA_HOME" "run_remote_script is a Java class (§3b)"
+  # The JVM and the tree are the master's: CTP's -initfile is read where the
+  # Java process runs and sent inline, so a slave needs neither.
+  if [ "$h" = "$master" ]; then
+    j=$(on "$h" 'echo ${JAVA_HOME:-}')
+    [ -n "$j" ] && ok "JAVA_HOME" "$j" || bad "JAVA_HOME" "run_remote_script is a Java class (§3b)"
 
-  c=$(on "$h" 'echo ${CTP_HOME:-}')
-  if [ -n "$c" ] && [ -n "$(on "$h" "[ -d '$c/shell/init_path' ] && echo y")" ]; then
-    ok "CTP_HOME with shell/init_path" "$c"
-  else
-    bad "CTP_HOME with shell/init_path" "\$init_path is where HA.properties goes (§3c)"
+    c=$(on "$h" 'echo ${CTP_HOME:-}')
+    if [ -n "$c" ] && [ -n "$(on "$h" "[ -d '$c/shell/init_path' ] && echo y")" ]; then
+      ok "CTP_HOME with shell/init_path" "$c"
+    else
+      bad "CTP_HOME with shell/init_path" "\$init_path is where HA.properties goes (§3c)"
+    fi
   fi
 
   for tool in expect scp ssh csql; do
     [ -n "$(on "$h" "command -v $tool")" ] && ok "$tool" || bad "$tool" "make_ha.sh's expect files need it (§3d)"
   done
 
-  w=$(on "$h" '. ~/.bash_profile >/dev/null 2>&1; [ -w "$CUBRID/conf/cubrid.conf" ] && echo y')
+  w=$(on "$h" '[ -n "$CUBRID" ] && [ -w "$CUBRID/conf/cubrid.conf" ] && echo y')
   [ -n "$w" ] && ok "\$CUBRID/conf is writable" || bad "\$CUBRID/conf is writable" "modify_cubrid_conf rewrites it"
 done
 
@@ -78,7 +89,7 @@ if [ -n "$(on "$master" "(</dev/tcp/$slave/$port) >/dev/null 2>&1 && echo y")" ]
 else
   bad "master -> slave:$port" "the cases ssh from the master to the slave"
 fi
-p=$(on "$master" '. ~/.bash_profile >/dev/null 2>&1; ini.sh -s common $CUBRID/conf/cubrid.conf cubrid_port_id 2>/dev/null')
+p=$(on "$master" 'ini.sh -s common $CUBRID/conf/cubrid.conf cubrid_port_id 2>/dev/null')
 p=${p:-1523}
 if [ -n "$(on "$slave" "(</dev/tcp/$master/$p) >/dev/null 2>&1 && echo y")" ]; then
   ok "slave -> master:$p (engine port)"

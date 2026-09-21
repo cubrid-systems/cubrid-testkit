@@ -62,6 +62,11 @@ type Result struct {
 	// not have, and WriteFailed the writes the engine refused.
 	Converted   int
 	WriteFailed int
+	// KeyDuplicate and KeyNull count the two ways an added primary key can
+	// refuse the corpus's own data. The first is unambiguous; the second
+	// includes the corpus's own NOT NULL columns.
+	KeyDuplicate int
+	KeyNull      int
 	// ObjectDomain counts reads skipped because they touch a table with a
 	// column whose type is another class.
 	ObjectDomain int
@@ -188,6 +193,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 	}
 
 	master := p.MasterChannel()
+	conv := NewConversion()
 	dirty, keysStale := false, true
 	var noKey, withObject []string
 	seen := map[string]bool{}
@@ -204,7 +210,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 			copy(list, seg.stmts)
 			if addKey {
 				for i := range list {
-					if converted, changed := AddPrimaryKey(list[i]); changed {
+					if converted, changed := conv.Apply(list[i]); changed {
 						list[i] = converted
 						res.Converted++
 					}
@@ -221,6 +227,13 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 			// INSERT the added key rejects leaves the table empty on both
 			// nodes, and two empty tables agree.
 			res.WriteFailed += strings.Count(out, "ERROR: ")
+			// Split out the refusals the conversion can cause. The unique
+			// violation names the index and CUBRID generates a primary key's
+			// as pk_<table>_<column>, so that one is unambiguous. A NOT NULL
+			// violation is not -- the corpus has its own NOT NULL columns --
+			// and is counted apart rather than folded into either.
+			res.KeyDuplicate += strings.Count(out, "unique constraint violations. INDEX pk_")
+			res.KeyNull += strings.Count(out, "violated NOT NULL constraint")
 			// Over-claimed on purpose: an unnecessary wait costs a second,
 			// and a missed one compares a slave that was never given the
 			// chance to catch up.

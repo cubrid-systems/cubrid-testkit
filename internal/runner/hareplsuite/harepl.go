@@ -50,8 +50,10 @@ const (
 	// cases that genuinely share state are rare enough to be named.
 	ResetKey = "reset"
 	// AddKeyKey turns on the conversion: a CREATE TABLE with no primary key
-	// gets one on its first column, which is what CTP's own ha_repl migration
-	// has done since 2012. Off by default -- see Run.
+	// gets a column of its own to be one, and the case's positional INSERTs
+	// are rewritten to name their columns around it. Off by default -- the
+	// unconverted run is the baseline the conversion has to be measured
+	// against.
 	AddKeyKey = "add_primary_key"
 )
 
@@ -187,7 +189,7 @@ func report(results []Result) {
 		stmts += r.Statements
 		cmp += r.Compared
 	}
-	var skipped, unordered, converted, failed, empty, objs int
+	var skipped, unordered, converted, failed, empty, objs, kdup, knull int
 	for _, r := range results {
 		skipped += r.Unreplicated
 		unordered += r.Unordered
@@ -195,16 +197,22 @@ func report(results []Result) {
 		failed += r.WriteFailed
 		empty += r.EmptyAgreement
 		objs += r.ObjectDomain
+		kdup += r.KeyDuplicate
+		knull += r.KeyNull
 	}
 	fmt.Printf("  %d statement(s), %d read(s) compared, %d skipped for want of a primary key, %d agreeing only as a set\n",
 		stmts, cmp, skipped, unordered)
 	if converted > 0 {
-		fmt.Printf("  %d CREATE TABLE(s) given a primary key on their first column\n", converted)
+		fmt.Printf("  %d statement(s) rewritten to carry a generated primary key\n", converted)
 	}
 	if objs > 0 {
 		fmt.Printf("  %d read(s) skipped for an object-domain column, whose reference is not replicated\n", objs)
 	}
-	fmt.Printf("  %d write(s) the engine refused\n", failed)
+	fmt.Printf("  %d write(s) the engine refused", failed)
+	if kdup+knull > 0 {
+		fmt.Printf(" (%d on a generated primary key, %d on a NOT NULL constraint)", kdup, knull)
+	}
+	fmt.Println()
 	fmt.Printf("  %d of the agreeing read(s) returned no rows on the master either\n", empty)
 	fmt.Printf("  waited      %s in total, never slept\n", waited.Round(time.Millisecond))
 	if by[Differ] > 0 {

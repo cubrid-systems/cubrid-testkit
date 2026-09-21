@@ -1,70 +1,103 @@
 package hareplsuite
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-func TestAddPrimaryKeyPutsItOnTheFirstColumn(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{
-			"one column",
-			"create table t(i int)",
-			"create table t(i int PRIMARY KEY)",
-		},
-		{
-			"several columns",
-			"create table t(i int, v varchar(10))",
-			"create table t(i int PRIMARY KEY, v varchar(10))",
-		},
-		{
-			// The comma inside numeric(10,2) is not the end of a column, and
-			// this is the case CTP's position-comparing version cannot see.
-			"a comma inside the type",
-			"create table t(n numeric(10,2), v varchar(10))",
-			"create table t(n numeric(10,2) PRIMARY KEY, v varchar(10))",
-		},
-		{
-			"a column list over several lines",
-			"create class tb(\n\tcol1 char(20),\n\tcol2 int\n)",
-			"create class tb(\n\tcol1 char(20) PRIMARY KEY,\n\tcol2 int\n)",
-		},
-		{
-			// A parenthesis and a comma inside a default literal are text.
-			"a literal with punctuation in it",
-			"create table t(v varchar(10) default 'a,b(c', i int)",
-			"create table t(v varchar(10) default 'a,b(c' PRIMARY KEY, i int)",
-		},
+func TestConversionAddsAKeyNoDataCanViolate(t *testing.T) {
+	c := NewConversion()
+	got, changed := c.Apply("create table t(i int, v varchar(10))")
+	if !changed {
+		t.Fatal("a table with no primary key was left without one")
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, changed := AddPrimaryKey(c.in)
-			if !changed {
-				t.Fatalf("not converted: %q", c.in)
+	want := "create table t(i int, v varchar(10), " + KeyColumn + " INT AUTO_INCREMENT PRIMARY KEY)"
+	if got != want {
+		t.Errorf("\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// The column list is read off the CREATE, so a comma inside a type is not the
+// end of a column and a table-level constraint is not one at all.
+func TestConversionReadsTheColumnNames(t *testing.T) {
+	cases := []struct {
+		name, create string
+		want         []string
+	}{
+		{"simple", "create table t(i int, v varchar(10))", []string{"i", "v"}},
+		{"comma in a type", "create table t(n numeric(10,2), v varchar(10))", []string{"n", "v"}},
+		{"a table-level constraint", "create table t(a int, b int, FOREIGN KEY (a) REFERENCES u(x))", []string{"a", "b"}},
+		{"over several lines", "create class tb(\n col1 char(20),\n col2 int\n)", []string{"col1", "col2"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewConversion()
+			if _, ok := c.Apply(tc.create); !ok {
+				t.Fatalf("not converted: %q", tc.create)
 			}
-			if got != c.want {
-				t.Errorf("\n got: %q\nwant: %q", got, c.want)
+			got := c.cols["t"]
+			if got == nil {
+				got = c.cols["tb"]
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("want %v, got %v", tc.want, got)
 			}
 		})
 	}
 }
 
-// The transform leaves alone what it cannot improve, and says so by returning
-// false. A statement it changed when it should not have is a case that now
-// fails for a reason the corpus did not write.
-func TestAddPrimaryKeyLeavesTheseAlone(t *testing.T) {
+// The extra column breaks a positional INSERT, which is most of the corpus.
+// That objection is answered rather than accepted: the names are written in.
+func TestConversionNamesTheColumnsOfAPositionalInsert(t *testing.T) {
+	c := NewConversion()
+	c.Apply("create table t(c1 int, c2 varchar(10))")
+
+	got, changed := c.Apply("insert into t values(1, 'a')")
+	if !changed {
+		t.Fatal("a positional insert was left to break on the extra column")
+	}
+	if got != "insert into t (c1, c2) values(1, 'a')" {
+		t.Errorf("got %q", got)
+	}
+
+	if got, _ := c.Apply("insert into t select * from u"); got != "insert into t (c1, c2) select * from u" {
+		t.Errorf("insert-select: got %q", got)
+	}
+}
+
+// The corpus nests them, and both tables may have been converted.
+func TestConversionReachesANestedInsert(t *testing.T) {
+	c := NewConversion()
+	c.Apply("create class person2(name varchar(20), age integer)")
+	c.Apply("create class employees(empno integer, attr person2)")
+
+	got, changed := c.Apply("insert into employees values(1001, (insert into person2 values ('xxx', 21)))")
+	if !changed {
+		t.Fatal("not converted")
+	}
+	if !strings.Contains(got, "insert into employees (empno, attr) values") {
+		t.Errorf("the outer insert was not named: %q", got)
+	}
+	if !strings.Contains(got, "insert into person2 (name, age) values") {
+		t.Errorf("the inner insert was not named: %q", got)
+	}
+}
+
+func TestConversionLeavesTheseAlone(t *testing.T) {
+	c := NewConversion()
+	c.Apply("create table t(c1 int, c2 int)")
 	for _, in := range []string{
-		"create table t(i int primary key, v varchar(10))",
-		"create table t(i int, v varchar(10), PRIMARY KEY(i))",
-		"create table t2 as select * from t1",
-		"insert into t values(1)",
+		"create table u(i int primary key, v varchar(10))",
+		"create table v2 as select * from t",
+		"insert into t(c1) values(1)", // already names its columns
+		"insert into t set c1 = 1",    // names them another way
+		"insert into other values(1)", // a table this conversion did not touch
 		"select * from t",
-		"create view v as select * from t",
-		"create index ix on t(i)",
+		"create view w as select * from t",
 	} {
-		got, changed := AddPrimaryKey(in)
+		got, changed := c.Apply(in)
 		if changed {
 			t.Errorf("changed what it should not have: %q -> %q", in, got)
-		}
-		if got != in {
-			t.Errorf("returned a different statement without saying so: %q", got)
 		}
 	}
 }

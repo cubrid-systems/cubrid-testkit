@@ -3,12 +3,15 @@
 - **Date:** 2026-09-21
 - **What this is:** the functional specification for HA testing in this system. Written **before**
   any port, because the thing being ported is weak enough that copying it would lock the weakness
-  in. What CTP does is §2, measured; what it cannot do is §3, measured; §4 is the specification.
+  in. What CTP does is §2, measured; what it does not examine is §3, measured; §4 is the
+  specification, in two groups — **A, the topology holding still**, which is what these two suites
+  are actually for and where the near work is; and **B, the topology as the subject**, which is
+  admitted, specified and deferred.
 - **Trees:** cases `CUBRID/cubrid-testcases-private` `HA/shell` (373 cases by ADR-013's rule) · CTP
   `cubrid-testtools` as checked out here · `cubrid-cluster-sandbox` `3081496`.
 - **Related:** ADR-022 (who stands the topology up) · ADR-015 (axis B, and its four admission
   criteria) · `evidence/ha-topology.md` (what a sandbox pair gives) ·
-  `concept/beyond-axis.md` B-T15.
+  `concept/beyond-axis.md` B-T16.
 
 ---
 
@@ -102,7 +105,7 @@ failure is a typo, so that comparison can only ever pass. One case of 373, found
 spelling of the two verdict helpers — but it is the kind of defect an answer-file corpus would have
 surfaced and this one cannot, because nothing checks that a case is capable of failing.
 
-## 3. What CTP cannot do — measured
+## 3. What it does not examine — measured
 
 **No fault is ever injected into the network.** Over all 373 cases:
 
@@ -154,14 +157,51 @@ failback problem — 0 files. `slave rebuild` — a script with a long history o
 `ha_ping_hosts` appears in 9, and every one of them writes the setting and greps a message; none
 makes the ping host unreachable.
 
-**What that adds up to.** CTP's HA testing establishes that *replication copies rows* and that *a
-node that is stopped is noticed*. Both matter. Neither is where CUBRID's HA defects have been.
+### 3-1. The sharper statement: the move is setup, never the subject
+
+"No fault is injected" is true and it is the wrong headline, because it suggests the corpus leaves
+the topology alone. It does not. Counted:
+
+| | cases |
+|---|---:|
+| cases that move the topology (`hb stop`, `service stop`, `kill -9`) | **263 of 373** |
+| of those, asserting **data equality** afterwards | **115** |
+| of those, asserting on `hb status` or `changemode` | 22 |
+| of those, **timing** the transition | **4** |
+| using `wait_for_slave_failover` | 8 |
+
+So 263 cases stop a node, and what they then do is ask whether replication still copied the rows.
+**The transition is a precondition for a steady-state comparison, and almost never the thing being
+examined** — 22 look at the states it passed through and 4 time it.
+
+`ha_repl` does not move the topology at all: two or three of its twenty-odd Java files mention `hb
+stop`, and those are deploy and cleanup. It is steady-state by construction.
+
+**What that adds up to.** CTP's HA testing establishes that *replication copies rows across a
+topology that is holding still*, including after it has been disturbed. That is a real and useful
+thing, and it is most of what these two suites are for. What is missing is not only the fault
+vocabulary — it is that **nothing examines the disturbance itself**, and the absent network faults
+are one class of disturbance among several the corpus already performs and does not look at.
 
 ## 4. The specification
 
 Seven properties. Each says what must be established, how it is observed, and what result would show
 it worked — ADR-015's third criterion is that the evidence is declared before the work, so each row
 is written to be falsifiable now rather than described later.
+
+**They are in two groups, and the order is a decision** (2026-09-21). §3-1 is why: these suites test
+a topology that is holding still, and that is a legitimate job rather than a shortfall. So the
+properties that make *that* job correct come first; the ones that make the disturbance itself the
+subject are a second axis and wait.
+
+| | | |
+|---|---|---|
+| **A. The held-still topology** | P1 · P7 · P2's setup half | needs the corpus and the runner. No new environment capability, no second machine, no fault verb |
+| **B. The moving topology** | P3 · P4 · P5 · P6 · P2's subject half | needs a provisioner that can cut a network — ADR-022's sandbox path |
+
+Group A is the near work. Group B is admitted, specified, and deferred.
+
+### Group A — the topology is holding still
 
 **P1 — Replication is complete, and the wait is a wait.**
 Every write accepted by the master appears on every slave. Observed by the existing oracle: the same
@@ -179,6 +219,23 @@ A failover reaches `registered_and_active` on exactly one node. **`to_be_active`
 are states a test can wait for, assert on, and time**, because a transition that stops in one is the
 field's reported failure and is currently invisible. A transition that does not complete within a
 declared bound is a failure with the state it stopped in named in the verdict.
+
+**This property is in both groups, and its halves separate cleanly.** *Waiting for a transition to
+complete* belongs to group A and belongs there urgently: 263 cases perform one as setup and wait for
+it with a sleep (§3-1), so when the setup transition has not finished, the steady-state comparison
+that follows is measuring nothing and says so with a green verdict. *Timing the transition, and
+asserting on the states it passed through*, is group B.
+
+**P7 — A case cannot silently pass.**
+Every case must be capable of failing. Checked mechanically, not by review: a case whose failure
+path is unreachable — a misspelt `write_nok`, a comparison whose inputs are always identical — is a
+defect in the case. §2-4 is one instance; nothing currently looks for more. It needs the corpus and
+nothing else — no machine, no pair, no provisioner.
+
+### Group B — the topology is the subject
+
+Admitted and specified so the evidence is declared in advance, deferred so that group A is not held
+behind a provisioner.
 
 **P3 — A partition is a fault the tests can produce.**
 Unreachability between two nodes, with the mechanism named — a dropped route and a dropped packet
@@ -206,11 +263,6 @@ number, because the measurement's own spread is wider than some of the effects �
 four years of work on this stall on reproducibility rather than on knowledge
 (`requirements/02-ha-role-transition-field-evidence.md`).
 
-**P7 — A case cannot silently pass.**
-Every case must be capable of failing. Checked mechanically, not by review: a case whose failure
-path is unreachable — a misspelt `write_nok`, a comparison whose inputs are always identical — is a
-defect in the case. §2-4 is one instance; nothing currently looks for more.
-
 ### What is deliberately not here
 
 **A new case language.** `.ctl` earned its place in isolation because the thing being expressed —
@@ -227,12 +279,34 @@ verdicts are the baseline everything here is measured against. Nothing in §4 sh
 baseline exists — **and it does not exist yet**, which makes it the next piece of work regardless of
 this document.
 
-The seven properties then arrive in two forms:
+The two groups then arrive by different routes.
 
-- **As new cases**, outside the frozen corpus, where P3–P6 live. They need a provisioner that can cut
-  a network, which is ADR-022's sandbox path.
-- **As a change to how the frozen cases are run**, where P1 and P7 live. A `sleep` cannot be removed
-  from a frozen case — but a runner that provides the waits, and that reports a case which cannot
-  fail, changes what those 373 cases are worth without editing one of them.
+**Group A is a patch set, and the mechanism is already built.** A `sleep` cannot be deleted from a
+frozen case — but a run has been able to carry corpus changes it does not own since the shell suite
+needed them, and isolation's set is the same defect with the same fix:
 
-That second form is the interesting half, and it is the one this repository can do alone.
+```
+delete_select_06.ctl :32    MC: sleep 1;   ->   MC: wait until C2 ready;
+```
+
+HA is that shape again: `sleep 5` becomes `wait_for_slave`, and **`wait_for_slave` is already in the
+corpus's own helper library** — 136 cases call it while 244 sleep (§2-3). Everything the mechanism
+needs exists: `case_patch_dir`, the apply-and-revert around a run, the guard that fails when a patch
+stops applying, and the `PATCHED` report that names every case whose verdict came from patched
+source. The set itself lives outside this repository — `cubrid-testkit-patches`, named by
+`TESTKIT_PATCHES` — which is where an HA set would go too, and for the same reason: an HA patch
+carries context lines from a private corpus.
+
+A patch that replaces a sleep with the wait sitting beside it is also the kind that goes upstream
+unchanged, and a patch that stops applying is how this side finds out it landed.
+
+P7 needs even less: it reads the corpus and reports cases whose failure path cannot be reached. No
+machine at all.
+
+**Group B is new cases**, outside the frozen corpus, and they need a provisioner that can cut a
+network — ADR-022's sandbox path, and the node flavour `evidence/ha-topology.md` §3 asks for.
+
+So the near work needs **no new environment capability**: not the four node additions, not a fault
+verb, not a second machine. It needs the corpus, the patch layer and the runner. The one thing it
+does need a pair for is the *verification* — whether removing a sleep leaves every verdict where it
+was — and that is the two-machine baseline above, which is owed anyway.

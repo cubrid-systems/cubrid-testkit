@@ -1018,18 +1018,23 @@ case-seconds; a second off all 3,444 is nearly an hour of serial work.
 | Not yet | 3's second cluster, which needs finding before it can be costed |
 | Evidence | this run's `case_plan`, which is the first per-case duration record for the whole corpus and the input every one of these needs |
 
-### B-T15. HA that tests what breaks HA — **blocked**
+### B-T16. HA that tests what it is actually for — **A ready, B blocked**
 
 | | |
 |---|---|
-| Blocked on | T: the two-machine baseline for the 373 frozen HA cases, which does not exist yet |
 | Improves on | T: the `HA/shell` corpus and `make_ha.sh` |
-| Today | measured over all 373 cases (`design/module-ha.md` §3). **No fault is ever injected into the network** — `iptables` 0 files, `ip route` 0, `tc qdisc` 0; every fault is `kill -9` or `hb stop`, so a node is stopped and never merely unreachable. **no case waits on or asserts `to_be_active` or `to_be_standby`** — the one appearance anywhere in the tree is a byte inside a recorded `hb status` answer file — though the field's tracker records a failover stopping in one for hours. **The three parameters that decide switchover appear in 0 files**, and `cluster-sandbox` measured their behaviour not to be the documented arithmetic. And synchronisation is the clock: **244 of 373 cases sleep, 726 times, 20,370 seconds — 5h39m** — which is both the cost and the correctness bug, since a sleep that is too short fails for a reason that is not the engine's and one that is too long passes without waiting. **And the corpus already ships the fix it does not use**: `wait_for_slave` writes a marker row on the master and polls the slave until it arrives, and 136 cases call it while 244 sleep |
-| Beyond | seven properties, specified in `design/module-ha.md` §4: a wait that is a poll on state; role transitions whose intermediate states are observable; partition as a producible fault, with the mechanism named; split brain reachable on purpose and a verdict when it is not; divergence detected by the data rather than by the engine's own gauges; the switchover parameters as test inputs with a distribution rather than a number; and a case that cannot silently pass |
-| Evidence | declared in advance, per property, in §4 — each row says what result would show it worked. The headline one: the corpus's 20,370 seconds fall to what the engine actually takes, with no verdict changing |
-| Why it is axis B and not a port | **copying this would lock the weakness in.** CTP's HA testing establishes that replication copies rows and that a stopped node is noticed. Neither is where CUBRID's HA defects have been |
-| Switchable off | the frozen 373 keep running as they are, on the two-machine path, unchanged. Everything here is either a new case outside the corpus or a property of the runner around it (§5) |
-| Depends on | ADR-022 for the pair, and on `cluster-sandbox`'s fault verbs for P3–P6 — not built here |
+| Two groups | **A — the topology holding still**, which is what these suites are for. **B — the topology as the subject**, admitted and deferred. `design/module-ha.md` §4 |
+| Today, measured over all 373 cases | **Synchronisation is the clock**: 244 of 373 sleep, 726 times, **20,370 seconds — 5h39m**. Both the cost and a correctness bug, since a sleep too short fails for a reason that is not the engine's and one too long passes without waiting. **And the corpus ships the fix it does not use** — `wait_for_slave` writes a marker row on the master and polls the slave until it arrives; 136 cases call it, 244 sleep, 91 do both. **A case can be incapable of failing**: `_22_ha/bug_xdbms3769` calls `wirte_nok`, and nothing looks for more |
+| Group A — beyond | P1 a wait that is a poll on state, not a sleep. P7 a case that cannot silently pass. P2's setup half — a transition waited for rather than slept through, which matters because **263 of 373 cases move the topology as setup** and a setup transition that did not finish leaves the comparison after it measuring nothing and reporting green |
+| Group A — evidence | the corpus's 20,370 seconds fall to what the engine actually takes, **with no verdict changing** against the two-machine baseline; and every case that cannot reach its own failure path is named |
+| Group A — what it needs | the corpus, the patch set and the runner. **No fault verb, no sandbox node flavour, no second machine** — except for the verification, which needs the baseline that is owed anyway |
+| Status A | **ready** once the baseline exists; the mechanism is built (`case_patch_dir`, the guard, the `PATCHED` report) and the patch set has a home (`cubrid-testkit-patches`) |
+| Group B — beyond | P3 partition as a producible fault, with the mechanism named. P4 split brain reachable on purpose, and a verdict when it is not. P5 divergence found in the data when every gauge says healthy. P6 the switchover parameters as inputs, reported as a distribution. P2's other half — timing the transition and asserting the states it passed through |
+| Group B — today | **no fault is injected into the network**: `iptables` 0, `ip route` 0, `tc qdisc` 0, across every file in the tree. No case waits on or asserts `to_be_active` — its one appearance anywhere is a byte in a recorded `hb status` answer file — though the field's tracker records a failover stopping there for hours. The three parameters that decide switchover: 0 cases |
+| Status B | **blocked** on a provisioner that can cut a network (ADR-022's sandbox path) and on the node flavour `evidence/ha-topology.md` §3 asks for |
+| Blocked on, both | T: the two-machine baseline for the frozen 373, which does not exist |
+| Why it is axis B and not a port | **copying this would lock the weakness in.** What CTP establishes is that replication copies rows across a topology that is holding still. That is a real job and most of what these suites are for — but it is established by sleeping, by cases that can be incapable of failing, and without ever examining the disturbances the corpus itself performs |
+| Switchable off | the frozen 373 keep running as they are, on the two-machine path, unchanged. Group A is a patch set a run may or may not carry; group B is new cases outside the corpus |
 
 ### B-T4. A verdict that says why — **idea**
 

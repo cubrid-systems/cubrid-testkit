@@ -37,7 +37,7 @@
   - [Contracts](design/contracts.md) — 계약 5개와 그 경계
   - [module-shell](design/module-shell.md) — 1차 대체 대상, 35 클래스 매핑
   - [module-sql](design/module-sql.md) · [module-isolation](design/module-isolation.md) · [module-medium](design/module-medium.md)
-  - [module-ha](design/module-ha.md) — **기능 명세** (2026-09-21). CTP 의 HA 테스팅을 전수 측정하고, 그대로 따라가지 않기로 한 근거와 일곱 속성. 축 B `beyond-axis.md` B-T15
+  - [module-ha](design/module-ha.md) — **기능 명세** (2026-09-21). CTP 의 HA 테스팅을 전수 측정하고, 그대로 따라가지 않기로 한 근거와 일곱 속성. **A(유지되는 토폴로지)가 지금, B(바뀌는 토폴로지)는 나중.** 축 B `beyond-axis.md` B-T16
 - **Evidence (측정과 비교)** — 주장마다 근거. 숫자는 전부 실제 run 에서 나온다
   - [regression-shell](evidence/regression-shell.md) · [parallel-shell](evidence/parallel-shell.md) — shell
   - [sql-baseline](evidence/sql-baseline.md) · [sql-native](evidence/sql-native.md) · [regression-sql](evidence/regression-sql.md) — sql·medium (ADR-017 게이트 포함)

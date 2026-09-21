@@ -187,18 +187,22 @@ func report(results []Result) {
 		stmts += r.Statements
 		cmp += r.Compared
 	}
-	var skipped, unordered, converted, failed, empty int
+	var skipped, unordered, converted, failed, empty, objs int
 	for _, r := range results {
 		skipped += r.Unreplicated
 		unordered += r.Unordered
 		converted += r.Converted
 		failed += r.WriteFailed
 		empty += r.EmptyAgreement
+		objs += r.ObjectDomain
 	}
 	fmt.Printf("  %d statement(s), %d read(s) compared, %d skipped for want of a primary key, %d agreeing only as a set\n",
 		stmts, cmp, skipped, unordered)
 	if converted > 0 {
 		fmt.Printf("  %d CREATE TABLE(s) given a primary key on their first column\n", converted)
+	}
+	if objs > 0 {
+		fmt.Printf("  %d read(s) skipped for an object-domain column, whose reference is not replicated\n", objs)
 	}
 	fmt.Printf("  %d write(s) the engine refused\n", failed)
 	fmt.Printf("  %d of the agreeing read(s) returned no rows on the master either\n", empty)

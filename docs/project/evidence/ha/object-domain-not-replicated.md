@@ -1,6 +1,9 @@
 # An object-domain column replicates its row and not its reference
 
 - **Date:** 2026-09-21
+- **Status:** **a known constraint of CUBRID HA, undocumented** (confirmed by the team,
+  2026-09-21). Not a defect report. Written down because it is not written down anywhere else,
+  and because a suite that meets it needs to know it is a constraint rather than a finding.
 - **What this is:** a master/slave pair in which both rows arrive, both tables have primary keys,
   every gauge reads healthy, and one column holds a value on the master and NULL on the slave.
   Found by the native `ha_repl` runner over the `sql` corpus, isolated to four statements.
@@ -68,16 +71,32 @@ value with `att->type->data_readval` and puts it into a template with `dbt_put_i
 object-domain attribute that disk value is an **OID** — volume, page and slot on the *master*. It
 names nothing on the slave, and what lands is NULL.
 
-## Is it known?
+## Known, and not written down
 
-Not in this tree. Searched for a guard that refuses to replicate a class with an object-domain
-attribute, and for a message naming the restriction: there is none. The only "not replicated"
-statement in the source is about `DROP VARIABLE`
-(`src/query/execute_statement.c:17033`, and that one says *intentionally*).
+**The team knows.** It is a constraint rather than a defect, and the reason is the one the source
+gives: an object reference is a physical address, and replication carries the primary key.
 
-Whether CUBRID's manual documents the limitation is outside this tree and is **not** established
-here. What is established is that the engine does not detect it, does not report it, and does not
-move the counter that exists to say the two nodes disagree.
+It is not written down. Searched this tree for a guard that refuses to replicate a class with an
+object-domain attribute, and for a message naming the restriction: there is none. The only "not
+replicated" statement in the source is about `DROP VARIABLE`
+(`src/query/execute_statement.c:17033`, and that one says *intentionally*). So a reader of the
+code meets the behaviour before the rule, which is how this document came to exist — the suite
+reported it six times as a difference before anybody could say it was not one.
+
+What that leaves is the operational half, stated as fact rather than as a complaint: the engine
+does not detect it, does not report it, and does not move the counter that exists to say the two
+nodes disagree. Anything monitoring an HA pair by asking the engine how it is doing will not learn
+of it.
+
+## What the suite does with it now
+
+It is the fourth thing `ha_repl` cannot ask the pair about, beside a missing primary key, a view
+onto a keyless table and a synonym for one. A read touching a table with an object-domain column
+is skipped and counted separately -- separately, because "no primary key" and "holds an object" are
+two different facts about a corpus and one number would hide the second.
+
+On the 39 cases of `_06_manipulation/_04_insert`, with the conversion on: **0 differences**, 27
+reads compared, 6 skipped for an object domain. Two runs, identical.
 
 ## How it was found, and what that says about the corpus
 

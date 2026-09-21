@@ -11,10 +11,12 @@
 ## Findings from this directory
 
 - [object-domain-not-replicated](object-domain-not-replicated.md) — **2026-09-21.** A column whose
-  type is another class holds a value on the master and a stored NULL on the slave. Both rows
-  arrive, both tables have primary keys, `fail_counter` does not move and the applier logs nothing.
-  Isolated to four statements; the source explains it (replication carries the primary key and the
-  slave rebuilds the row from the master's heap image, in which an object reference is an OID).
+  type is another class holds a value on the master and a stored NULL on the slave. **A known
+  constraint, undocumented**, which is why it is written here: the suite met it six times as a
+  difference before it could be called one. Isolated to four statements, and the source explains
+  it — replication carries the primary key, and the slave rebuilds the row from the master's heap
+  image, in which an object reference is an OID. Nothing reports it: the applier logs nothing and
+  `fail_counter` does not move.
 
 ## Why this is the first measurement
 

@@ -62,6 +62,9 @@ type Result struct {
 	// not have, and WriteFailed the writes the engine refused.
 	Converted   int
 	WriteFailed int
+	// ObjectDomain counts reads skipped because they touch a table with a
+	// column whose type is another class.
+	ObjectDomain int
 	// EmptyAgreement counts reads the two nodes agreed on where the master
 	// itself returned no rows. Agreement about nothing is still agreement,
 	// and it is what a refused write leaves behind.
@@ -125,6 +128,26 @@ const viewsQuery = "SELECT v.vclass_name, v.vclass_def FROM db_class c, db_vclas
 	"WHERE c.class_name = v.vclass_name AND c.is_system_class='NO'"
 const synonymsQuery = "SELECT synonym_name, target_name FROM db_synonym"
 
+// objectDomainQuery names the tables holding a column whose type is another
+// class.
+//
+// Such a column replicates its row and not its reference: the referenced row
+// arrives, the referring row arrives with its key and its ordinary columns,
+// and the reference itself arrives as a stored NULL
+// (evidence/ha/object-domain-not-replicated.md). Replication carries the
+// primary key and the slave rebuilds the row from the master's heap image, in
+// which an object reference is an OID -- a volume, page and slot on the
+// master, naming nothing on the slave.
+//
+// **A known constraint of CUBRID HA, undocumented.** It is therefore the
+// fourth thing this suite cannot ask the pair about, beside a missing primary
+// key, a view onto a keyless table and a synonym for one -- and reporting it
+// as a difference would be reporting a design decision as this build's
+// defect, which is the noise every one of those three exists to remove.
+const objectDomainQuery = "SELECT DISTINCT a.class_name FROM db_attribute a, db_class c " +
+	"WHERE a.class_name = c.class_name AND c.is_system_class='NO' " +
+	"AND a.domain_class_name IS NOT NULL ORDER BY 1"
+
 // Skipped is a case this runner will not judge: its semicolons are not all
 // statement terminators, so splitting it would run fragments. Named rather
 // than attempted, and counted rather than hidden.
@@ -166,7 +189,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 
 	master := p.MasterChannel()
 	dirty, keysStale := false, true
-	var noKey []string
+	var noKey, withObject []string
 	seen := map[string]bool{}
 
 	for _, seg := range segments(stmts) {
@@ -220,6 +243,12 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 				res.Outcome, res.Detail = CaseFailed, kerr.Error()
 				return res
 			}
+			objs, oerr := query(ctx, p, objectDomainQuery)
+			if oerr != nil {
+				res.Outcome, res.Detail = CaseFailed, oerr.Error()
+				return res
+			}
+			withObject = names(objs)
 			noKey, keysStale = bare, false
 			for _, t := range bare {
 				if !seen[t] {
@@ -254,6 +283,13 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 				res.Unreplicated++
 				continue
 			}
+			// Counted apart from the keyless tables on purpose: they are two
+			// different facts about a corpus, and one number would hide the
+			// second.
+			if mentionsAny(stmt, withObject) {
+				res.ObjectDomain++
+				continue
+			}
 			res.Compared++
 			if Normalise(want[i]) == Normalise(got[i]) {
 				// Two empty answers agree, and that is how a refused write
@@ -286,6 +322,11 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 	}
 
 	if res.Compared == 0 {
+		if res.ObjectDomain > 0 && res.Unreplicated == 0 {
+			res.Outcome = Unreplicatable
+			res.Detail = "every read touches an object-domain column, whose reference is not replicated"
+			return res
+		}
 		if res.Unreplicated > 0 {
 			res.Outcome = Unreplicatable
 			res.Detail = "every read touches a table with no primary key (" +

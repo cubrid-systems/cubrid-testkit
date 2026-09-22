@@ -14,6 +14,17 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [class-owner-change-not-replicated](class-owner-change-not-replicated.md) — **2026-09-22.**
+  `call change_owner (...) on class db_root` does not reach the slave, for the same reason the
+  trigger's does not: `_db_class` has an index and not a primary key. **Unlike the trigger, no key
+  is coming for it**, so this one still wants a judgement. It also explains the run's other new
+  difference without any engine defect in it: a reset runs on the master and reaches a slave as
+  replication, so once the owners disagree the DROP names nothing on the slave, the object stays,
+  and every later case starts from a database the run did not choose. The suite now repairs that
+  and — more importantly — records that it had to. Two runner defects fell out on the way: the
+  key conversion was breaking any table that already auto-increments, and a `SELECT` of a serial's
+  next value was being compared across the pair.
+
 - [split-brain-divergence-converges](split-brain-divergence-converges.md) — **2026-09-22.** Group
   B's first measurement, and the first time this suite has asked its question of a topology that
   moved. A split brain is reached on purpose, a row is written on each side, the network is healed,

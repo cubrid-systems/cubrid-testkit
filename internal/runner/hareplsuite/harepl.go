@@ -120,7 +120,8 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	keepDir := cfg.GetOr("difference_dir", filepath.Join(filepath.Dir(req.ConfigPath), "ha_repl_differences"))
 
 	var results []Result
-	lastDir := ""
+	var stranded []strandedAt
+	lastDir, lastCase := "", "the state the run started from"
 	leftovers := 0
 	for _, path := range cases {
 		if ctx.Err() != nil {
@@ -128,12 +129,22 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		}
 		dir := filepath.Dir(path)
 		if resetEvery == "case" || dir != lastDir {
-			left, rerr := Reset(ctx, pair)
+			out, rerr := Reset(ctx, pair)
 			if rerr != nil {
 				fmt.Printf("  ! could not reset the database: %v\n", rerr)
-			} else if len(left) > 0 {
-				fmt.Printf("  ! %s\n", ResetNote(left))
+			}
+			if len(out.Left) > 0 {
+				fmt.Printf("  ! %s\n", ResetNote(out.Left))
 				leftovers++
+			}
+			// A slave holding what the master does not is a finding and not
+			// housekeeping: something the master did did not arrive, or
+			// arrived and could not be undone by name. It is named, attributed
+			// to the case that left it, and written down -- the repair keeps
+			// the next case honest, the record keeps this one.
+			for _, s := range out.Stranded {
+				fmt.Printf("  ! %s, left by %s\n", s.String(), lastCase)
+				stranded = append(stranded, strandedAt{Case: lastCase, S: s})
 			}
 		}
 		lastDir = dir
@@ -145,6 +156,7 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		rel, _ := filepath.Rel(scenario, path)
 		r := RunCase(ctx, pair, rel, string(sql), wait, keepDir, addKey)
 		results = append(results, r)
+		lastCase = rel
 		fmt.Printf("  %-15s %s%s\n", r.Outcome, rel, detailSuffix(r))
 	}
 
@@ -152,12 +164,67 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		if err := keepEmptyAgreements(keepDir, results); err != nil {
 			fmt.Printf("  ! could not record the empty agreements: %v\n", err)
 		}
+		if err := keepStranded(keepDir, stranded); err != nil {
+			fmt.Printf("  ! could not record what a slave was left holding: %v\n", err)
+		}
 	}
 	report(results)
 	if leftovers > 0 {
 		fmt.Printf("  %d case(s) started from a state a reset could not clear\n", leftovers)
 	}
+	reportStranded(stranded, keepDir)
 	return nil
+}
+
+// strandedAt is one stranded object and the case that left it.
+type strandedAt struct {
+	Case string
+	S    Stranded
+}
+
+// reportStranded says how often the pair diverged in a way the master's own
+// reset could not undo, which is a different number from `differ` and worth
+// its own line: `differ` is a case's reads disagreeing, this is the database
+// underneath every case after it.
+func reportStranded(stranded []strandedAt, keepDir string) {
+	if len(stranded) == 0 {
+		return
+	}
+	repaired, cases := 0, map[string]bool{}
+	for _, s := range stranded {
+		if s.S.Repaired {
+			repaired++
+		}
+		cases[s.Case] = true
+	}
+	fmt.Printf("\n  %d object(s) were left on a slave by %d case(s), %d of them repaired\n",
+		len(stranded), len(cases), repaired)
+	for _, s := range stranded {
+		fmt.Printf("    %-46s %s\n", s.Case, s.S.String())
+	}
+	if keepDir != "" {
+		fmt.Printf("    written to %s\n", filepath.Join(keepDir, strandedFile))
+	}
+}
+
+const strandedFile = "slave-stranded.tsv"
+
+// keepStranded writes the record a reader needs after the run: which case left
+// what on which node, and whether it was taken off again.
+func keepStranded(dir string, stranded []strandedAt) error {
+	if len(stranded) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("case\tnode\tkind\tname\trepaired\twhy\n")
+	for _, s := range stranded {
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%t\t%s\n",
+			s.Case, s.S.Node, strings.ToLower(s.S.Word), s.S.Name, s.S.Repaired, s.S.Why)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, strandedFile), []byte(b.String()), 0o644)
 }
 
 func detailSuffix(r Result) string {

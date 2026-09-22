@@ -55,8 +55,27 @@ func (c *Conversion) Apply(stmt string) (string, bool) {
 }
 
 // convertCreate appends the key column to a CREATE TABLE that has none.
+//
+// A table that already has an AUTO_INCREMENT column is left alone, because the
+// key this conversion adds is an AUTO_INCREMENT one and "a class can have only
+// one AUTO_INCREMENT attribute" -- the engine refuses the converted CREATE,
+// every statement after it in the case has no table to work on, and the case's
+// reads come back empty on both nodes. Two empty answers agree, so the case
+// reports `same` while establishing nothing at all.
+//
+// Found by reading back a case the suite had called `same`:
+// `_02_class/_003_auto_increment/cubridsus-965.sql` changes a class's owner by
+// method call, which does not replicate, so it is a case that makes a real
+// difference and was being reported as agreement. 96 of `_01_object`'s 3,327
+// cases and 2 of `_33_elderberry`'s 131 hold such a CREATE.
+//
+// Not converting leaves the table without a key, so its reads come back
+// `unreplicatable` instead. That is the honest answer: this suite cannot judge
+// a keyless table, and saying so is what that outcome is for.
 func (c *Conversion) convertCreate(stmt string) (string, bool) {
-	if !isCreateTable(stmt) || strings.Contains(strings.ToUpper(stmt), "PRIMARY KEY") {
+	upper := strings.ToUpper(stmt)
+	if !isCreateTable(stmt) || strings.Contains(upper, "PRIMARY KEY") ||
+		strings.Contains(upper, "AUTO_INCREMENT") {
 		return stmt, false
 	}
 	// A subclass inherits its parent's columns, including the key this

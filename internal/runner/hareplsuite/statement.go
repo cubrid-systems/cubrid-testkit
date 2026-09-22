@@ -163,8 +163,25 @@ func Splittable(src string) bool {
 // IsRead reports whether a statement's output is worth comparing across the
 // pair. It is the oracle's trigger, so it under-claims too: a statement this
 // calls a write is simply not compared.
+//
+// # A SELECT that takes a serial's next value is not a read
+//
+// `SELECT s.next_value FROM db_root` and `SELECT serial_next_value(s, 1)`
+// advance the serial. Running one on the master and the same text on the slave
+// is therefore not asking the same question twice; it is asking for a write on
+// a node that will not take one. Measured over `_01_object`: five cases of
+// `_05_serial` came back `differ` with a value on the master and an empty
+// answer on the standby, and not one of them was about replication.
+//
+// So they are writes here, which is what they are: run on the master, waited
+// for, and not compared. `current_value` on its own is left comparable -- it
+// reads what replication carried -- and a statement that asks for both in one
+// line is a write, because the line as a whole moves the serial.
 func IsRead(stmt string) bool {
 	s := strings.ToLower(strings.TrimSpace(stmt))
+	if strings.Contains(s, "next_value") || strings.Contains(s, "nextval") {
+		return false
+	}
 	for _, p := range []string{"select ", "select\n", "select\t", "show ", "values "} {
 		if strings.HasPrefix(s, p) {
 			return true

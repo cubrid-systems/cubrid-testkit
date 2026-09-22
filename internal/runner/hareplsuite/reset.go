@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
@@ -58,37 +59,264 @@ import (
 // far side of a container exec, about four tenths of a second, and six of them
 // per case is over two hours across `_01_object`'s 3,327. They are one
 // UNION ALL, ranked so that the order the drops need survives the trip.
-func Reset(ctx context.Context, p *sandbox.Pair) ([]string, error) {
+func Reset(ctx context.Context, p *sandbox.Pair) (ResetOutcome, error) {
 	for pass := 0; pass < 5; pass++ {
 		left, err := remaining(ctx, p)
 		if err != nil {
-			return nil, err
+			return ResetOutcome{}, err
 		}
 		if len(left) == 0 {
-			return nil, nil
+			stranded, serr := strandedOnSlaves(ctx, p)
+			return ResetOutcome{Stranded: stranded}, serr
 		}
 		drops := make([]string, 0, len(left))
 		for _, l := range left {
 			drops = append(drops, l.drop())
 		}
 		if _, _, err := newBatch(drops).runRaw(ctx, p.MasterChannel(), p.DB); err != nil {
-			return nil, err
+			return ResetOutcome{}, err
 		}
 		after, aerr := remaining(ctx, p)
 		if aerr != nil {
-			return nil, aerr
+			return ResetOutcome{}, aerr
 		}
 		// No progress means the rest cannot be removed this way, and saying so
 		// is better than four more passes that will not either.
 		if len(after) >= len(left) && len(after) > 0 {
-			return leftoverNames(after), nil
+			return ResetOutcome{Left: leftoverNames(after)}, nil
 		}
 	}
 	left, err := remaining(ctx, p)
 	if err != nil {
+		return ResetOutcome{}, err
+	}
+	if len(left) == 0 {
+		stranded, serr := strandedOnSlaves(ctx, p)
+		return ResetOutcome{Stranded: stranded}, serr
+	}
+	return ResetOutcome{Left: leftoverNames(left)}, nil
+}
+
+// ResetOutcome is what a reset has to say afterwards.
+//
+// Two different failures and they are not interchangeable. Left is the
+// master's, and is a reset that did not finish. Stranded is a slave's, and is
+// something else entirely: the master is clean, the pair is not, and the
+// difference between them is a fact about the engine rather than about this
+// runner.
+type ResetOutcome struct {
+	Left     []string
+	Stranded []Stranded
+}
+
+// Stranded is one object a slave holds that the master does not.
+//
+// # Why it is kept and not just fixed
+//
+// Because it is evidence. A slave holds an object the master does not only if
+// something the master did failed to arrive, or arrived and could not be
+// undone by name -- which is exactly what this suite exists to find. Repairing
+// it silently would erase, once per case, the very thing a run is looking for,
+// and nobody reading the tally afterwards could tell an intended divergence
+// from an accident.
+//
+// So each one is printed when it happens, written to a file beside the
+// differences, attributed to the case that left it, and counted at the end.
+// The repair is what keeps the *next* case honest; the record is what keeps
+// this one.
+type Stranded struct {
+	Node string
+	Word string
+	Name string
+	// Repaired says whether the object is gone from the slave now.
+	Repaired bool
+	// Why is what stopped the repair, when it did.
+	Why string
+}
+
+func (s Stranded) String() string {
+	out := strings.ToLower(s.Word) + " " + s.Name + " on " + s.Node
+	switch {
+	case s.Repaired:
+		out += " (repaired)"
+	case s.Why != "":
+		out += " (not repaired: " + s.Why + ")"
+	}
+	return out
+}
+
+// strandedOnSlaves reports what a slave still holds once the master is clean.
+//
+// # Why a clean master is not a clean pair
+//
+// This reset runs on the master and reaches a slave the only way anything
+// does: as replication. So a DROP the master accepts is a DROP the slave
+// replays -- and a slave replays it by name. Once the two catalogs disagree
+// about a name, the drop names something the slave does not have, fails there,
+// and the object stays.
+//
+// Measured, four statements
+// (evidence/ha/class-owner-change-not-replicated.md): `call change_owner
+// ('t1', 'u1') on class db_root` leaves `u1.t1` on the master and `dba.t1` on
+// the slave. The reset then drops `[U1].[t1]`, which is right for the master
+// and names nothing on the slave. The master is clean, the slave holds
+// `dba.t1`, and the next case's `create table t1` succeeds on the master and
+// is refused on the slave for a name clash -- so from there on the two nodes
+// differ for a reason belonging to a case that has already finished, and a
+// comparison of class *names* cannot even see it.
+//
+// This cannot be repaired from here: a standby takes no writes, and the only
+// hand that reaches it is the master's log. So it is reported, which is this
+// file's whole contract -- a reset that quietly failed is the defect it exists
+// to remove, and one that half-failed is the same defect on one node.
+//
+// # Why it costs nothing when nothing is wrong
+//
+// The check is one query per slave, and it is only reached when the master
+// came back clean. A slave that looks dirty may simply be behind, so that case
+// -- and only that case -- pays for one marker round trip and a second look.
+func strandedOnSlaves(ctx context.Context, p *sandbox.Pair) ([]Stranded, error) {
+	stranded, err := slaveLeftovers(ctx, p)
+	if err != nil || len(stranded) == 0 {
 		return nil, err
 	}
-	return leftoverNames(left), nil
+	// Behind is not stranded. One marker crossing tells them apart, and it is
+	// paid for only by a pair that already looks wrong.
+	if _, werr := p.WaitForReplication(ctx, slaveCatchUp); werr != nil {
+		for i := range stranded {
+			stranded[i].Why = "no marker crossed, so this may be lag rather than divergence"
+		}
+		return stranded, nil
+	}
+	stranded, err = slaveLeftovers(ctx, p)
+	if err != nil || len(stranded) == 0 {
+		return nil, err
+	}
+	return repairSlaves(ctx, p, stranded), nil
+}
+
+// repairSlaves takes a stranded object off a slave, by the only hand that
+// reaches one: the master's log.
+//
+// A standby accepts no writes, so nothing here connects to it. What it does
+// instead is make the master issue the DROP the slave will accept. The master
+// does not have the object -- that is what stranded means -- so the DROP has
+// to be given something to drop:
+//
+//	master:  CREATE TABLE [DBA].[xxx](...)   slave: refused, the name is taken
+//	master:  DROP TABLE [DBA].[xxx]          slave: the stranded object goes
+//
+// The CREATE failing on the slave is the point rather than a problem. Both
+// statements succeed on the master, which ends as clean as it started.
+//
+// # What it will not do
+//
+// Invent a definition. A view needs a query, a synonym needs a target and a
+// trigger needs a table and an action, and a placeholder for any of those is
+// this runner deciding what the case meant. Those are reported unrepaired,
+// which is worse for the run and better than a guess.
+func repairSlaves(ctx context.Context, p *sandbox.Pair, stranded []Stranded) []Stranded {
+	var drops []string
+	for i, s := range stranded {
+		make, ok := placeholderFor(s.Word, s.Name)
+		if !ok {
+			stranded[i].Why = "a " + strings.ToLower(s.Word) +
+				" needs a definition this runner will not invent"
+			continue
+		}
+		drops = append(drops, make, "DROP "+s.Word+" "+s.Name)
+	}
+	if len(drops) == 0 {
+		return stranded
+	}
+	if _, _, err := newBatch(drops).runRaw(ctx, p.MasterChannel(), p.DB); err != nil {
+		for i := range stranded {
+			if stranded[i].Why == "" {
+				stranded[i].Why = err.Error()
+			}
+		}
+		return stranded
+	}
+	if _, werr := p.WaitForReplication(ctx, slaveCatchUp); werr != nil {
+		for i := range stranded {
+			if stranded[i].Why == "" {
+				stranded[i].Why = "the repair did not reach the slave within " + slaveCatchUp.String()
+			}
+		}
+		return stranded
+	}
+	// Said rather than assumed: the slave is asked again, and what is still
+	// there is still reported.
+	after, err := slaveLeftovers(ctx, p)
+	if err != nil {
+		return stranded
+	}
+	still := map[string]bool{}
+	for _, s := range after {
+		still[s.Node+" "+s.Word+" "+s.Name] = true
+	}
+	for i, s := range stranded {
+		if s.Why != "" {
+			continue
+		}
+		if still[s.Node+" "+s.Word+" "+s.Name] {
+			stranded[i].Why = "the master's DROP did not remove it"
+			continue
+		}
+		stranded[i].Repaired = true
+	}
+	return stranded
+}
+
+// placeholderFor is the shortest thing the master can create under a given
+// name so that dropping it names the slave's copy too.
+func placeholderFor(word, name string) (string, bool) {
+	switch word {
+	case "TABLE":
+		return "CREATE TABLE " + name + "(" + KeyColumn + " INT)", true
+	case "SERIAL":
+		return "CREATE SERIAL " + name, true
+	case "USER":
+		return "CREATE USER " + name, true
+	default:
+		return "", false
+	}
+}
+
+// slaveCatchUp bounds the one wait strandedOnSlaves pays for.
+const slaveCatchUp = 30 * time.Second
+
+// markerPrefix names the tables the replication wait makes and unmakes, as
+// internal/sandbox spells them.
+const markerPrefix = "tkrepl_"
+
+func slaveLeftovers(ctx context.Context, p *sandbox.Pair) ([]Stranded, error) {
+	var out []Stranded
+	for i, name := range p.Slaves {
+		ch, cerr := p.SlaveChannel(i)
+		if cerr != nil {
+			return nil, cerr
+		}
+		res, rerr := ch.Run(ctx, fmt.Sprintf("csql -u dba -t -N -c %q %s", resetQuery, p.DB))
+		if rerr != nil {
+			return nil, fmt.Errorf("asking %s what it still holds: %w", name, rerr)
+		}
+		for _, row := range parseTableList(res.Stdout) {
+			word, n, ok := strings.Cut(bare(row), " ")
+			if !ok || n == "" {
+				continue
+			}
+			// The wait above leaves its own marker behind for a moment: the
+			// slave reports the row, the master drops the table, and that DROP
+			// is still crossing while this read happens. Reporting it would
+			// accuse the pair of the check's own footprint.
+			if strings.Contains(strings.ToLower(n), "["+markerPrefix) {
+				continue
+			}
+			out = append(out, Stranded{Node: name, Word: strings.ToUpper(word), Name: n})
+		}
+	}
+	return out, nil
 }
 
 // leftover is one object a case left behind, carrying the word its DROP needs.

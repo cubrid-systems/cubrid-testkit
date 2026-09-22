@@ -163,3 +163,31 @@ func TestReplicatingIsAnOutcomeDistinctFromNoData(t *testing.T) {
 		}
 	}
 }
+
+// The key this conversion adds is an AUTO_INCREMENT column, and a class can
+// have only one. Converting a table that already has one produces a CREATE the
+// engine refuses, which empties the rest of the case and makes it report `same`
+// over two empty answers -- the failure mode this suite exists to remove.
+func TestConversionLeavesATableThatAlreadyAutoIncrements(t *testing.T) {
+	for _, create := range []string{
+		"create class xoo ( id int auto_increment , title varchar(100))",
+		"create table t1 (c1 int AUTO_INCREMENT)",
+		"create class xoo ( id int auto_increment(2,-1) , title varchar(100))",
+	} {
+		c := NewConversion()
+		got, changed := c.Apply(create)
+		if changed || got != create {
+			t.Errorf("converted a table that already auto-increments:\n got: %q\nwant: %q", got, create)
+		}
+	}
+}
+
+// A table with both is already left alone by the primary-key check, and stays
+// left alone.
+func TestConversionLeavesATableThatHasBoth(t *testing.T) {
+	create := "create table t1 (c1 int auto_increment primary key, c2 int)"
+	c := NewConversion()
+	if got, changed := c.Apply(create); changed || got != create {
+		t.Errorf("got %q, changed %v", got, changed)
+	}
+}

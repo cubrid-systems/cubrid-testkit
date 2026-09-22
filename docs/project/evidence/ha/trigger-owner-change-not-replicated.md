@@ -131,5 +131,10 @@ Read back with
 ## What is not claimed
 
 One pair, one host, one build — `develop` at `5f3a30d09`, which is before #7980 and so has
-`_db_trigger` with no index at all. Whether the same holds for `change_owner` on a class, for a
-trigger owned by a user other than DBA to begin with, or across a failover, is unmeasured.
+`_db_trigger` with no index at all. Whether the same holds for a trigger owned by a user other than
+DBA to begin with, or across a failover, is unmeasured.
+
+`change_owner` on a class **is** measured now, and it behaves the same way for the same reason —
+[`class-owner-change-not-replicated.md`](class-owner-change-not-replicated.md). It does not get
+this document's judgement, though: `_db_class` has an index that is deliberately not a primary key,
+and no #7980 is coming for it.

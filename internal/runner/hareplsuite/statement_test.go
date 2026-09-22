@@ -195,3 +195,25 @@ func TestBothSpellingsCoversTheQualifiedAndTheBareName(t *testing.T) {
 		t.Errorf("a trailing dot is not a second name, got %v", got)
 	}
 }
+
+// A serial's next value is a write wearing a SELECT. Comparing one across the
+// pair asks a standby to take a write, which it will not, so the master's
+// answer and an empty one are reported as a difference that is not one.
+func TestASelectThatMovesASerialIsNotARead(t *testing.T) {
+	for _, stmt := range []string{
+		"SELECT serial_next_value(ser1, 1) FROM db_root",
+		"select se1.next_value from db_root",
+		"SELECT cnf_col1.current_value,cnf_col1.next_value  from cnf_1",
+	} {
+		if IsRead(stmt) {
+			t.Errorf("compared across the pair: %q", stmt)
+		}
+		if !IsWrite(stmt) {
+			t.Errorf("not waited for: %q", stmt)
+		}
+	}
+	// The value replication carried is still worth comparing.
+	if !IsRead("select se1.current_value from db_root") {
+		t.Error("current_value on its own should still be compared")
+	}
+}

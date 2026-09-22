@@ -8,6 +8,10 @@
 
 ---
 
+**Start here to pick the work up:** [where-this-stands](where-this-stands.md) — what the native
+`ha_repl` runner is, how to run it, the state of both environments, the four candidates for what
+is next, and the traps that cost a day each.
+
 ## Findings from this directory
 
 - [unjudged-cases](unjudged-cases.md) — **2026-09-22.** The 24 cases the suite reports as

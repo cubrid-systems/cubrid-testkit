@@ -39,28 +39,53 @@ something small and real.**
 
 ## The run
 
-24 cases dispatched, 10 executed before it was stopped, **all ten NOK**, every one of them on
-`Wait data replicated ... FAIL`. Two things are worth recording about it and neither is about
-the cases:
+Three attempts, the last on a pair whose replication was verified working first. **10 cases
+executed, all ten NOK.** The run was stopped after that; it was not going to say anything new.
 
-- **CTP rebuilds the whole database when it finds it dirty** — create on master, restart HA,
-  rebuild the slave — which is why ten cases took about thirty-five minutes.
-- **The failures are not the pair being broken.** Checked after stopping: `qa_system_tb_flag`
-  reads 1 row on the master and 1 on the slave, and `cubrid heartbeat status` agrees on both
-  nodes that desktop is master and notebook is slave. The failing line reads
-  `FAIL (0 seconds, 134, 'GOOD-14')` — the slave had a flag, just an older one than the id being
-  waited for, across repeated rebuilds.
+| | |
+|---|---:|
+| `Wait data replicated ... GOT` | **271** |
+| `Wait data replicated ... FAIL` | **0** |
+| `Fail. Retry to compare.` | **239** |
+| database rebuilds | 1 |
+| cases executed / passed | 10 / **0** |
 
-So what CTP established on these 24 is not "these cases find something". It is that its
-per-case liveness check can fail for reasons of its own.
+**The liveness oracle passes every time.** 271 checks, no failures — the pair carries CTP's flag
+across, every case. (In the first attempt it failed on all ten, with the slave holding an older
+flag than the one being waited for; that was the pair still catching up after repeated rebuilds,
+and it resolved: master and slave now read the same value, and an update on one appears on the
+other.)
 
-The 24th does read, and is the one place the two would differ. It is
-`cbrd_24042/cbrd_24181/remove_list.sql`, which builds its tables with
-`CREATE TABLE ta AS SELECT ...`. A CTAS has no column list, so neither conversion can give it a
-primary key — not this one, and not CTP's, whose rule inserts `PRIMARY KEY` into a column list
-and returns the line unchanged when there is no `(`. Without a key the rows do not replicate, so
-**CTP would compare and report a failure** whose cause is the primary-key requirement. This suite
-says `unreplicatable` instead, which is the same fact without the accusation.
+**What fails is the per-statement comparison**, and the statements it fails on are the ones the
+engine refuses. The first one in the log:
+
+```sql
+create class test (
+  testno    char(10) PRIMARY KEY not null,
+  ...
+  primary key(testdate)
+)
+```
+
+Two primary keys — a deliberate negative test. CUBRID rejects it, so nothing reached the slave
+and nothing was going to. CTP compares, finds a difference, and **retries, because it reads a
+difference as the slave not having caught up yet**. It cannot tell "the slave is behind" from
+"there was nothing to be behind on", so it retries until it gives up and the case is NOK.
+
+That is the distinction this suite draws by comparing only reads and skipping statements that
+produce no result. It is why the same cases come back `no_data` here and NOK there.
+
+**Neither verdict is a finding about replication.** CTP's is noise on a case whose point is that
+a statement is refused; this suite's is silence on the same case. The difference is which one a
+reader has to investigate.
+
+### And one case no runner should be given
+
+`xdbms32.sql` stalls it. The case is real — it creates a table with a primary key — but the data
+it inserts is **63 KB of HTML documentation, 2,810 tags**, and CTP retries the comparison on
+every line of it. Two attempts stopped there before it was removed from the scenario. It also
+defeats this suite's statement splitter, which reads it as 170 statements and no reads, because
+the HTML carries both `;` and unbalanced apostrophes.
 
 ## The 24 still execute no read, and that part stands
 

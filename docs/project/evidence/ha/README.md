@@ -14,8 +14,10 @@
   establishing nothing. 23 of them execute no read at all — and **CTP judges them anyway**, by a
   second oracle this document first missed: a flag table of its own, written on the master and
   polled on the slave once per case whatever the case contains. This suite has the parts for the
-  same check and throws the result away. Also records the `kill -9` in CTP's cleanup that had to
-  be removed before it could be run, and the two configuration traps after it.
+  same check and throws the result away. **Run: 10 executed, 10 NOK** — the liveness oracle passed
+  271 times out of 271, and what failed was the per-statement comparison, on statements the engine
+  refuses, which CTP retries as though the slave were behind. Also records the `kill -9` in CTP's
+  cleanup that had to be removed before it could be run, and the two configuration traps after it.
 
 - [trigger-owner-change-not-replicated](trigger-owner-change-not-replicated.md) — **2026-09-22.**
   `call change_trigger_owner (...) on class db_root` does not reach the slave. Three neighbouring

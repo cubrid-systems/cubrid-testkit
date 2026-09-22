@@ -179,6 +179,20 @@ defensible.
   on a workstation is the operator's session. Removed from `util_common.sh` on both machines of
   the pair, along with the two helpers that existed only to serve it. **Any third machine's CTP
   tree still has it.** `upgrade.sh` was verified not to restore it.
+- **This repository carries the same trap, in its own copy, and containment is off by default.**
+  `internal/runner/sqlsuite/stages.sh` `do_clean()` runs `pkill cub` (:73) and then
+  `remove_shared_memory()`, which is `ipcs -a | grep $USER` into `ipcrm -m` (:84-86) — every
+  shared-memory segment the account owns, not the run's. `internal/runner/shellsuite/deploy.go`
+  (:219-221) sweeps ipc the same way on each host it deploys to. `do_clean` runs at the start of
+  every `sql` run, and `TESTKIT_CONTAIN` is off unless set to `1` (`internal/contain/contain.go:27`).
+  So **an uncontained `testkit sql` takes this project's own sandbox nodes with it**, along with
+  anything else CUBRID the account is running.
+
+  Measured from the other side on 2026-09-22: a peer session ran the sql suite about ten times
+  between 22:44 and 22:52 **with** `TESTKIT_CONTAIN=1`, each run doing both the pkill and the
+  ipcrm, and the clusters here lived through all of it. Containment holds; its default does not.
+  That is the one fact to keep from a day that lost two runs to something stopping every CUBRID
+  process on the host at 21:22:12 and 22:34:52.
 - **`cubrid_download_url` must be absent, not a placeholder.** `Main.java:72` treats any value as
   a request to install: `file:///dev/null` ran the installer, which refused it, and left
   `buildId` null for an NPE two steps later.

@@ -95,7 +95,7 @@ and counted at the end, beside but not inside the `differ` tally. Repairing quie
 once per case, the very thing the suite is looking for, and no reader afterwards could tell a
 divergence the corpus intended from one it caused by accident.
 
-## Two runner defects this found on the way
+## Three runner defects this found on the way
 
 **The conversion was hiding the case that causes it.** `add_primary_key` appends
 `tk_repl_key INT AUTO_INCREMENT PRIMARY KEY` to a `CREATE TABLE` with no key — and a class can have
@@ -110,6 +110,18 @@ advances the serial, so running the same text on the standby asks a read-only no
 cases of `_05_serial` came back `differ` with a value on the master and an empty answer on the
 slave, and not one was about replication. They are writes now: run on the master, waited for, not
 compared.
+
+**And the read that would have caught this was being skipped for a quoted name.** The
+keyless-table check matches names anywhere in a statement, so
+`select class_name, owner_name from db_class where class_name='xxx'` counted as a read of the
+keyless table `xxx` and was not compared — while it is a read of the catalog, which replicates as
+DDL. That is the read that sees master PUBLIC and slave DBA. A name inside a string literal is a
+value now; a read that selects *from* a keyless table is still skipped, which is what that check was
+written for.
+
+**All three were hiding the same fact, in three different ways**, which is the argument for the run
+that found them: the conversion stopped the case from running, the quoted name stopped its read
+from being compared, and the serial reads filled the difference list with something else.
 
 ## What is not claimed
 

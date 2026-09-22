@@ -3,6 +3,11 @@
 - **Date:** 2026-09-22
 - **What this is:** the first sample wide enough to say anything about the corpus rather than
   about a directory. Two runs, per-case verdicts identical.
+- **Superseded in part, the same day.** Both runs below started from a database holding another
+  run's users and an owner-changed table, because the reset could not drop either. With that
+  fixed the same 131 cases give **117 same and 3 differ** — see *Re-measured after the reset was
+  fixed*. The numbers in the next table are what a dirty start produced, and are kept because the
+  difference between the two is the finding.
 - **Trees:** engine built here from `cubrid/cubrid` develop · corpus `cubrid-testcases`
   `sql/_33_elderberry` (131 cases) · pair from `cubrid-cluster-sandbox`, rootless podman, one host.
 - **Runner:** testkit's `ha_repl`, `add_primary_key=yes`, `reset=case`. No comparison against CTP.
@@ -35,6 +40,44 @@ Two runs, 131 verdicts each, **identical**.
 `replicating`: not that their data matches — they make no comparable read — but that replication
 was alive while they ran. That check is taken from CTP, which asks it of every case
 ([`unjudged-cases.md`](unjudged-cases.md)).
+
+## Re-measured after the reset was fixed
+
+Both runs above began every case with `u1`, `u7` and `u9` already in the database and a table
+called `own_t` owned by `u7`. The reset could not remove any of them: it dropped by bare name, and
+a bare name resolves in the caller's schema, so the drop of an owner-changed table named a table
+that does not exist and failed exactly as a success looks. Users, standalone serials and triggers
+it never tried to drop at all.
+
+That was found by starting `_01_object` and watching every case print the same warning. With the
+reset owner-qualifying its names and clearing serials, triggers and users as well, the same 131
+cases, same settings, no warnings:
+
+| | dirty start | clean start |
+|---|---:|---:|
+| same | 119 | **117** |
+| differ | **1** | **3** |
+| replicating | 10 | 10 |
+| unreplicatable | 1 | 1 |
+| reads compared | 765 | 746 |
+| statements | 3,758 | 3,730 |
+| writes the engine refused | 291 | 266 |
+
+**A case that starts clean runs further.** `create user u1` no longer fails for having been run by
+a case an hour ago, so the cases that go on to test what an owner change does to the catalog now
+reach the reads they were written for. Twenty-five fewer refused writes is the same fact from the
+other side.
+
+The two new differences are both catalog reads in `cbrd_23844/cbrd_24195`, and **neither is
+explained yet**:
+
+| | what the master has and the slave does not |
+|---|---|
+| `rename1.sql` | the table `t3` — `create table t3 (c1 int primary key, c2 int, constraint foreign key (c2) references t1 (c1))`, read back from `_db_class` |
+| `create5.sql` | the row joining `_db_class` to `_db_serial` for `u1.t1` and its auto_increment `t1_ai_c1`; the slave's join returns nothing |
+
+Both are DDL that should arrive on the statement channel, which is what makes them worth the next
+look. Recorded here as measured and unexplained rather than held back until they are understood.
 
 ## Against the same 131 cases before this week's changes
 

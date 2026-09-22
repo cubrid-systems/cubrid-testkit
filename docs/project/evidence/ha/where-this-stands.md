@@ -191,6 +191,15 @@ defensible.
 - **`xdbms32.sql` stalls any runner.** It is a real case that inserts 63 KB of HTML documentation,
   2,810 tags. CTP retries its comparison per line; this suite's splitter reads it as 170
   statements and no reads, because the HTML carries both semicolons and unbalanced apostrophes.
+- **A rootless sandbox pair is not isolated from a host-level CUBRID stop.** On 2026-09-22 all
+  four nodes of **two** clusters — one of them idle — stopped at the same millisecond, 1,228 cases
+  into a 3,327-case run. No crash, no OOM, disk not full, and the containers still up: each node's
+  master log ends with a clean *"CUBRID heartbeat feature stopped."* The containers share no `/tmp`
+  with the host, so it was not a socket; a rootless container's processes are the same user's host
+  processes, so anything that stops CUBRID by walking the process table — `cubrid service stop`,
+  a `pkill cub_`, CTP's cleanup — reaches inside every container at once. The run reported
+  2,100 `wait_timeout`, which is at least honest, and cost 70 minutes. `csb cluster up` brings a
+  pair back with its database intact.
 - **A DROP by bare name is a no-op once a case has changed an owner**, and it reports nothing.
   `DROP TABLE [t]` as dba means `dba.t`; the table a case gave to `u7` is `u7.t`. Ask the catalog
   for `[owner].[name]`. The same shape will bite anything else that drops, renames or grants by

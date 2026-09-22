@@ -191,8 +191,26 @@ defensible.
   Measured from the other side on 2026-09-22: a peer session ran the sql suite about ten times
   between 22:44 and 22:52 **with** `TESTKIT_CONTAIN=1`, each run doing both the pkill and the
   ipcrm, and the clusters here lived through all of it. Containment holds; its default does not.
-  That is the one fact to keep from a day that lost two runs to something stopping every CUBRID
-  process on the host at 21:22:12 and 22:34:52.
+  Guarded the same day: `do_clean`'s two account-wide steps now run only inside containment and
+  say why when they do not.
+- **The third tree was on this machine.** Four mass deaths on 2026-09-22 — 21:22:12, 22:34:52,
+  23:02:52, 23:03:39 — every CUBRID process the account owned, both sandbox clusters and the
+  host's own install, in the same millisecond each time. A one-second watcher caught the last two:
+  at both moments a process from **`/data/cub_sys/projects/regr-sql/CTP`** was running
+  (`shell/init_path/cubrid createdb ... hnswload`), several levels below a peer Claude session.
+  That tree still carries what was taken out of the pair's:
+
+  | | |
+  |---|---|
+  | `shell/init_path/init.sh:807`, `:1733` | `pkill cub` |
+  | `shell/init_path/init.sh:681` | `ipcrm -m` |
+  | `shell/init_path/rqg_init.sh:440-443` | `ps -u $USER ... \| xargs kill -9` — server, broker, cas, master |
+  | `shell/src/com/navercorp/cubridqa/shell/common/Constants.java:178`, `:198` | the same two, from the Java side |
+
+  44 matches in that tree. Which line fired is not established; that the mechanism is there and
+  that it was running at both captured moments is. **A sandbox pair on a shared account is not
+  isolated from any CTP tree on the same machine**, and the note above about a third machine's
+  tree was too narrow: a third *directory* is enough.
 - **`cubrid_download_url` must be absent, not a placeholder.** `Main.java:72` treats any value as
   a request to install: `file:///dev/null` ran the installer, which refused it, and left
   `buildId` null for an NPE two steps later.

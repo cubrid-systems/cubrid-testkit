@@ -3,14 +3,15 @@
 # what the engine's files end up holding, what the database is made of, and
 # what a stage prints are CTP's, because a verdict can depend on any of them.
 #
-# Three things differ, and each is said where it happens. run.sh's globals come
+# Four things differ, and each is said where it happens. run.sh's globals come
 # from the runner, which has already read the configuration and cubrid_rel, in
 # front of this file. `ini` is a function rather than run.sh's alias, which
-# bash does not expand in a script. And HA mode is decided by ha_mode_of rather
+# bash does not expand in a script. HA mode is decided by ha_mode_of rather
 # than a global that config_cubrid_ha sets, because a slot starts its server in
-# a later invocation than the one that configured the engine.
+# a later invocation than the one that configured the engine. And do_clean's
+# two account-wide steps run only inside containment -- see sweep_this_account.
 #
-# Variables the runner sets: CTP_HOME config_file_main scenario_category
+# Variables the runner sets: testkit_contained CTP_HOME config_file_main scenario_category
 # scenario_full_name db_name cubrid_bits cubrid_ver cubrid_ver_p1 cubrid_ver_p2
 # cubrid_ver_p3 cubrid_ver_p4 cubrid_ver_prefix os_type db_charset
 # cubrid_createdb_opts need_make_locale test_data_file log_filename
@@ -69,14 +70,45 @@ do_clean()
      #clean log files and core
      clean_log_cores
 
-     #kill cub for the current user
-     pkill cub
-
-     #kill share ports
-     remove_shared_memory
+     #kill cub for the current user, and this user's shared memory with it
+     sweep_this_account
 
      #reset cubrid conf files
      reset_cubrid_files
+}
+
+# sweep_this_account is run.sh's `pkill cub` and its ipcrm loop, behind the one
+# condition that makes them true.
+#
+# Both select by account and not by run: `pkill cub` matches every CUBRID
+# process the user owns, and remove_shared_memory hands `ipcrm` every segment
+# `ipcs` attributes to $USER. On a machine given over to one run that is what
+# cleaning up means, and it is why run.sh does it. On a machine that is not,
+# it reaches whatever else the account is running -- another suite's databases,
+# a broker somebody is using, and this project's own sandbox nodes, whose
+# CUBRID processes are ordinary processes of the same user.
+#
+# Measured here on 2026-09-22: every CUBRID process on this host stopped twice
+# in one evening, both sandbox clusters and the host's own install, in the same
+# millisecond each time. A peer session ran this suite about ten times in that
+# window **with** TESTKIT_CONTAIN=1 -- each run reaching this function -- and
+# nothing of theirs touched anything of ours. Containment makes the account and
+# the run the same thing: its own PID and IPC namespaces are exactly the scope
+# these two commands assume they have.
+#
+# So they run when that is true and say why when it is not. The alternative
+# considered and rejected was narrowing the selection to the run's own
+# processes, which is a second model of what belongs to a run and would drift
+# from run.sh silently; refusing is visible and keeps the body diffable.
+sweep_this_account()
+{
+     if [ "$testkit_contained" != "1" ]; then
+          echo "do_clean: leaving this account's cub processes and shared memory alone," \
+               "because the run is not contained -- set TESTKIT_CONTAIN=1 for run.sh's behaviour"
+          return 0
+     fi
+     pkill cub
+     remove_shared_memory
 }
 
 remove_shared_memory()

@@ -83,9 +83,9 @@ still working pairs and the conf is CTP's rather than the operator's.
 `./preflight.sh <master> <slave> <user> [<password>]` checks in seconds whether a pair can host
 CTP's corpus at all. It reported READY on this one.
 
-## 4. The four ways on
+## 4. The four ways on — A settled 2026-09-22, three open
 
-### A. The one difference, awaiting a judgement — *cheapest*
+### A. The one difference — *settled 2026-09-22, and not by work*
 
 `change_trigger_owner` does not replicate and three neighbouring owner changes do
 ([`trigger-owner-change-not-replicated.md`](trigger-owner-change-not-replicated.md)). Measured,
@@ -93,9 +93,16 @@ discriminated and explained: `_db_trigger` has no primary key and `_db_serial` h
 serial's instance update replicates as data and the trigger's cannot, while both DDL forms arrive
 on the statement channel.
 
-**What is needed is not more work but a decision.** If it is a known constraint, like the object
-domain, it becomes the fifth thing the suite skips instead of reports. If it is not, the
-reproduction is four statements and the discrimination table is written.
+**Judged: passed by, not filed.** CBRD-27302 (PR #7980, open, draft) gives `_db_trigger` a
+`unique_name` primary key — for name lookup rather than for replication, but the method's instance
+update gets a channel out of it either way. The difference stays *reported*: it is deliberately not
+made the fifth skip, because `alter trigger ... owner to` replicates through `_db_trigger` today
+and a skip there would hide working coverage.
+
+**What is left is one re-run**, on a tree that has #7980 — the four statements in the finding, read
+back as `unique_name` **and** `owner.name`. The owner column is an object domain, this suite's other
+finding says those arrive as NULL, and `_db_serial.owner` nonetheless arrived intact; that tension
+is unexplained, so the key alone may not settle it.
 
 ### B. Scale — `_01_object`, 3,327 cases
 

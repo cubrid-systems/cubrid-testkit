@@ -95,6 +95,11 @@ where the DDL form does. A minimal reproduction was attempted and did not settle
 returned `Trigger "dba.tg9" was not found` and the trigger then disappeared from both nodes, which
 is its own question. Recorded here as observed, with the case named and both answers on disk.
 
+**Settled later the same day**, and not as "a method": it is `change_trigger_owner` specifically,
+because `_db_trigger` has no primary key while `_db_serial` has one —
+[`trigger-owner-change-not-replicated.md`](trigger-owner-change-not-replicated.md), which also
+carries the judgement (passed by; CBRD-27302 gives the catalog class its key).
+
 ## What is not claimed
 
 One directory, one pair, one host, one build. 131 of 17,447 cases.

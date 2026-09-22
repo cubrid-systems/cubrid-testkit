@@ -1,9 +1,10 @@
 # `change_trigger_owner` does not replicate, and its three neighbours do
 
 - **Date:** 2026-09-22
-- **Status:** measured, discriminated and **explained**. It is the primary-key rule again, one
-  layer down — in the catalog this time. Whether the catalog's shape is deliberate is not
-  something this document can say.
+- **Status:** measured, discriminated, explained — and **judged, 2026-09-22: passed by, not
+  filed.** The key `_db_trigger` lacks is already on its way (CBRD-27302, PR #7980), and with a key
+  the method form has a channel. It is the primary-key rule again, one layer down — in the catalog
+  this time. What the judgement rests on, and what it does not, is *The judgement* below.
 - **What this is:** four owner changes on one pair. Three reach the slave and one does not, and
   the one that does not is not distinguished by being a trigger or by being a method.
 - **Trees:** engine built here from `cubrid/cubrid` develop · pair from `cubrid-cluster-sandbox`,
@@ -77,6 +78,41 @@ So this is the rule this suite has been measuring since the first day of it: **n
 replication.** The surprise is only that it applies to a system catalog, and that `_db_serial`
 was given a key where `_db_trigger` was not.
 
+## The judgement: passed by, and what it rests on
+
+**2026-09-22. Not filed as a defect.** `_db_trigger` is about to be given the key whose absence is
+the entire mechanism. **CBRD-27302, [PR #7980](https://github.com/CUBRID/cubrid/pull/7980)** (open,
+draft, base `develop`) changes `get_trigger`'s constraint list from `{}` to
+`{DB_CONSTRAINT_PRIMARY_KEY, "", {TR_ATT_UNIQUE_NAME, nullptr}, false}`
+(`src/object/schema_system_catalog_install.cpp:806`). The PR is about removing the duplicated
+trigger storage in `db_root.triggers` and `_db_user.triggers`, and the key is there so that name
+lookup and concurrent creation have something to go on. Replication would get it as a side effect —
+the method's instance update would then have the channel `_db_serial` already replicates on.
+
+**Two things that judgement does not rest on:**
+
+- **It is an expectation, not a measurement.** Nothing here has been run against #7980. The check
+  is the four statements below, on a pair built from a tree that has it.
+- **The key may not be the whole of it.** `_db_trigger.owner` is an object-domain column
+  (`AU_USER_CLASS_NAME`), and this suite's other finding is that an object-domain attribute arrives
+  as a stored NULL ([`object-domain-not-replicated.md`](object-domain-not-replicated.md)). Yet
+  `_db_serial.owner` is the same shape and *did* arrive — the slave read `U7`, not NULL. Why a
+  catalog class's object reference survives where a user class's does not is unexplained. So the
+  re-run has to read `owner.name` and not only `unique_name`.
+
+**Why it is cheap to pass by in the meantime.** The only route to it is an explicit
+`call change_trigger_owner (...) on class db_root` by a DBA. `ALTER TRIGGER ... OWNER TO` does not
+compile to it, no class-owner change cascades into it — `authenticate_access_class.cpp` cascades to
+serials only — and the one dump that emitted the call has been dead code behind
+`#if defined(ENABLE_UNUSED_FUNCTION)` (`tr_dump_all_triggers`, `trigger_manager.c:6785`), which
+#7980 deletes outright.
+
+**What the suite does with it: nothing changes.** It keeps reporting the difference, and this is
+deliberately *not* the fifth thing `ha_repl` skips. The four skips are static rules about shapes
+that cannot replicate at all; `_db_trigger` is not one, because `alter trigger ... owner to`
+replicates through it today. A skip on `_db_trigger` reads would suppress coverage that works in
+order to hide one call that is about to start working.
+
 ## The reproduction
 
 ```sql
@@ -94,5 +130,6 @@ Read back with
 
 ## What is not claimed
 
-One pair, one host, one build. Whether the same holds for `change_owner` on a class, for a
+One pair, one host, one build — `develop` at `5f3a30d09`, which is before #7980 and so has
+`_db_trigger` with no index at all. Whether the same holds for `change_owner` on a class, for a
 trigger owned by a user other than DBA to begin with, or across a failover, is unmeasured.

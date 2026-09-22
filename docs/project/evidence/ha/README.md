@@ -29,7 +29,9 @@ is next, and the traps that cost a day each.
   it is neither "triggers" nor "methods". **Explained:** `_db_serial` has a primary key and
   `_db_trigger` has no index at all, so the serial's instance update replicates as data and the
   trigger's cannot — while both DDL forms arrive on the statement channel. The primary-key rule
-  again, in the catalog. Nothing reports it.
+  again, in the catalog. Nothing reports it. **Judged 2026-09-22: passed by, not filed** —
+  CBRD-27302 (PR #7980) gives `_db_trigger` the key it lacks. The suite keeps reporting the
+  difference rather than skipping it, and what is left is one re-run after that merge.
 
 - [ha-repl-wide-sample](ha-repl-wide-sample.md) — **2026-09-22.** 131 cases, two runs, identical
   verdicts: 119 same, 1 differ, 765 reads compared. **110 of the agreeing reads returned no rows

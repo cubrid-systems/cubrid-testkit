@@ -11,9 +11,11 @@
 ## Findings from this directory
 
 - [unjudged-cases](unjudged-cases.md) — **2026-09-22.** The 24 cases the suite reports as
-  establishing nothing: **23 of them execute no read at all**, so CTP's ha_repl — whose oracle is
-  the same shape — would not judge them either. Also records why CTP was not run to check:
-  its deploy `kill -9`s every process the invoking user owns, on the master.
+  establishing nothing. 23 of them execute no read at all — and **CTP judges them anyway**, by a
+  second oracle this document first missed: a flag table of its own, written on the master and
+  polled on the slave once per case whatever the case contains. This suite has the parts for the
+  same check and throws the result away. Also records the `kill -9` in CTP's cleanup that had to
+  be removed before it could be run, and the two configuration traps after it.
 
 - [trigger-owner-change-not-replicated](trigger-owner-change-not-replicated.md) — **2026-09-22.**
   `call change_trigger_owner (...) on class db_root` does not reach the slave. Three neighbouring

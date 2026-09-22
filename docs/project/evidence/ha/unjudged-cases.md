@@ -3,18 +3,56 @@
 - **Date:** 2026-09-22
 - **Question:** the suite reports 24 cases as establishing nothing — `no_data` and
   `unreplicatable`. Would CTP's `ha_repl` establish something on them?
-- **Answered by reading, not by running.** See [§ Why not by running](#why-not-by-running):
-  CTP's deploy kills every process the invoking user owns, on the master, and the master is this
-  machine.
+- **Answered by reading, then corrected by running.** The reading said CTP would not judge them
+  either. **It was wrong**, and running CTP is what showed it — see
+  [§ The correction](#the-correction). Running it at all first required removing the `kill -9`
+  in CTP's own cleanup; see [§ Why it could not be run before](#why-it-could-not-be-run-before).
 
 ---
 
-## The answer
+## The correction
 
-**23 of the 24 execute no read at all.** CTP's oracle is the same shape as this suite's — the
-case's own reads, run on both nodes and compared, master dump against slave dump
-([`design/module-ha.md`](../../design/module-ha.md) §1). A case that reads nothing gives CTP
-nothing to compare, so CTP would not judge them either.
+**CTP judges all of them, and this document first said it would not.**
+
+The reasoning was that CTP's oracle is the case's own reads compared across nodes, so a case
+with no read offers nothing to compare. That half is true. What it missed is that **CTP has a
+second oracle**, and it does not depend on the case at all:
+
+```java
+// Test.java:937
+private boolean waitDataReplicated (SSHConnect ssh, long expectedFlagId) {
+  spt += "csql -u dba " + hostManager.getTestDb()
+       + " -c \"select 'GO'||'OD-'||v FROM QA_SYSTEM_TB_FLAG \" | grep GOOD";
+  ...
+  if (result.indexOf ("GOOD-" + expectedFlagId) != -1) { ... }
+```
+
+`QA_SYSTEM_TB_FLAG` is CTP's own table. It writes a flag on the master and polls the slave for
+it, **once per case, whatever the case contains**. So a case that reads nothing still gets a
+verdict: did replication carry CTP's marker across while this case ran.
+
+That is a liveness check on the pair rather than a check of the case, and it is a thing this
+suite does not do — although it already has the parts. `Pair.WaitForReplication` writes and
+polls exactly such a marker; the suite runs it and then, for a case with no reads, reports
+`no_data` and throws the result away. **A `no_data` case whose wait succeeded has established
+something small and real.**
+
+## The run
+
+24 cases dispatched, 10 executed before it was stopped, **all ten NOK**, every one of them on
+`Wait data replicated ... FAIL`. Two things are worth recording about it and neither is about
+the cases:
+
+- **CTP rebuilds the whole database when it finds it dirty** — create on master, restart HA,
+  rebuild the slave — which is why ten cases took about thirty-five minutes.
+- **The failures are not the pair being broken.** Checked after stopping: `qa_system_tb_flag`
+  reads 1 row on the master and 1 on the slave, and `cubrid heartbeat status` agrees on both
+  nodes that desktop is master and notebook is slave. The failing line reads
+  `FAIL (0 seconds, 134, 'GOOD-14')` — the slave had a flag, just an older one than the id being
+  waited for, across repeated rebuilds.
+
+So what CTP established on these 24 is not "these cases find something". It is that its
+per-case liveness check can fail for reasons of its own.
 
 The 24th does read, and is the one place the two would differ. It is
 `cbrd_24042/cbrd_24181/remove_list.sql`, which builds its tables with
@@ -24,7 +62,9 @@ and returns the line unchanged when there is no `(`. Without a key the rows do n
 **CTP would compare and report a failure** whose cause is the primary-key requirement. This suite
 says `unreplicatable` instead, which is the same fact without the accusation.
 
-## How "no read" was established, three ways
+## The 24 still execute no read, and that part stands
+
+How it was established, three ways.
 
 Counting reads with the suite's own splitter is one reading of the corpus, so it was checked
 against the text and then against the engine.
@@ -62,7 +102,7 @@ cases whose subject is the statement being accepted or refused, not the data tha
 is what [`module-ha.md`](../../design/module-ha.md) predicted of the conversion: *"a case whose
 point is the rendering has nothing to say here … converting one is not wrong, it is empty."*
 
-## Why not by running
+## Why it could not be run before
 
 CTP's `ha_repl` deploy calls `clean_processes` on **every node, master included**, and
 `CTP/common/script/util_common.sh:38` is:
@@ -80,10 +120,24 @@ editors, and anything else they were running. It was run twice here before the c
 and both times it took the session down with it. It also stopped the podman sandbox on the same
 host, because conmon belongs to the same user.
 
-The preflight and the scenario are prepared and kept, so the run is one line away on a pair whose
-master is not a machine anyone is using:
-`docs/project/evidence/ha/preflight.sh` reports READY on this pair, and the 24 cases are a
-scenario tree of six groups with their answer files.
+**Removed, 2026-09-22.** `kill_process` and the two helpers that existed only to serve it are
+gone from `util_common.sh` on both machines of this pair, and `clean_processes` now stops at
+`cleanCUBRID`, `releaseSharedmemory` and the monitor. Verified that `upgrade.sh` does not
+restore them (`[INFO] SKIP TO UPDATE`, md5 unchanged), and then verified the way that matters:
+the run completed the deploy, stood HA up on both nodes and executed ten cases, and the
+operator's session was still there afterwards.
+
+Two more things a reader will need. `cubrid_download_url` must be **absent**, not a placeholder:
+`Main.java:72` treats any value as a request to install and calls
+`setReInstallTestBuildYn(true)`, so `file:///dev/null` got as far as running the installer, which
+refused it — and left `buildId` null, which is an NPE two steps later. And the HA parameters have
+to be given, because nothing else supplies them:
+
+```
+env.instance1.cubrid.ha_mode=on
+env.instance1.ha.ha_node_list=cubrid@hgryoo-desktop:hgryoo-notebook
+env.instance1.ha.ha_db_list=xdb
+```
 
 ## What is not claimed
 

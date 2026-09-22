@@ -1,8 +1,9 @@
 # `change_trigger_owner` does not replicate, and its three neighbours do
 
 - **Date:** 2026-09-22
-- **Status:** measured and discriminated; **mechanism not established**. Whether it is known is
-  not something this document can say.
+- **Status:** measured, discriminated and **explained**. It is the primary-key rule again, one
+  layer down — in the catalog this time. Whether the catalog's shape is deliberate is not
+  something this document can say.
 - **What this is:** four owner changes on one pair. Three reach the slave and one does not, and
   the one that does not is not distinguished by being a trigger or by being a method.
 - **Trees:** engine built here from `cubrid/cubrid` develop · pair from `cubrid-cluster-sandbox`,
@@ -40,18 +41,41 @@ and `cubrid heartbeat status` reports one master and one slave. As with the obje
 constraint, a monitor asking the engine how it is doing will not learn that the two catalogs
 disagree.
 
-## Where the source was followed to, and where it stopped
+## Why, and it is the same rule as everything else
 
-`au_change_trigger_owner` and `au_change_serial_owner` both live in
-`src/object/authenticate_owner.cpp` and both edit a catalog object — the serial through a
-`DB_OTMPL`, the trigger through `obj_get`/`obj_set` on `_db_trigger`. The method entry points are
-in `src/compat/db_method_static.cpp`; the DDL paths call the same two functions from
-`src/query/execute_statement.c` (3239 and 7515).
+There are **two** replication mechanisms and the four routes use them differently.
 
-`_db_serial` and `_db_trigger` are both system classes with no primary key, so neither replicates
-as **data** — which means the serial's change must be reaching the slave by some other route, and
-that route is what would explain the difference. **It was not found**, and guessing at it would
-be worse than saying so.
+**Statement replication.** The applier replays a DDL statement's own text on the slave —
+`la_apply_statement_log` ends in `la_update_query_execute (stmt_text, false)`
+(`log_applier.c:5657`). So `alter table ... owner to` and `alter trigger ... owner to` arrive
+because the statement arrives. A `call ... on class` is not a DDL statement and has no text to
+replay.
+
+**Data replication, which carries the primary key.** `repl_add_update_lsa`
+(`replication.c`) says the log is generated at index processing *because that is where the
+primary key value is fetched*. An instance update therefore replicates only if its class has a
+primary key.
+
+That is the whole of it, and the catalog decides it:
+
+```
+_db_serial    pk_db_serial_unique_name   is_unique YES   is_primary_key YES
+_db_trigger   (no index at all)
+```
+
+- `au_change_serial_owner` edits an `_db_serial` instance with `dbt_edit_object` and
+  `dbt_put_internal` — a normal instance update, on a class **with** a primary key. It
+  replicates as data, so the method form works.
+- `au_change_trigger_owner` edits a `_db_trigger` instance with `obj_set`, and `_db_trigger`
+  has **no primary key**. There is nothing for data replication to carry it by.
+
+**Both trigger routes call the same function** — `execute_statement.c:7515` for the DDL form and
+`db_method_static.cpp:959` for the method — which is why the difference cannot be inside it. The
+DDL form arrives on the statement channel; the method form has no channel at all.
+
+So this is the rule this suite has been measuring since the first day of it: **no primary key, no
+replication.** The surprise is only that it applies to a system catalog, and that `_db_serial`
+was given a key where `_db_trigger` was not.
 
 ## The reproduction
 

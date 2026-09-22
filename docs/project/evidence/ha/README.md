@@ -18,7 +18,10 @@
 - [trigger-owner-change-not-replicated](trigger-owner-change-not-replicated.md) — **2026-09-22.**
   `call change_trigger_owner (...) on class db_root` does not reach the slave. Three neighbouring
   changes do, including the DDL form of the same change and the same method form on a serial, so
-  it is neither "triggers" nor "methods". Mechanism not established. Nothing reports it.
+  it is neither "triggers" nor "methods". **Explained:** `_db_serial` has a primary key and
+  `_db_trigger` has no index at all, so the serial's instance update replicates as data and the
+  trigger's cannot — while both DDL forms arrive on the statement channel. The primary-key rule
+  again, in the catalog. Nothing reports it.
 
 - [ha-repl-wide-sample](ha-repl-wide-sample.md) — **2026-09-22.** 131 cases, two runs, identical
   verdicts: 119 same, 1 differ, 765 reads compared. **110 of the agreeing reads returned no rows

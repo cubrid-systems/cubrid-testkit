@@ -401,6 +401,13 @@ func remaining(ctx context.Context, p *sandbox.Pair) ([]leftover, error) {
 //   - a serial a table owns is that table's auto_increment. It goes when the
 //     table goes, and naming it here would be a DROP SERIAL the engine refuses;
 //     `class_name` is what the catalog calls that attachment.
+//   - a partition is a class of its own in `db_class` -- `list_test__p__p0`
+//     beside `list_test` -- and it cannot be dropped on its own either: the
+//     parent's DROP takes all three. Naming them here made a reset report four
+//     tables it could not remove where there was one table it could, and made
+//     the slave check call the same four stranded. `db_partition` says which
+//     they are, matched on the owner as well as the name, so this is the
+//     catalog's answer and not a guess about `__p__`.
 //   - DBA, PUBLIC and INFORMATION_SCHEMA are the database's own users and no
 //     case's to leave behind.
 const resetQuery = "SELECT w || ' ' || n FROM (" +
@@ -412,8 +419,10 @@ const resetQuery = "SELECT w || ' ' || n FROM (" +
 	"FROM db_trigger " +
 	"UNION ALL SELECT 4, 'SERIAL', '[' || owner || '].[' || name || ']' " +
 	"FROM db_serial WHERE class_name IS NULL " +
-	"UNION ALL SELECT 5, 'TABLE', '[' || owner_name || '].[' || class_name || ']' " +
-	"FROM db_class WHERE is_system_class='NO' AND class_type='CLASS' " +
+	"UNION ALL SELECT 5, 'TABLE', '[' || c.owner_name || '].[' || c.class_name || ']' " +
+	"FROM db_class c WHERE c.is_system_class='NO' AND c.class_type='CLASS' " +
+	"AND NOT EXISTS (SELECT 1 FROM db_partition pt " +
+	"WHERE pt.partition_class_name = c.class_name AND pt.owner_name = c.owner_name) " +
 	"UNION ALL SELECT 6, 'USER', '[' || name || ']' " +
 	"FROM db_user WHERE name NOT IN ('DBA', 'PUBLIC', 'INFORMATION_SCHEMA')" +
 	") t ORDER BY r, n"

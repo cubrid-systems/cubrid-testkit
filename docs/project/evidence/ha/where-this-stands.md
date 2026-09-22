@@ -211,6 +211,16 @@ defensible.
   that it was running at both captured moments is. **A sandbox pair on a shared account is not
   isolated from any CTP tree on the same machine**, and the note above about a third machine's
   tree was too narrow: a third *directory* is enough.
+
+  The session driving it confirmed: its shell cases sourced that `init.sh` directly and
+  uncontained, all evening, and it has since replaced it with a five-function stub of its own. It
+  also reports a **second failure mode of the same tree, which is not the sweep**: a correlated
+  query in its case answered `Cannot coerce value of domain (null) to integer` every time under
+  that `init.sh` and correctly against the same database outside it. Not root-caused, and **not
+  verified here** — it is recorded because the consequence is worth knowing before it is met: that
+  tree can change the verdict of the case running in it, so a NOK read out of it is not yet a
+  statement about the engine. `init.sh` prepends its own `bin` and `commonforc/lib` to `PATH` and
+  `LD_LIBRARY_PATH`, which is where that session would look.
 - **`cubrid_download_url` must be absent, not a placeholder.** `Main.java:72` treats any value as
   a request to install: `file:///dev/null` ran the installer, which refused it, and left
   `buildId` null for an NPE two steps later.

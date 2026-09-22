@@ -134,6 +134,9 @@ type Stranded struct {
 	Why string
 }
 
+// key identifies one object across two readings of the same slave.
+func (s Stranded) key() string { return s.Node + " " + s.Word + " " + s.Name }
+
 func (s Stranded) String() string {
 	out := strings.ToLower(s.Word) + " " + s.Name + " on " + s.Node
 	switch {
@@ -221,57 +224,74 @@ func strandedOnSlaves(ctx context.Context, p *sandbox.Pair) ([]Stranded, error) 
 // trigger needs a table and an action, and a placeholder for any of those is
 // this runner deciding what the case meant. Those are reported unrepaired,
 // which is worse for the run and better than a guess.
+// # Why it repeats
+//
+// The slave's objects depend on each other the way the master's do: a table a
+// foreign key refers to does not go until the referring table has. The master's
+// reset discovers that order by retrying, and this has to as well -- one pass
+// left `album` behind on a slave with `track` still pointing at it and reported
+// it unrepairable, which was true only of that pass.
 func repairSlaves(ctx context.Context, p *sandbox.Pair, stranded []Stranded) []Stranded {
-	var drops []string
-	for i, s := range stranded {
-		make, ok := placeholderFor(s.Word, s.Name)
-		if !ok {
-			stranded[i].Why = "a " + strings.ToLower(s.Word) +
-				" needs a definition this runner will not invent"
-			continue
-		}
-		drops = append(drops, make, "DROP "+s.Word+" "+s.Name)
-	}
-	if len(drops) == 0 {
-		return stranded
-	}
-	if _, _, err := newBatch(drops).runRaw(ctx, p.MasterChannel(), p.DB); err != nil {
-		for i := range stranded {
-			if stranded[i].Why == "" {
-				stranded[i].Why = err.Error()
+	done := map[string]bool{}
+	for pass := 0; pass < 5; pass++ {
+		var drops []string
+		for i, s := range stranded {
+			if s.Repaired || s.Why != "" {
+				continue
 			}
-		}
-		return stranded
-	}
-	if _, werr := p.WaitForReplication(ctx, slaveCatchUp); werr != nil {
-		for i := range stranded {
-			if stranded[i].Why == "" {
-				stranded[i].Why = "the repair did not reach the slave within " + slaveCatchUp.String()
+			make, ok := placeholderFor(s.Word, s.Name)
+			if !ok {
+				stranded[i].Why = "a " + strings.ToLower(s.Word) +
+					" needs a definition this runner will not invent"
+				continue
 			}
+			drops = append(drops, make, "DROP "+s.Word+" "+s.Name)
 		}
-		return stranded
-	}
-	// Said rather than assumed: the slave is asked again, and what is still
-	// there is still reported.
-	after, err := slaveLeftovers(ctx, p)
-	if err != nil {
-		return stranded
-	}
-	still := map[string]bool{}
-	for _, s := range after {
-		still[s.Node+" "+s.Word+" "+s.Name] = true
-	}
-	for i, s := range stranded {
-		if s.Why != "" {
-			continue
+		if len(drops) == 0 {
+			break
 		}
-		if still[s.Node+" "+s.Word+" "+s.Name] {
-			stranded[i].Why = "the master's DROP did not remove it"
-			continue
+		if _, _, err := newBatch(drops).runRaw(ctx, p.MasterChannel(), p.DB); err != nil {
+			markUnrepaired(stranded, err.Error())
+			return stranded
 		}
-		stranded[i].Repaired = true
+		if _, werr := p.WaitForReplication(ctx, slaveCatchUp); werr != nil {
+			markUnrepaired(stranded, "the repair did not reach the slave within "+slaveCatchUp.String())
+			return stranded
+		}
+		// Said rather than assumed: the slave is asked again, and what is still
+		// there is still reported.
+		after, err := slaveLeftovers(ctx, p)
+		if err != nil {
+			return stranded
+		}
+		still := map[string]bool{}
+		for _, s := range after {
+			still[s.key()] = true
+		}
+		gone := 0
+		for i, s := range stranded {
+			if s.Repaired || s.Why != "" || still[s.key()] {
+				continue
+			}
+			stranded[i].Repaired = true
+			done[s.key()] = true
+			gone++
+		}
+		if gone == 0 {
+			break
+		}
 	}
+	markUnrepaired(stranded, "the master's DROP did not remove it")
 	return stranded
+}
+
+// markUnrepaired gives a reason to everything still unaccounted for.
+func markUnrepaired(stranded []Stranded, why string) {
+	for i, s := range stranded {
+		if !s.Repaired && s.Why == "" {
+			stranded[i].Why = why
+		}
+	}
 }
 
 // placeholderFor is the shortest thing the master can create under a given

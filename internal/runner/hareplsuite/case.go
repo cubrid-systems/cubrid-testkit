@@ -471,23 +471,56 @@ func tablesWithoutPrimaryKey(ctx context.Context, p *sandbox.Pair) ([]string, er
 	// the same name matching is used on it -- and for the same reason: erring
 	// towards skipping costs a comparison, where missing one costs a finding
 	// that is not one.
+	//
+	// # Why this repeats until it stops growing
+	//
+	// A view can stand on a view. `_03_virtual_class/_006_querypart/1023.sql`
+	// builds `vxoo` over the keyless `xoo` and then `vxoo1` over `vxoo`, and
+	// one pass reaches `vxoo1` only if the catalog happened to return `vxoo`
+	// first -- so the case came back `differ` with two rows on the master and
+	// none on the slave, which is the primary-key rule and not a finding. A
+	// synonym for such a view is the same shape again.
+	//
+	// So the closure is taken rather than approximated, the same way the reset
+	// discovers dependency order: repeat until a pass adds nothing.
 	views, verr := query(ctx, p, viewsQuery)
-	if verr == nil {
-		for _, row := range views {
-			name, def, ok := splitTwo(row)
-			if ok && mentionsAny(def, bare) {
-				bare = append(bare, bothSpellings(name)...)
+	syns, serr := query(ctx, p, synonymsQuery)
+	seen := map[string]bool{}
+	for _, b := range bare {
+		seen[strings.ToLower(b)] = true
+	}
+	add := func(name string) bool {
+		grew := false
+		for _, spelling := range bothSpellings(name) {
+			if key := strings.ToLower(spelling); !seen[key] {
+				seen[key] = true
+				bare = append(bare, spelling)
+				grew = true
 			}
 		}
+		return grew
 	}
-	// A synonym is a name for a name, and the target is the whole row.
-	syns, serr := query(ctx, p, synonymsQuery)
-	if serr == nil {
-		for _, row := range syns {
-			name, target, ok := splitTwo(row)
-			if ok && mentionsAny(target, bare) {
-				bare = append(bare, bothSpellings(name)...)
+	for pass := 0; pass < 10; pass++ {
+		grew := false
+		if verr == nil {
+			for _, row := range views {
+				name, def, ok := splitTwo(row)
+				if ok && !seen[strings.ToLower(name)] && mentionsAny(def, bare) {
+					grew = add(name) || grew
+				}
 			}
+		}
+		// A synonym is a name for a name, and the target is the whole row.
+		if serr == nil {
+			for _, row := range syns {
+				name, target, ok := splitTwo(row)
+				if ok && !seen[strings.ToLower(name)] && mentionsAny(target, bare) {
+					grew = add(name) || grew
+				}
+			}
+		}
+		if !grew {
+			break
 		}
 	}
 	return bare, nil

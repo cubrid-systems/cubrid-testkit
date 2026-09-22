@@ -55,6 +55,22 @@ const (
 	// unconverted run is the baseline the conversion has to be measured
 	// against.
 	AddKeyKey = "add_primary_key"
+	// ResumeKey picks up where a run stopped. Off by default: a run that
+	// silently continued someone else's would be the reproducibility problem
+	// this suite spent a week removing, in a new place.
+	//
+	// It exists because a run here is long enough to be interrupted by things
+	// that have nothing to do with it. Twice on 2026-09-22 every CUBRID
+	// process on the host stopped in the same millisecond -- both sandbox
+	// clusters and the host's own -- 1,228 cases into 3,327, and the second
+	// time seventeen seconds in. A rootless container's processes are the
+	// invoking user's, so anything that stops CUBRID by walking the process
+	// table reaches inside (evidence/ha/where-this-stands.md §5).
+	//
+	// A case whose verdict was about the run rather than about the case --
+	// `wait_timeout`, `case_failed` -- is never resumed. Those are exactly the
+	// ones the interruption produced.
+	ResumeKey = "resume"
 )
 
 func clusterOf(cfgCluster string) string {
@@ -119,8 +135,24 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	// Where a difference is kept so it can be read rather than believed.
 	keepDir := cfg.GetOr("difference_dir", filepath.Join(filepath.Dir(req.ConfigPath), "ha_repl_differences"))
 
+	// The verdicts, one line each, written as they happen so that a run which
+	// is interrupted still has everything it had judged.
+	ledger, lerr := openLedger(keepDir)
+	if lerr != nil {
+		fmt.Printf("  ! could not keep the verdicts: %v\n", lerr)
+	}
+	defer ledger.Close()
+	var done map[string]Result
+	if cfg.Bool(ResumeKey, false) {
+		done = ledger.Judged()
+		if len(done) > 0 {
+			fmt.Printf("  resuming: %d case(s) already judged\n", len(done))
+		}
+	}
+
 	var results []Result
 	var stranded []strandedAt
+	resumed := 0
 	lastDir, lastCase := "", "the state the run started from"
 	leftovers := 0
 	for _, path := range cases {
@@ -128,6 +160,15 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 			break
 		}
 		dir := filepath.Dir(path)
+		rel0, _ := filepath.Rel(scenario, path)
+		if _, already := done[rel0]; already {
+			// Nothing ran, so there is nothing to reset and nothing a slave
+			// could have been left holding by it.
+			results = append(results, done[rel0])
+			resumed++
+			lastDir, lastCase = dir, rel0
+			continue
+		}
 		if resetEvery == "case" || dir != lastDir {
 			out, rerr := Reset(ctx, pair)
 			if rerr != nil {
@@ -156,6 +197,7 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		rel, _ := filepath.Rel(scenario, path)
 		r := RunCase(ctx, pair, rel, string(sql), wait, keepDir, addKey)
 		results = append(results, r)
+		ledger.Write(r)
 		lastCase = rel
 		fmt.Printf("  %-15s %s%s\n", r.Outcome, rel, detailSuffix(r))
 	}
@@ -169,6 +211,9 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		}
 	}
 	report(results)
+	if resumed > 0 {
+		fmt.Printf("  %d of those were resumed from an earlier run, and their statements are not in the counts above\n", resumed)
+	}
 	if leftovers > 0 {
 		fmt.Printf("  %d case(s) started from a state a reset could not clear\n", leftovers)
 	}

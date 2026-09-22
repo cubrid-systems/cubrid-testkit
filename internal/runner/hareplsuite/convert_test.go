@@ -149,3 +149,17 @@ func TestIsDatalessSeparatesAPlanTestFromADataTest(t *testing.T) {
 		}
 	}
 }
+
+// A case that writes and never reads is not a case this suite has nothing to
+// say about. Taken from CTP, which asks it of every case: was replication
+// alive while this ran?
+func TestReplicatingIsAnOutcomeDistinctFromNoData(t *testing.T) {
+	if Replicating == NoData {
+		t.Fatal("the two must be distinguishable")
+	}
+	for _, o := range []Outcome{Same, Differ, Replicating, Unreplicatable, NoData, Skipped, WaitTimeout, CaseFailed} {
+		if o == "" {
+			t.Error("an outcome with no name would print as blank and be counted as nothing")
+		}
+	}
+}

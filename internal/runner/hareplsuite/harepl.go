@@ -201,7 +201,7 @@ func report(results []Result) {
 	}
 	fmt.Println()
 	fmt.Printf("ha_repl: %d case(s)\n", len(results))
-	for _, o := range []Outcome{Same, Differ, Unreplicatable, NoData, Skipped, WaitTimeout, CaseFailed} {
+	for _, o := range []Outcome{Same, Differ, Replicating, Unreplicatable, NoData, Skipped, WaitTimeout, CaseFailed} {
 		if by[o] > 0 {
 			fmt.Printf("  %-15s %d\n", o, by[o])
 		}

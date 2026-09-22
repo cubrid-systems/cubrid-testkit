@@ -165,6 +165,12 @@ const objectDomainQuery = "SELECT DISTINCT a.class_name FROM db_attribute a, db_
 // than attempted, and counted rather than hidden.
 const Skipped Outcome = "skipped"
 
+// Replicating is a case that wrote, made no comparable read, and whose write
+// was followed across to the slave. It establishes less than Same and more
+// than nothing: not that this case's data matches, but that the pair was
+// replicating while it ran.
+const Replicating Outcome = "replicating"
+
 // Unreplicatable is a case whose tables have no primary key. Its rows never
 // reach the slave and the engine reports nothing, so a comparison would be
 // answering a question about CUBRID's HA design rather than about this build.
@@ -370,8 +376,32 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 				strings.Join(res.Tables, ", ") + "), whose rows are never replicated"
 			return res
 		}
+		// The case asked the pair nothing about its own data. If it wrote
+		// anything, one question is still worth asking, and it is the one
+		// CTP's ha_repl asks of every case whatever the case contains:
+		// **was replication alive while this ran?**
+		//
+		// Taken from CTP deliberately (Test.java:937 `waitDataReplicated`,
+		// which polls a flag table of its own on the slave, once per case).
+		// This suite had the parts already -- WaitForReplication writes and
+		// polls exactly such a marker -- and threw the answer away, reporting
+		// `no_data` for 14 cases that write. What it kept instead is the part
+		// CTP gets wrong: comparing statements the engine refused, and
+		// retrying as though the slave were behind.
+		if dirty {
+			waited, werr := p.WaitForReplication(ctx, wait)
+			res.Waited += waited
+			if werr != nil {
+				res.Outcome, res.Detail = WaitTimeout, werr.Error()
+				return res
+			}
+			res.Outcome = Replicating
+			res.Detail = "the case makes no read this suite can compare, but it wrote and the pair " +
+				"carried a marker across afterwards, so replication was alive while it ran"
+			return res
+		}
 		res.Outcome = NoData
-		res.Detail = "the case makes no read, so the pair was never asked to agree about anything"
+		res.Detail = "the case neither writes nor reads, so the pair was never asked anything"
 		return res
 	}
 	res.Outcome = Same

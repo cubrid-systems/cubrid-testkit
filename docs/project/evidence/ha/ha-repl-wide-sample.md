@@ -16,8 +16,9 @@
 | cases | **131** |
 | same | **119** |
 | differ | **1** |
+| replicating | 10 |
 | unreplicatable | 1 |
-| no_data | 10 |
+| **no_data** | **0** |
 | skipped | **0** |
 | statements | 3,758 |
 | reads compared across the pair | **765** |
@@ -28,6 +29,12 @@
 | time spent waiting for replication | 1 m 53 s — and never slept |
 
 Two runs, 131 verdicts each, **identical**.
+
+**Nothing in this directory establishes nothing any more.** The ten that used to come back
+`no_data` all write, and the pair carried a marker across after each of them, so they are
+`replicating`: not that their data matches — they make no comparable read — but that replication
+was alive while they ran. That check is taken from CTP, which asks it of every case
+([`unjudged-cases.md`](unjudged-cases.md)).
 
 ## Against the same 131 cases before this week's changes
 

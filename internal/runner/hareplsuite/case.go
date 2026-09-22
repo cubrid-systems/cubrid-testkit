@@ -526,6 +526,7 @@ func mentionsAny(stmt string, tables []string) bool {
 		return false
 	}
 	low := strings.ToLower(stmt)
+	lit := literalMask(low)
 	for _, t := range tables {
 		name := strings.ToLower(t)
 		for i := 0; ; {
@@ -542,13 +543,44 @@ func mentionsAny(stmt string, tables []string) bool {
 			if at+len(name) < len(low) {
 				after = low[at+len(name)]
 			}
-			if !isWordByte(before) && !isWordByte(after) {
+			if !isWordByte(before) && !isWordByte(after) && !lit[at] {
 				return true
 			}
 			i = at + len(name)
 		}
 	}
 	return false
+}
+
+// literalMask marks the bytes inside a string literal.
+//
+// A name in quotes is a value, not a table. `select class_name, owner_name
+// from db_class where class_name='xxx'` reads the catalog and nothing else,
+// and skipping it because a keyless table is called `xxx` throws away the one
+// read that would have caught something.
+//
+// Measured: `_02_class/_003_auto_increment/cubridsus-965.sql` changes a class's
+// owner by method call, which does not replicate
+// (evidence/ha/class-owner-change-not-replicated.md). Its first read sees that
+// -- master PUBLIC, slave DBA -- and was being skipped for the quoted name,
+// while its second read agreed, so the case reported `same` over a divergence
+// the same run then found stranded on the slave.
+//
+// CUBRID quotes an identifier with brackets or double quotes, so only the
+// single quote is a literal here. A doubled quote inside one toggles twice and
+// lands where it started, which is the right answer for this purpose.
+func literalMask(s string) []bool {
+	mask := make([]bool, len(s))
+	in := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\'' {
+			in = !in
+			mask[i] = true
+			continue
+		}
+		mask[i] = in
+	}
+	return mask
 }
 
 func isWordByte(b byte) bool {

@@ -81,6 +81,13 @@ Both statements succeed on the master, which ends as clean as it started. Tables
 are repaired this way; a view, a synonym or a trigger is reported unrepaired, because a placeholder
 for one would be this runner deciding what the case meant.
 
+**The repair is visible in `fail_counter`, and that has to be said.** The CREATE it issues is
+*meant* to fail on the slave, and a failed statement replay is what that counter counts: `pmha-n2`
+went from 22 to 24 across the runs that repaired. So a reader who finds a non-zero `fail_counter`
+after a run of this suite has to check `slave-stranded.tsv` before blaming the engine — which is the
+same reason the file exists. Everything this directory says about `fail_counter` not moving is about
+what the *engine* does with a divergence; this is the suite moving it on purpose.
+
 **The record is the point, not the repair.** An object a slave holds and the master does not is
 evidence that something did not arrive — which is what a run is for. So each one is printed as it
 happens, attributed to the case that left it, written to `ha_repl_differences/slave-stranded.tsv`,

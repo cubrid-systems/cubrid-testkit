@@ -99,11 +99,21 @@ func TestReadAndWriteAreDecidedTheSafeWayRound(t *testing.T) {
 // The keyless-table check is name matching, and the direction it errs in is
 // the whole of its correctness: a missed table turns CUBRID's HA design into
 // a reported defect of this build.
+//
+// The one place that direction was wrong is a name in quotes, and the case
+// below used to be listed here as a table that must be seen. It is not a
+// table; it is a value. A read of `db_index` or `db_class` filtered by the
+// name of a keyless table reads the catalog, which replicates as DDL, and the
+// rows that do not replicate are never touched. Skipping it cost a finding:
+// `_02_class/_003_auto_increment/cubridsus-965.sql` changes a class's owner by
+// a method call that does not replicate, its first read sees exactly that, and
+// the case reported `same` because that read was skipped for the quoted name
+// -- while the same run found the divergence stranded on the slave a moment
+// later (evidence/ha/class-owner-change-not-replicated.md).
 func TestMentionsAnyMatchesWholeNamesOnly(t *testing.T) {
 	bare := []string{"track", "t1"}
 	for _, s := range []string{
 		"select * from track",
-		"select * from db_index where class_name in ('track')",
 		"SELECT * FROM TRACK ORDER BY 1",
 		"select * from t1 order by 1",
 	} {
@@ -116,6 +126,8 @@ func TestMentionsAnyMatchesWholeNamesOnly(t *testing.T) {
 		"select * from my_track",
 		"select * from t12",
 		"select * from album",
+		// A value, not a table: the catalog is what is being read.
+		"select * from db_index where class_name in ('track')",
 	} {
 		if mentionsAny(s, bare) {
 			t.Errorf("a different table was taken for a keyless one: %q", s)
@@ -215,5 +227,24 @@ func TestASelectThatMovesASerialIsNotARead(t *testing.T) {
 	// The value replication carried is still worth comparing.
 	if !IsRead("select se1.current_value from db_root") {
 		t.Error("current_value on its own should still be compared")
+	}
+}
+
+// A keyless table's name inside a string literal is a value. Skipping a
+// catalog read for it throws away the read that would have caught the
+// divergence -- measured on cubridsus-965, which reported `same` over one.
+func TestAQuotedNameIsNotATableReference(t *testing.T) {
+	keyless := []string{"xxx"}
+	skipped := "select class_name, owner_name from db_class where class_name='xxx'"
+	if mentionsAny(skipped, keyless) {
+		t.Errorf("a catalog read was skipped for a quoted value: %q", skipped)
+	}
+	real := "select * from xxx"
+	if !mentionsAny(real, keyless) {
+		t.Errorf("a read of the table itself was not skipped: %q", real)
+	}
+	// The name has to be the whole word, quoted or not.
+	if mentionsAny("select * from xxx_ai_a", keyless) {
+		t.Error("matched a longer name")
 	}
 }

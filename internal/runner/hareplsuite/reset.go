@@ -209,6 +209,12 @@ func strandedOnSlaves(ctx context.Context, p *sandbox.Pair) ([]Stranded, error) 
 // The CREATE failing on the slave is the point rather than a problem. Both
 // statements succeed on the master, which ends as clean as it started.
 //
+// It does leave a mark: a failed statement replay is what `fail_counter`
+// counts, so a repair moves the gauge this suite elsewhere reports as not
+// moving. That is why every repair is written down -- a non-zero counter after
+// a run has to be checkable against what this did, or the next reader blames
+// the engine for it.
+//
 // # What it will not do
 //
 // Invent a definition. A view needs a query, a synonym needs a target and a

@@ -74,6 +74,10 @@ diff, so a `differ` can be read instead of believed.
 **The sandbox pair `pmha`** — rootless podman, on this host, provisioned by cluster-sandbox. This
 is what the runner uses. `csb cluster status` says whether it is serving.
 
+**A second sandbox pair `gbha`**, created 2026-09-22 for group B. It exists because that work makes
+two masters out of a cluster and partitions it, which cannot be done to a pair a run is using.
+Anything that moves the topology goes here; `pmha` stays for the corpus runs.
+
 **A two-machine pair** — `hgryoo-desktop` (master) and `hgryoo-notebook` (slave), over tailscale,
 which is the only thing CTP can run on. As of 2026-09-22 it is **up, HA-configured by CTP, with a
 database `xdb`**, and the three conf files on both machines were rewritten by CTP's deploy.
@@ -104,13 +108,24 @@ back as `unique_name` **and** `owner.name`. The owner column is an object domain
 finding says those arrive as NULL, and `_db_serial.owner` nonetheless arrived intact; that tension
 is unexplained, so the key alone may not settle it.
 
-### B. Scale — `_01_object`, 3,327 cases
+### B. Scale — `_01_object`, 3,327 cases — *running 2026-09-22*
 
-Now worth running: the suite is reproducible, nothing comes back `no_data`, and the conversion
-adds no refusals. Three to four hours at the current rate; run it in the background.
+What it answers: whether the four known non-replicating shapes are the whole list, or whether a
+fifth is waiting in a corpus twenty-five times larger than anything run so far.
 
-What it would answer: whether the four known non-replicating shapes are the whole list, or
-whether a fifth is waiting in a corpus twenty-five times larger than anything run so far.
+**The reset had to be fixed before it could mean anything.** Starting this run printed the same
+warning on every case: the database still holds `own_t`. The reset dropped by bare name, and a
+bare name resolves in the caller's schema, so the drop of a table a case had given to another
+owner named a table that does not exist — and failed exactly as a success looks. Serials, triggers
+and users it never dropped at all, which `_04_trigger` and `_05_serial` would have met in the
+first hour. Both are fixed, and the same 131 cases of `_33_elderberry` now give **117 same and
+3 differ** where the recorded run gave 119 and 1
+([`ha-repl-wide-sample.md`](ha-repl-wide-sample.md)).
+
+**What to expect of the tally.** 72% of the corpus contains a `SELECT`, but it is not spread
+evenly: `_01_type` is 11% and `_09_partition`, which is 1,500 of the 3,327, is 92%. So the early
+hours come back `replicating` — the case wrote, made no comparable read, replication was alive —
+and the comparisons arrive late. A run stopped halfway establishes much less than half.
 
 ### C. Group B — cases that move the topology — *most likely to find something*
 
@@ -126,6 +141,31 @@ want of a provisioner that could cut a network. **That provisioner now exists an
 This is the question the suite has never been able to ask. Everything so far establishes that
 replication is correct while the topology holds still, and `module-ha.md` §3-1 is blunt about how
 little of the corpus even does that.
+
+**Started 2026-09-22, and it found something on the first day.** The testkit side of the fault
+verbs is in `internal/sandbox` — `Partition`, `SplitBrain`, `Faults`, `ClearFaults`, and
+`HAStatus` beside them as the gauge the oracle is not. The measurement is
+`TestLiveSplitBrainLeavesWhatTheGaugesDoNotReport`, which needs a cluster of its own because it
+makes two masters out of it:
+
+```bash
+extensions/cluster-sandbox/bin/csb cluster create --name gbha --build /path/to/install
+TESTKIT_CSB=extensions/cluster-sandbox/bin/csb TESTKIT_CSB_CLUSTER=gbha \
+  go test ./internal/sandbox/ -run TestLiveSplitBrain -v -count=3 -timeout 40m
+```
+
+What it found is in
+[`split-brain-divergence-converges.md`](split-brain-divergence-converges.md): the divergence a
+healed split brain leaves is **not permanent**, which corrects the sibling project's finding
+rather than confirming it. Three of three runs differ at thirty seconds and agree at ninety with
+nothing written. Everything else there stands, including that every gauge reads healthy the whole
+time.
+
+**What is left of group B:** P3 on its own (a partition without a split brain, and the `drop`
+mechanism as well as `blackhole`), P4 as a *verdict* rather than a state a measurement asks for,
+P6 at all, and the case format — this is a Go test, not something a case can express. The design
+says HA needs "honest waits and a fault verb, and both are functions", and the functions now
+exist.
 
 ### D. Tidy up
 
@@ -151,6 +191,13 @@ defensible.
 - **`xdbms32.sql` stalls any runner.** It is a real case that inserts 63 KB of HTML documentation,
   2,810 tags. CTP retries its comparison per line; this suite's splitter reads it as 170
   statements and no reads, because the HTML carries both semicolons and unbalanced apostrophes.
+- **A DROP by bare name is a no-op once a case has changed an owner**, and it reports nothing.
+  `DROP TABLE [t]` as dba means `dba.t`; the table a case gave to `u7` is `u7.t`. Ask the catalog
+  for `[owner].[name]`. The same shape will bite anything else that drops, renames or grants by
+  name.
+- **Never validate a query with `2>/dev/null`.** A reset query here was checked that way, came
+  back empty, and was empty because it was a syntax error: `db_serial.owner` is an object on
+  `_db_serial` and a varchar on the `db_serial` view. It read as "no serials" for an hour.
 - **This machine's shell wrapper truncates long lines through pipes.** `git show` came back 31
   lines of 603, `wc -l` under-counted, and a config rewritten with `grep -v … > file` had its
   longest line cut, which cost a run. Edit files with python, count with python.

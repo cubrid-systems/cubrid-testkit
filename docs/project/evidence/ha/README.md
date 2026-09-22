@@ -14,6 +14,16 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [split-brain-divergence-converges](split-brain-divergence-converges.md) — **2026-09-22.** Group
+  B's first measurement, and the first time this suite has asked its question of a topology that
+  moved. A split brain is reached on purpose, a row is written on each side, the network is healed,
+  and the pair is read. **It corrects the sibling project's published finding rather than
+  confirming it:** the divergence is real, and the direction reproduces, but it is not permanent —
+  three of three runs differ at thirty seconds and three of three agree at ninety, with nothing
+  written in between. Every gauge reads healthy throughout, which is the half that stands. The arm
+  that writes a marker was a coin flip because the marker itself takes 55 s to cross a pair that
+  has just healed.
+
 - [unjudged-cases](unjudged-cases.md) — **2026-09-22.** The 24 cases the suite reports as
   establishing nothing. 23 of them execute no read at all — and **CTP judges them anyway**, by a
   second oracle this document first missed: a flag table of its own, written on the master and

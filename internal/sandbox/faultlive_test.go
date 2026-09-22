@@ -63,10 +63,15 @@ func TestLiveSplitBrainLeavesWhatTheGaugesDoNotReport(t *testing.T) {
 	}
 }
 
-// observeAfterHeal is how long the quiet arm watches before it reads. Thirty
-// seconds because that is what the sandbox finding's direct read used, so the
-// two are comparable.
-const observeAfterHeal = 30 * time.Second
+// observeAfterHeal are the moments the quiet arm reads the standby, in seconds
+// after the heal.
+//
+// Thirty because that is when the sandbox finding took its direct read, so the
+// first sample is comparable with it. The later two are what tells a row that
+// is lost from a row that has not arrived yet -- "permanent" is a claim about
+// the last sample and not the first, and nothing so far has watched past the
+// first.
+var observeAfterHeal = []time.Duration{30 * time.Second, 90 * time.Second, 150 * time.Second}
 
 func splitBrainRun(t *testing.T, postHealWrite bool) {
 	cli := liveCluster(t)
@@ -165,11 +170,16 @@ func splitBrainRun(t *testing.T, postHealWrite bool) {
 			t.Logf("a marker crossed after the heal in %s", took.Round(time.Millisecond))
 		}
 	} else {
-		t.Logf("writing nothing, watching for %s", observeAfterHeal)
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case <-time.After(observeAfterHeal):
+		waited := time.Duration(0)
+		for _, at := range observeAfterHeal {
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(at - waited):
+			}
+			waited = at
+			t.Logf("wrote nothing; %s after the heal %s holds %v and %s holds %v",
+				at, first, ids(ctx, t, cli, first, pair.DB), second, ids(ctx, t, cli, second, pair.DB))
 		}
 	}
 	const read = "SELECT id, tag FROM tk_p5 ORDER BY id"

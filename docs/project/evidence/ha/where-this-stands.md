@@ -108,7 +108,7 @@ back as `unique_name` **and** `owner.name`. The owner column is an object domain
 finding says those arrive as NULL, and `_db_serial.owner` nonetheless arrived intact; that tension
 is unexplained, so the key alone may not settle it.
 
-### B. Scale — `_01_object`, 3,327 cases — *running 2026-09-22*
+### B. Scale — `_01_object`, 3,327 cases — *run 2026-09-23*
 
 What it answers: whether the four known non-replicating shapes are the whole list, or whether a
 fifth is waiting in a corpus twenty-five times larger than anything run so far.
@@ -126,6 +126,23 @@ first hour. Both are fixed, and the same 131 cases of `_33_elderberry` now give 
 evenly: `_01_type` is 11% and `_09_partition`, which is 1,500 of the 3,327, is 92%. So the early
 hours come back `replicating` — the case wrote, made no comparable read, replication was alive —
 and the comparisons arrive late. A run stopped halfway establishes much less than half.
+
+**It ran.** 3,327 cases in 64 minutes: **2,308 same, 7 differ, 943 replicating, 67
+unreplicatable**, one `wait_timeout` and one `case_failed`. 2,256 reads compared, of which **356
+agreed about nothing** — the master returned no rows either. The tail of it was measured over a
+pair a user trigger had left dirty, so `_10_system_table` was run again clean: **11 differences in
+244 cases**, and one sentence explains all of them —
+[`method-calls-on-the-catalog-do-not-replicate.md`](method-calls-on-the-catalog-do-not-replicate.md).
+
+**What it answered.** The four known non-replicating shapes were not the whole list. The fifth is
+not a shape at all but a *route*: a method call on a catalog class, which reaches the slave only
+when that class has a primary key. `_db_trigger`, `_db_class` and `_db_user` have none, and the
+last of those means a user — and its grants — can exist on the master alone.
+
+**What it cost to get there:** four defects in this runner, each now fixed and tested, and a fifth
+left open and named (the oracle assumes the same session can be established on both nodes). The
+run is resumable now, which it had to be: something stopped every CUBRID process on the host four
+times while it was going.
 
 ### C. Group B — cases that move the topology — *most likely to find something*
 

@@ -14,6 +14,17 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [method-calls-on-the-catalog-do-not-replicate](method-calls-on-the-catalog-do-not-replicate.md)
+  — **2026-09-23.** The rule the two findings below are instances of, and the scale run is what
+  showed it is a family: a method call on a catalog class reaches the slave only if that class has
+  a **primary** key, and three of them have none. The newest instance is the sharpest —
+  `create user u` replicates and `call add_user ('u') on class db_root` does not, so **a user can
+  exist on the master alone**, with every grant that rests on it. Measured over `_10_system_table`
+  on a clean pair: **11 differences in 244 cases**, all of them this rule or a consequence. Two of
+  the eleven are this runner's own: the oracle compares two nodes only while the same session can
+  be established on both, and a `call login` of a user the slave never got makes the two reads run
+  as different users.
+
 - [class-owner-change-not-replicated](class-owner-change-not-replicated.md) — **2026-09-22.**
   `call change_owner (...) on class db_root` does not reach the slave, for the same reason the
   trigger's does not: `_db_class` has an index and not a primary key. **Unlike the trigger, no key

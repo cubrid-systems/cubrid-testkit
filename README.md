@@ -43,7 +43,7 @@ family.
 | | Why |
 |---|---|
 | **Go 1.25+** | to build the binary (`go.mod`) |
-| **A CTP checkout** | any task that has not been rewritten runs the original as a subprocess: `CTP_HOME`, and `JAVA_HOME` for that path |
+| **A CTP checkout** | **two different reasons, and both apply.** A task that has not been rewritten runs the original as a subprocess, which needs `CTP_HOME` and `JAVA_HOME`. And the rewritten `shell` task needs it too: every case in the corpus begins `. $init_path/init.sh`, that file is CTP's, and `write_ok`, `write_nok`, `compare_result_between_files`, `finish` and `cubrid_createdb` are all in it. The corpus is frozen (NG1), so the dependency is the corpus's rather than the runner's — it ends when the corpus is freed, not when a task is rewritten |
 | **A CUBRID build** | the engine under test, with its own install and `CUBRID_DATABASES` |
 | **A testcases checkout** | the cases themselves, for the tasks that read a corpus |
 

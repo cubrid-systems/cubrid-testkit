@@ -41,7 +41,7 @@ TESTKIT_CONTAIN=1 TESTKIT_NATIVE=shell testkit shell -c shell.conf
 | | 왜 |
 |---|---|
 | **Go 1.25+** | 바이너리 빌드 (`go.mod`) |
-| **CTP 체크아웃** | 아직 다시 쓰지 않은 task 는 원본을 서브프로세스로 돌린다: `CTP_HOME`, 그리고 그 경로를 위한 `JAVA_HOME` |
+| **CTP 체크아웃** | **이유가 둘이고 둘 다 적용된다.** 다시 쓰지 않은 task 는 원본을 서브프로세스로 돌리므로 `CTP_HOME` 과 `JAVA_HOME` 이 필요하다. 그리고 **다시 쓴 `shell` task 도 필요하다**: 코퍼스의 모든 케이스가 `. $init_path/init.sh` 로 시작하는데 그 파일은 CTP 의 것이고, `write_ok` · `write_nok` · `compare_result_between_files` · `finish` · `cubrid_createdb` 가 전부 그 안에 있다. 코퍼스는 동결돼 있으므로(NG1) 이 의존은 러너의 것이 아니라 **코퍼스의 것**이다 — task 를 다시 쓴다고 없어지지 않고, 코퍼스가 풀릴 때 없어진다 |
 | **CUBRID 빌드** | 테스트 대상 엔진. 자체 설치본과 `CUBRID_DATABASES` |
 | **testcases 체크아웃** | 케이스 자체. 코퍼스를 읽는 task 를 위해 |
 

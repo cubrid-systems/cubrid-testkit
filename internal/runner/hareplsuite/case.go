@@ -12,6 +12,7 @@ package hareplsuite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -297,7 +298,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 			}
 			out, _, err := newBatchWith(prelude, list).runRaw(ctx, master, p.DB)
 			if err != nil {
-				res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
+				res.Outcome, res.Detail = CaseFailed, unreachable("master", err)
 				return res
 			}
 			// A batch reports one exit code for many statements, so refusals
@@ -359,7 +360,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 		b := newBatchWith(prelude, probed)
 		want, _, err := b.run(ctx, master, p.DB)
 		if err != nil {
-			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
+			res.Outcome, res.Detail = CaseFailed, unreachable("master", err)
 			return res
 		}
 		slave, serr := p.SlaveChannel(0)
@@ -369,7 +370,7 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 		}
 		got, _, gerr := b.run(ctx, slave, p.DB)
 		if gerr != nil {
-			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the slave could not be reached: %v", gerr)
+			res.Outcome, res.Detail = CaseFailed, unreachable("slave", gerr)
 			return res
 		}
 		// Two nodes in two different sessions are two different questions, and
@@ -786,4 +787,18 @@ func IsDataless(sql string) bool {
 		}
 	}
 	return true
+}
+
+// unreachable is what a failed node call says, and it is careful about one
+// distinction. A call the runner's own deadline killed is not a node that could
+// not be reached: `_09_partition` holds cases whose single statements take
+// minutes -- one builds 2,048 partitions -- and a whole-corpus run met that
+// bound eight times. Reporting those as unreachable sent a reader looking for a
+// dead node, which cost an afternoon once already.
+func unreachable(who string, err error) string {
+	if errors.Is(err, sandbox.ErrTimedOut) {
+		return fmt.Sprintf("this case outran the runner's own bound on a %s call, "+
+			"which is a limit here rather than a fault on the pair: %v", who, err)
+	}
+	return fmt.Sprintf("the %s could not be reached: %v", who, err)
 }

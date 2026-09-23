@@ -39,6 +39,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,7 +58,19 @@ const BinEnv = "TESTKIT_CSB"
 // DefaultTimeout bounds one csb call. Provisioning verbs are slower than this
 // and are not called from here: a run attaches to a cluster somebody already
 // stood up, so every call this package makes is a read or an exec.
+//
+// It is not large enough for every case in the sql corpus. `_09_partition` holds
+// statements that take minutes on their own -- one case creates a table with
+// 2,048 partitions -- and a run over `_01_object` hit this bound eight times.
+// That is a real limit, and a caller should be able to raise it (`CLI.Timeout`);
+// what it must not do is disguise it, which is what `ErrTimedOut` below is for.
 const DefaultTimeout = 2 * time.Minute
+
+// ErrTimedOut is a call that ran past this package's own bound and was killed
+// for it. It is a distinct error because the remedy is distinct: the node did
+// not fail and the cluster is not unreachable -- the work was longer than the
+// caller allowed. Test with errors.Is.
+var ErrTimedOut = errors.New("sandbox: the call outlived its timeout")
 
 // CLI is one cluster, reached through the csb command.
 type CLI struct {
@@ -140,6 +153,15 @@ func (c *CLI) call(ctx context.Context, noun, verb string, rest ...string) (*env
 	var out, errOut strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	runErr := cmd.Run()
+
+	// A deadline this package set killed the child, and `exec` reports that as
+	// `signal: killed` -- which reads exactly like something outside the run
+	// killing it. Said plainly instead, with the bound named: a caller deciding
+	// what to do needs to know the node was fine and the clock was not.
+	if runErr != nil && ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("%w: %s %s %s did not finish within %s",
+			ErrTimedOut, c.bin(), noun, verb, c.timeout())
+	}
 
 	var env envelope
 	if jerr := json.Unmarshal([]byte(out.String()), &env); jerr != nil {

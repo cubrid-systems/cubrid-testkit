@@ -14,15 +14,15 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
-- [scale-01-object](scale-01-object.md) — **2026-09-23.** The scale run: `sql/_01_object`, 3,327
-  cases, 2,256 reads compared, **7 differences with three causes between them** — and one of the
-  seven was the suite's own residue, which is why all seven were re-run on a clean pair. The
-  causes: a `call ... on class` into the catalog does not replicate and the DDL form of the same
-  change does (`add_user` is the third route measured, after the trigger's and the class's owner);
-  an object reference still does not cross, this time `_db_user.password`; and **a DDL whose text
-  names a csql session variable cannot be replayed at all**, which is a limit of statement
-  replication rather than of any catalog class. 356 of the agreeing reads returned no rows on the
-  master either, so the discount this suite reported at 131 cases survives at 3,327.
+- [ddl-with-a-session-variable-does-not-replay](ddl-with-a-session-variable-does-not-replay.md)
+  — **2026-09-23.** The scale run's other cause, and not the one above: a `CREATE CLASS` whose text
+  names a csql variable — `create class t(c2 x SHARED :arg1)` — is replayed verbatim on the slave,
+  which has no such variable, so the class is simply absent there. Discriminated with a control: a
+  variable holding a **number** fails the same way, a literal default does not, so it is the
+  variable and not what it holds. **The first finding in this directory the engine reports**: the
+  applier names the statement and says `Unknown variable`, and `fail_counter` moves. That corrects
+  the attribution of `_004_db_attribute/1003` and `1007`, which have no user, no owner change and
+  no method call in them.
 
 - [method-calls-on-the-catalog-do-not-replicate](method-calls-on-the-catalog-do-not-replicate.md)
   — **2026-09-23.** The rule the two findings below are instances of, and the scale run is what

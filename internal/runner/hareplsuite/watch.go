@@ -82,6 +82,11 @@ func Watch(ctx context.Context, home *conf.Home, confPaths []string, addr string
 	}
 
 	board := status.New(total)
+	// The watcher's page competes for the same machine the runs do, and the
+	// disk it should report is csb's state root for the same reason the run's
+	// own page reports it (board.go): that is where every pair's volumes and
+	// copy logs are, and it is what fills up.
+	board.Watch(csbStateRoot(), "", 0)
 	where, stop, serr := board.Serve(addr)
 	if serr != nil {
 		return serr

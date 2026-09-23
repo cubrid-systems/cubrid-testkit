@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,6 +50,13 @@ func openBoard(ctx context.Context, cfg *conf.Config, shards []*runShard,
 		return nil, func() {}
 	}
 	fmt.Fprintf(os.Stderr, "[INFO] status page at http://%s/\n", where)
+	// The machine panel was empty on this suite's page, because only the disk
+	// and memory a run actually competes for are worth showing and nobody had
+	// said which those are here. They are not $CUBRID: this runner writes
+	// nothing to the host's install. They are csb's state root, where every
+	// pair's volumes and copy logs live -- the directory that grew to 53 GB
+	// across eleven pairs and took the filesystem to 98%.
+	board.Watch(csbStateRoot(), "", 0)
 	names := make([]string, 0, len(shards))
 	for _, sh := range shards {
 		board.Lane(sh.cluster, "pair "+sh.cluster)
@@ -157,4 +165,20 @@ func yesNo(b bool) string {
 		return "yes"
 	}
 	return "no"
+}
+
+// csbStateRoot is where cluster-sandbox keeps what it stands up: one directory
+// per cluster, holding its describe artifact and every node's filesystem.
+//
+// It is read here rather than asked of csb because the page needs it before the
+// first call, and because it is a documented default with one override
+// (`CSB_HOME`) rather than something a cluster reports about itself.
+func csbStateRoot() string {
+	if h := strings.TrimSpace(os.Getenv("CSB_HOME")); h != "" {
+		return h
+	}
+	if h, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(h, ".local", "share", "csb")
+	}
+	return ""
 }

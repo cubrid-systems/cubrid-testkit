@@ -123,6 +123,19 @@ back as `unique_name` **and** `owner.name`. The owner column is an object domain
 finding says those arrive as NULL, and `_db_serial.owner` nonetheless arrived intact; that tension
 is unexplained, so the key alone may not settle it.
 
+### A2. One CBRD issue is owed, and only the drafting is blocked
+
+The scale run's finding is judged and the judgement is **file it, as one issue covering all
+three** — see *The judgement* in
+[`method-calls-on-the-catalog-do-not-replicate.md`](method-calls-on-the-catalog-do-not-replicate.md),
+which carries every field the form asks for. The draft was not written because the
+`cubrid-org-jira-create` skill's rule book (`issue/methodology/jira-writing.md` and its siblings)
+is not on this machine and the skill halts rather than draft without it. Bring that vault, or run
+the skill where it lives, and this is twenty minutes.
+
+The one field still genuinely unknown is **affects versions**: only develop at `5f3a30d` is
+measured, so a branch sweep is owed before the issue is filed.
+
 ### B. Scale — `_01_object`, 3,327 cases — *run 2026-09-23*
 
 What it answers: whether the four known non-replicating shapes are the whole list, or whether a

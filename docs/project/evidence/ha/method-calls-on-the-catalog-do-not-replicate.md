@@ -115,6 +115,42 @@ never calls is unmeasured, and **whether any of this is deliberate is not for th
 say** — only that the catalog decides it, and that the catalog says three different things about
 three classes that are edited the same way.
 
+## The judgement: one issue, to be filed — 2026-09-23
+
+**Decided: file it, as a single CBRD issue covering all three.** They are one sentence with three
+instances, and the thing worth reporting is that the catalog says three different things about
+three classes that are edited the same way. `_db_trigger` goes in as the *resolved* case —
+CBRD-27302 gives it a key — which is what makes the other two answerable rather than arguable.
+
+What separates this from the trigger's "passed by":
+
+| | trigger | class | **user** |
+|---|---|---|---|
+| a key is coming | **yes**, CBRD-27302 | no | no |
+| anything emits the call | no — the one dump that did is dead code behind `ENABLE_UNUSED_FUNCTION` | nothing in the tree emits `call change_owner` | **yes, and it is live** |
+
+The user row is the reason to file. `au_export_users` emits
+`call [add_user]('%s', '') on class [db_root]` and `call [add_member](…)`
+(`authenticate_migration.cpp:251, 355`), and it is called from **unloaddb**
+(`unload_schema.c:1438`, `:5213`) with no guard. So a schema unloaded and loaded onto a master in
+an HA pair creates its users and their group memberships **on the master alone**, with every grant
+that rests on them, and a failover loses all of it while every gauge reads healthy.
+
+**Not drafted yet, and for one reason only:** the JIRA drafting skill's own rule book
+(`issue/methodology/jira-writing.md` and its siblings) is not on this machine, and the skill says
+to halt rather than draft without it. Everything the draft needs is here:
+
+| the form asks for | it is |
+|---|---|
+| type | Correct Error |
+| test build | `CUBRID 11.5 (11.5.0.2513-5f3a30d)`, 64-bit, Linux |
+| repro | the two lines under *The newest instance*, plus the four-statement one in the class finding |
+| expected / actual | the `create user` vs `call add_user` table above |
+| components | `Catalog`, and HA if the taxonomy has it |
+| affects versions | **TBD — needs a branch sweep.** Only develop at `5f3a30d` is measured |
+| body language | mixed: Korean `*Summary*`, English body (chosen 2026-09-23) |
+| related | CBRD-27302 (the trigger half, already being fixed) |
+
 ## The three instances in full
 
 - [`trigger-owner-change-not-replicated.md`](trigger-owner-change-not-replicated.md) — `_db_trigger`,

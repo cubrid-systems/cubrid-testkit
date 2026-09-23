@@ -209,6 +209,7 @@ func run(args []string) int {
 			fmt.Fprintf(os.Stderr, "testkit: no runner for %q\n", task)
 			continue
 		}
+		sayWhoRunsIt(os.Stderr, task)
 
 		req := runner.Request{
 			Task:        task,
@@ -662,6 +663,48 @@ func caseFragment(p string) string {
 		}
 	}
 	return p
+}
+
+// sayWhoRunsIt names the switch when a task has a native runner and is about to
+// be handed to CTP anyway.
+//
+// It exists because the two runners are hard to tell apart from their output.
+// A reader who meets CTP's failure goes looking in this repository for the code
+// that produced it, finds this project's faithful port of the same checker, and
+// debugs the wrong program. That happened: a peer session spent an hour on
+// `Check directory '${CTP_HOME}/bin' ...... FAIL` reading
+// `internal/runner/shellsuite/check.go`, which was not running. The tell was a
+// list of command names -- CTP checks dos2unix and not expect, this port does
+// the opposite and says why -- which is not a thing anyone should have to know.
+//
+// **On standard error, and that is the point.** Standard output is the frozen
+// surface (ADR-003) and the thing the regression diff compares (ADR-013); a
+// line added there would appear as a difference between the two runners in
+// every comparison, produced by the harness talking about itself. This is an
+// aside to the operator and belongs where the other asides are.
+func sayWhoRunsIt(w io.Writer, task cli.Task) {
+	for _, f := range []struct {
+		family string
+		tasks  []cli.Task
+	}{
+		{"shell", shellsuite.NewShell().Tasks()},
+		{"sql", sqlsuite.New().Tasks()},
+		{"isolation", isolationsuite.New().Tasks()},
+		{"ha_repl", hareplsuite.New().Tasks()},
+	} {
+		if native(f.family) {
+			continue
+		}
+		for _, t := range f.tasks {
+			if t != task {
+				continue
+			}
+			fmt.Fprintf(w,
+				"[INFO] %s is running as CTP's, in a subprocess. "+
+					"Set TESTKIT_NATIVE=%s to run it here instead.\n", task, f.family)
+			return
+		}
+	}
 }
 
 // native says whether a family runs here rather than being handed to CTP.

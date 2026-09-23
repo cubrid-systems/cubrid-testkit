@@ -125,6 +125,11 @@ type Board struct {
 	// templates is the database-template cache, when a run uses one. Nil when it
 	// does not, which is every run that leaves CTP_DB_TEMPLATE_CACHE off.
 	templates *templates
+	// pair is the HA topology panel, set by the runner rather than sampled
+	// here: what a pair is belongs to internal/sandbox, and this package draws
+	// what it is handed.
+	pair   *Pair
+	pairAt time.Time
 	// replaying says this board is playing a finished run back rather than
 	// watching one happen, and the page says so -- an old run and a live one look
 	// identical otherwise, and mistaking the first for the second is the kind of
@@ -530,10 +535,13 @@ type view struct {
 	// Templates is nil unless the run uses the database-template cache, and the
 	// page leaves the panel out when it is.
 	Templates *templateView `json:"templates,omitempty"`
-	Machine   machineView   `json:"machine"`
-	Finished  bool          `json:"finished"`
-	Replaying bool          `json:"replaying,omitempty"`
-	Replay    *replayView   `json:"replay,omitempty"`
+	// Pair is the topology an HA run measures against, and is nil for a run
+	// that has only one node to ask.
+	Pair      *Pair       `json:"pair,omitempty"`
+	Machine   machineView `json:"machine"`
+	Finished  bool        `json:"finished"`
+	Replaying bool        `json:"replaying,omitempty"`
+	Replay    *replayView `json:"replay,omitempty"`
 }
 
 type slotView struct {
@@ -709,6 +717,7 @@ func (b *Board) snapshot() view {
 	v.NPatched = len(b.patched)
 	v.NRefused = len(b.refused)
 	v.Templates = b.templates.snapshot()
+	v.Pair = b.pairView()
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()
 	for i := len(b.recent) - 1; i >= 0; i-- {

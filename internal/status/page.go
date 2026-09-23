@@ -256,6 +256,15 @@ const page = `<!doctype html>
   <div class=mgrid id=machine></div>
 </section>
 
+<section class=panel id=pairwrap hidden style="margin-bottom:1.6rem">
+  <h2>the pair <span class=count id=pairwhen></span></h2>
+  <div class=mgrid>
+    <div class=mg><h3>nodes</h3><table><tbody id=pairnodes></tbody></table></div>
+    <div class=mg><h3>artifact</h3><table><tbody id=pairwhat></tbody></table></div>
+  </div>
+  <div id=pairnote class=warn style="margin-top:.4rem"></div>
+</section>
+
 <section class=panel id=setupwrap hidden style="margin-bottom:1.6rem">
   <h2>configuration <span class=count id=setupwhen>what the run was told to do</span></h2>
   <div class=setupgrid id=setup></div>
@@ -546,6 +555,7 @@ async function tick() {
   lanes(v.lanes || [])
   setup(v.setup || [])
   templates(v.templates)
+  pair(v.pair)
   lastView = v
   draw(v)
 }
@@ -667,6 +677,46 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') rpSend('step=-10')
   if (e.key === 'ArrowRight') rpSend('step=10')
 })
+
+// The pair an HA run measures against. Absent for every other suite, which is
+// why the panel is hidden rather than empty -- a table of dashes would read as
+// "the pair is broken" where the truth is "this run has no pair".
+//
+// A role is the one thing on this page that is wrong rather than merely stale
+// when it disagrees with what the run assumes, so it carries the colour: two
+// actives is a split brain, none is a group that has not settled, and a node
+// that is not live is why every case after it will time out.
+function pair(p) {
+  $('pairwrap').hidden = !p
+  if (!p) return
+  const actives = (p.nodes || []).filter(n => (n.role || '').toLowerCase() === 'active').length
+  $('pairwhen').textContent = p.cluster + (p.age > 5 ? '  \u00b7 read ' + p.age + 's ago' : '')
+  $('pairnodes').innerHTML = (p.nodes || []).map(n => {
+    const bad = !n.live || (actives !== 1)
+    const lag = (n.applyLag || 0) + (n.copyLag || 0)
+    const detail = [
+      n.state || (n.role || '?'),
+      n.fail ? n.fail + ' failed' : '',
+      lag ? lag + ' page' + (lag === 1 ? '' : 's') + ' behind' : '',
+      (n.built && n.role && n.built !== n.role) ? 'built ' + n.built : '',
+    ].filter(Boolean).join(' \u00b7 ')
+    return '<tr><td>' + esc(n.name) + '<td class="' + ((bad || n.fail) ? 'warn' : '') + '">' + esc(detail) + '</tr>'
+  }).join('') || '<tr><td colspan=2 class=empty>no node answered</tr>'
+  const rows = [
+    ['engine', p.engine], ['database', p.db], ['backend', p.backend],
+    ['network', p.network], ['ping', p.ping], ['image', p.image],
+  ].filter(r => r[1])
+  $('pairwhat').innerHTML = rows.map(r => '<tr><td>' + r[0] + '<td>' + esc(r[1]) + '</tr>').join('')
+  // A fault is deliberate while group B runs and a mystery afterwards, so it
+  // is listed either way rather than folded into the node lines.
+  const faults = p.faults || []
+  if (faults.length) {
+    $('pairwhat').innerHTML += faults.map(f =>
+      '<tr><td>fault<td class=warn>' + esc(f) + '</tr>').join('')
+  }
+  $('pairnote').textContent = p.note || ''
+  $('pairnote').hidden = !p.note
+}
 
 // A lane is one word, and an unset one is nothing rather than a placeholder.
 const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''

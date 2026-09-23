@@ -71,6 +71,10 @@ const (
 	// `wait_timeout`, `case_failed` -- is never resumed. Those are exactly the
 	// ones the interruption produced.
 	ResumeKey = "resume"
+	// StatusKey is the page, off unless asked for, and never on standard
+	// output -- what the runner prints there is the frozen surface the
+	// equivalence comparison reads (ADR-003).
+	StatusKey = "status_http"
 )
 
 func clusterOf(cfgCluster string) string {
@@ -131,6 +135,9 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 
 	fmt.Printf("ha_repl: %s -> %s, %d case(s) from %s\n",
 		pair.Master, strings.Join(pair.Slaves, ","), len(cases), scenario)
+
+	board, closeBoard := openBoard(ctx, cfg, c, pair, name, scenario, wait, addKey, resetEvery, len(cases))
+	defer closeBoard()
 
 	// Where a difference is kept so it can be read rather than believed.
 	keepDir := cfg.GetOr("difference_dir", filepath.Join(filepath.Dir(req.ConfigPath), "ha_repl_differences"))
@@ -195,7 +202,9 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 			continue
 		}
 		rel, _ := filepath.Rel(scenario, path)
+		board.Begin(boardSlot, rel)
 		r := RunCase(ctx, pair, rel, string(sql), wait, keepDir, addKey)
+		board.End(boardSlot, rel, r.Outcome != Differ && r.Outcome != WaitTimeout && r.Outcome != CaseFailed)
 		results = append(results, r)
 		ledger.Write(r)
 		lastCase = rel

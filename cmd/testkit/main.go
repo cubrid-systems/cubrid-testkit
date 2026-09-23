@@ -566,10 +566,12 @@ func watchCmd(args []string) int {
 		fmt.Fprint(os.Stdout, watchUsage)
 		return exitOK
 	}
-	// Told nothing, it finds the runs itself. A sharded run is one process per
-	// pair and each of them was started with its own conf, which is still in
-	// its command line -- so the machine already holds the list the operator
-	// would otherwise have to keep and retype.
+	// Told nothing, it finds the runs itself. A run was started with `-c <conf>`
+	// and that argument is still in its command line for as long as it is
+	// running -- so the machine already holds the list the operator would
+	// otherwise have to keep and retype. One run now drives several pairs, so
+	// this is usually one conf; it stays a list because several corpora can be
+	// going at once, each in its own run.
 	if len(confPaths) == 0 {
 		confPaths = hareplsuite.Running()
 		if len(confPaths) == 0 {

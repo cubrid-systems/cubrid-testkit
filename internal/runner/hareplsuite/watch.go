@@ -106,7 +106,7 @@ func Watch(ctx context.Context, home *conf.Home, confPath, addr string, out io.W
 		}
 	}()
 
-	return follow(ctx, board, ledgerPath)
+	return follow(ctx, board, ledgerPath, len(cases))
 }
 
 // follow reads the ledger from the beginning and then keeps reading.
@@ -115,9 +115,11 @@ func Watch(ctx context.Context, home *conf.Home, confPath, addr string, out io.W
 // a run that had done 327 of them. By polling rather than by inotify: the file
 // is appended a few times a minute at most, the run flushes every line, and a
 // poll cannot miss a write the way a watcher that has to re-register can.
-func follow(ctx context.Context, board *status.Board, path string) error {
+func follow(ctx context.Context, board *status.Board, path string, total int) error {
 	var offset int64
-	seen := map[string]bool{}
+	var order []Result
+	seen := map[string]int{}
+	grew := time.Now()
 	for {
 		size, err := sizeOf(path)
 		switch {
@@ -128,27 +130,73 @@ func follow(ctx context.Context, board *status.Board, path string) error {
 		case size < offset:
 			// The file shrank, so it is a different run: start over rather
 			// than read the middle of a line.
-			offset, seen = 0, map[string]bool{}
+			offset, order, seen = 0, nil, map[string]int{}
+			board.Reset()
 			fallthrough
 		case size > offset:
+			replay := false
 			n, rerr := readFrom(path, offset, func(r Result) {
-				if seen[r.Case] {
+				at, already := seen[r.Case]
+				if !already {
+					seen[r.Case] = len(order)
+					order = append(order, r)
+					board.Begin(boardSlot, r.Case)
+					board.Record(boardSlot, r.Case, ok(r.Outcome), r.Took)
 					return
 				}
-				seen[r.Case] = true
-				board.Begin(boardSlot, r.Case)
-				board.Record(boardSlot, r.Case, ok(r.Outcome), r.Took)
+				// The run judged this case again -- a resumed run re-runs what
+				// came back wait_timeout, and the second answer is the one that
+				// counts. A board cannot be told to forget one case, so the
+				// whole thing is rebuilt from the lines in order, which is what
+				// replay does when it seeks backwards.
+				order[at] = r
+				replay = true
 			})
 			if rerr == nil {
+				if n != offset {
+					grew = time.Now()
+				}
 				offset = n
 			}
+			if replay {
+				board.Reset()
+				for _, r := range order {
+					board.Begin(boardSlot, r.Case)
+					board.Record(boardSlot, r.Case, ok(r.Outcome), r.Took)
+				}
+			}
 		}
+		board.Note(quiet(len(order), total, grew))
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+}
+
+// quietFor is how long a ledger may go without a new verdict before the page
+// says so.
+//
+// Longer than any case this corpus has: the wait bound alone is a minute, and
+// a case that hits it is slow rather than gone. Short enough that a run killed
+// at lunchtime is not still drawing a live-looking page at two.
+const quietFor = 3 * time.Minute
+
+// quiet is the sentence the page needs when the ledger stops growing.
+//
+// A finished run needs none -- the board already says finished, and a watcher
+// that added "nothing new" to it would be reporting success as a fault. An
+// unfinished one that has gone quiet is the case worth a sentence, because a
+// page that merely stops advancing reads exactly like a run that is slow, and
+// that is the failure this whole panel was built after: a pair died and an
+// hour of a run went into wait_timeout with nobody looking.
+func quiet(done, total int, since time.Time) string {
+	if done >= total || time.Since(since) < quietFor {
+		return ""
+	}
+	return fmt.Sprintf("no verdict in %s -- the run may have stopped, or be stuck on one case; "+
+		"%d of %d judged", time.Since(since).Round(time.Second), done, total)
 }
 
 func sizeOf(path string) (int64, error) {

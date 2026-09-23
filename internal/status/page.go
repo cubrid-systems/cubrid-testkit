@@ -231,6 +231,7 @@ const page = `<!doctype html>
   </div>
 </div>
 <div class=bar><i id=fill></i></div>
+<div id=note class=warn hidden style="margin:.5rem 0"></div>
 
 <section class=panel id=replaywrap hidden style="margin-bottom:1.6rem">
   <h2>replay <span class=count id=rpwhen></span></h2>
@@ -556,6 +557,10 @@ async function tick() {
   setup(v.setup || [])
   templates(v.templates)
   pair(v.pair)
+  // What the page has to say about itself, which is not the same as what the
+  // run has to say: a watcher's source can stop growing while the page is fine.
+  $('note').textContent = v.note || ''
+  $('note').hidden = !v.note
   lastView = v
   draw(v)
 }

@@ -139,6 +139,7 @@ type Board struct {
 	// what it is handed.
 	pair   *Pair
 	pairAt time.Time
+	note   string
 	// replaying says this board is playing a finished run back rather than
 	// watching one happen, and the page says so -- an old run and a live one look
 	// identical otherwise, and mistaking the first for the second is the kind of
@@ -390,6 +391,33 @@ func (b *Board) End(slot, name string, ok bool) {
 // endWith is End with a duration supplied rather than measured, which is what a
 // replay needs: the wall clock is compressed but the durations reported are the
 // ones the run really had.
+// Note is what the page says about itself: a watcher whose source has stopped
+// growing says so here, because a page that merely stops advancing reads
+// exactly like a run that is slow. Empty clears it.
+func (b *Board) Note(s string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.note = s
+}
+
+// Reset empties the board.
+//
+// A board is an accumulation and there is nothing to subtract from it, so a
+// reader whose source rewrote its own history -- a ledger whose earlier verdict
+// for a case was replaced by a later one -- starts again rather than counting
+// both. Replay does the same thing when it seeks backwards.
+func (b *Board) Reset() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reset()
+}
+
 // Record is one finished case with the time it took, for a page built from a
 // record rather than from the run that made it.
 //
@@ -561,7 +589,12 @@ type view struct {
 	Templates *templateView `json:"templates,omitempty"`
 	// Pair is the topology an HA run measures against, and is nil for a run
 	// that has only one node to ask.
-	Pair      *Pair       `json:"pair,omitempty"`
+	Pair *Pair `json:"pair,omitempty"`
+	// Note is one sentence the page has to say about itself rather than about
+	// the run: that its source has gone quiet, and for how long. A run's own
+	// board never sets it -- it cannot go quiet without the process it lives in
+	// going with it -- and a watcher reading a file can.
+	Note      string      `json:"note,omitempty"`
 	Machine   machineView `json:"machine"`
 	Finished  bool        `json:"finished"`
 	Replaying bool        `json:"replaying,omitempty"`
@@ -742,6 +775,7 @@ func (b *Board) snapshot() view {
 	v.NRefused = len(b.refused)
 	v.Templates = b.templates.snapshot()
 	v.Pair = b.pairView()
+	v.Note = b.note
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()
 	for i := len(b.recent) - 1; i >= 0; i-- {

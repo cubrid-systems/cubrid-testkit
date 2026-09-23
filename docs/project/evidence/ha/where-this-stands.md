@@ -1,6 +1,6 @@
 # HA: where this stands, and the four ways on
 
-- **Date:** 2026-09-22
+- **Date:** 2026-09-22, updated 2026-09-23 (A settled, B run, C started)
 - **What this is:** the handover. Everything below is what someone starting cold needs to pick up
   any of the four candidates without rediscovering it — including the things that cost a day and
   leave no trace in the code.
@@ -39,6 +39,20 @@ Outcomes, and what each means:
 reported: a table with no primary key, a view onto one, a synonym for one, and an object-domain
 column ([`object-domain-not-replicated.md`](object-domain-not-replicated.md)). The first is the
 rule the other three are consequences of.
+
+**A fifth is known and is not skipped, because it is a route rather than a shape.** A method call
+on a catalog class -- `call change_owner (…) on class db_root` and its relatives -- reaches the
+slave only if that class has a primary key, and `_db_trigger`, `_db_class` and `_db_user` have
+none ([`method-calls-on-the-catalog-do-not-replicate.md`](method-calls-on-the-catalog-do-not-replicate.md)).
+It stays reported: the DDL form of each of those changes replicates perfectly well, so skipping
+the catalog they touch would hide coverage that works.
+
+**One precondition of the oracle is not enforced and should be.** The comparison means what it
+says only while the same session can be established on both nodes. A case that does
+`call login ('u')` after creating `u` by the method route logs in on the master and fails to on the
+slave, and the two reads then run as different users -- which this suite currently reports as a
+difference. Two of the eleven differences in `_10_system_table` are that, and they are named in the
+finding. **This is the next thing to fix in the runner.**
 
 ## 2. How to run it
 
@@ -87,7 +101,7 @@ still working pairs and the conf is CTP's rather than the operator's.
 `./preflight.sh <master> <slave> <user> [<password>]` checks in seconds whether a pair can host
 CTP's corpus at all. It reported READY on this one.
 
-## 4. The four ways on — A settled 2026-09-22, three open
+## 4. The four ways on — A settled and B run (2026-09-23), C started, D open
 
 ### A. The one difference — *settled 2026-09-22, and not by work*
 

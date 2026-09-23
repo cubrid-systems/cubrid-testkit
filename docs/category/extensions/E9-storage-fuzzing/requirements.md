@@ -1,305 +1,328 @@
 # E9 — Storage-engine Concurrency Fuzzing (schedule × operation interleaving) (Requirements)
 
-**Source:** ROADMAP §6a-E9 + §6a 부록 (fuzzing 우선순위 사다리) · survey §7.4
-**Status:** incubating (조건부 — E5 선행 + SERVER_MODE in-process 기동)
-**축 매핑:** 축 5 확장 (engine-internal) × 축 8 (schedule/model-based) — 축 4·7 과 층이 다름
-**사다리 위치:** §6a 사다리 순위 5 (원안 6행)
-**Companion docs (후속):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
-**참조 구현:** RocksDB `fuzz/` — *입력 구조화 형태* 만 참조. 대상은 다르다 (§1.0)
+*English · [한국어](requirements.ko.md)*
 
-> **재정의 (2026-09-03, 사용자 결정).** 본 문서는 처음에 *단일 스레드 operation sequence*
-> fuzzing 으로 쓰였다. 그 형태는 값이 거의 없다 — 아래 §1.0. 재정의 이전 판의 판단 중
-> 유지되는 것과 폐기되는 것을 각 절에 표시한다.
+**Source:** ROADMAP §6a-E9 + the §6a appendix (the fuzzing priority ladder) · survey §7.4
+**Status:** incubating (conditional — E5 first, plus SERVER_MODE in-process startup)
+**Axis mapping:** axis 5 extended (engine-internal) × axis 8 (schedule/model-based) — a different layer from axes 4 and 7
+**Ladder position:** §6a ladder rank 5 (row 6 of the original)
+**Companion docs (to follow):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
+**Reference implementation:** RocksDB `fuzz/` — only the *shape of the structured input* is referenced. The target is different (§1.0)
+
+> **Redefinition (2026-09-03, the user's decision).** This document was first written as fuzzing of
+> a *single-threaded operation sequence*. That shape has almost no value — §1.0 below. Which of the
+> judgements from the edition before the redefinition are kept and which are discarded is marked in
+> each section.
 
 ---
 
-## 1. 이 확장이 해결하는 문제
+## 1. The problem this extension solves
 
-### 1.0 왜 단일 스레드 operation sequence 가 아닌가 (2026-09-03 재정의)
+### 1.0 Why not a single-threaded operation sequence (the 2026-09-03 redefinition)
 
-두 가지가 이 항목의 형태를 바꿨다.
+Two things changed the shape of this entry.
 
-**(1) 찾으려는 결함이 단일 스레드에 없다.** 아래 §1.1 이 나열하는 상태들은 대부분 두 개
-이상의 실행 흐름이 겹쳐야 생긴다. 한 스레드가 연산을 아무리 많은 순서로 늘어놓아도
-latch 순서나 vacuum 간섭에는 도달하지 않는다.
+**(1) The defects being looked for are not in a single thread.** Most of the states §1.1 below
+lists come about only when two or more flows of execution overlap. However many orders one thread
+lays its operations out in, it never arrives at latch ordering or at vacuum interference.
 
-**(2) 저장 계층은 모드별로 갈라진 코드다.** `SERVER_MODE` 분기가 `page_buffer.c` 에 **146**
-개, `log_manager.c` 에 **53** 개, `vacuum.c` 에 **26** 개 있고 `vacuum_Master_daemon` 은
-`cubthread::daemon` 이다. 단일 스레드 모드(SA)에서의 관측은 SERVER_MODE 서버로 이어지지
-않는다. 대상 라이브러리도 **`libcubrid.so`** (SERVER_MODE) 이며 — `heap_insert_logical`,
-`btree_insert`, `boot_restart_server` 가 모두 여기서 export 된다 — SA 라이브러리가 아니다.
+**(2) The storage layer is code that forks by mode.** There are **146** `SERVER_MODE` branches in
+`page_buffer.c`, **53** in `log_manager.c` and **26** in `vacuum.c`, and `vacuum_Master_daemon` is
+a `cubthread::daemon`. An observation made in single-threaded mode (SA) does not carry over to a
+SERVER_MODE server. The target library is **`libcubrid.so`** (SERVER_MODE) too —
+`heap_insert_logical`, `btree_insert` and `boot_restart_server` are all exported from there — and
+not the SA library.
 
-따라서 입력은 연산 열 하나가 아니라 **`(스레드별 연산 열 × 인터리빙)`** 쌍이다.
+So the input is not one operation sequence but a
+**`(per-thread operation sequence × interleaving)`** pair.
 
-CUBRID 의 **storage engine 내부 API** (heap / B-tree / slotted page / overflow / MVCC 가시성)
-를 *구조화된 operation sequence* 로 fuzzing 한다. 입력은 byte 뭉치가 아니라
-**유효한 DB 연산 열(sequence)** 이며, 그 열 자체를 mutate 한다.
+CUBRID's **storage engine internal API** (heap / B-tree / slotted page / overflow / MVCC
+visibility) is fuzzed with a *structured operation sequence*. The input is not a lump of bytes but
+**a sequence of valid DB operations**, and it is that sequence itself that is mutated.
 
-### 1.1 기존 축이 못 잡는 영역
+### 1.1 The area the existing axes cannot catch
 
-| 기존 축 | 도달 범위 | 사각지대 |
+| Existing axis | What it reaches | The blind spot |
 |---|---|---|
-| E5 (parser/protocol fuzz) | frontend byte 진입점 | *stateless* — 엔진 내부 상태 누적이 없음 |
-| E3 (SQLancer) | valid SQL 의 wrong-result | SQL 로 표현 가능한 조합만. 내부 API 직접 호출 불가 |
-| E2 (SQLsmith) | grammar 통과 random SQL | 동상 |
-| strangler-fig 모듈 전체 | 손으로 쓴 케이스 | 연산 *순서* 의 조합 폭발을 탐색하지 않음 |
+| E5 (parser/protocol fuzz) | the frontend byte entry points | *stateless* — no engine-internal state accumulates |
+| E3 (SQLancer) | wrong-result in valid SQL | only the combinations SQL can express. It cannot call an internal API directly |
+| E2 (SQLsmith) | random SQL that passes the grammar | the same |
+| the strangler-fig modules as a whole | cases written by hand | it does not explore the combinatorial explosion of operation *order* |
 
-storage engine 버그는 *하나의 연산* 이 아니라 **동시에 진행되는 연산들의 인터리빙** 이
-만든 상태에서 터진다:
+A storage engine bug goes off not in the state made by *one operation* but in the state made by
+**the interleaving of operations running at the same time**:
 
-- slotted page 의 slot 재사용 × **동시** 가변길이 record 갱신
-- overflow record 승격/강등 경계에서 두 트랜잭션이 같은 페이지를 잡는 순서
-- B-tree 의 unique violation 롤백과 다른 스레드의 재삽입이 겹치는 창
-- MVCC 가시성 — update 체인과 **vacuum 워커** 의 간섭
-- latch 획득 순서, 그리고 그 창이 마이크로초인 race
-- heap best-space 캐시가 실제 free space 와 어긋나는 상태
+- slot reuse in a slotted page × a **concurrent** update of a variable-length record
+- the order in which two transactions take the same page at the overflow record
+  promotion/demotion boundary
+- the window where a B-tree unique violation rollback overlaps another thread's re-insertion
+- MVCC visibility — the update chain interfering with the **vacuum worker**
+- the order in which latches are acquired, and the races whose window is microseconds
+- the state where the heap best-space cache has drifted from the actual free space
 
-이런 상태는 SQL 층에서 *우연히* 도달할 수는 있어도 *체계적으로* 탐색되지 않는다.
-그리고 **단일 스레드로는 도달하지 않는다** — 그것이 §1.0 의 요지다.
+The SQL layer can reach such a state *by accident*, but it does not explore it *systematically*.
+And **a single thread does not reach it at all** — that is the point of §1.0.
 
-### 1.2 잡는 버그 종류
+### 1.2 The kinds of bug it catches
 
-내부 assert 위반 / page corruption / slot 인덱스 out-of-range / OID dangling /
-overflow chain 누수 / MVCC 가시성 판정 오류 / heap best-space 불일치 /
-ASan heap-buffer-overflow · use-after-free / UBSan misaligned access.
+Internal assert violations / page corruption / a slot index out of range / a dangling OID /
+an overflow chain leak / a wrong MVCC visibility decision / heap best-space disagreement /
+ASan heap-buffer-overflow and use-after-free / UBSan misaligned access.
 
 ---
 
-## 2. protobuf 에 대한 오해 해소 (선결 확인 사항)
+## 2. Clearing up the misunderstanding about protobuf (to be confirmed first)
 
-> **CUBRID 는 자체 바이너리 프로토콜을 쓰고 protobuf 를 쓰지 않는다.
-> 그런데 왜 libprotobuf-mutator 인가? — 프로토콜과 무관하기 때문이다.**
+> **CUBRID uses its own binary protocol and does not use protobuf.
+> So why libprotobuf-mutator? — because it has nothing to do with the protocol.**
 
-여기서 protobuf 는 **fuzzer 내부의 입력 기술 언어(IR)** 일 뿐, *wire format 이 아니다*.
-CUBRID 는 protobuf 바이트를 **한 번도 보지 않는다.**
+protobuf here is only **the fuzzer's internal language for describing input (its IR)**, *not a wire
+format*. CUBRID **never sees a protobuf byte.**
 
 ```
 libFuzzer
    │  (raw bytes)
    ▼
-libprotobuf-mutator          ← protobuf 는 여기까지만 존재
-   │  (structure-aware mutation: field 교체 / oneof 전환 / repeated 삽입·삭제)
+libprotobuf-mutator          ← protobuf exists up to here and no further
+   │  (structure-aware mutation: replacing a field / switching a oneof / inserting into and deleting from a repeated)
    ▼
-StorageOpSequence  (in-memory C++ 객체)
-   │  harness 가 직접 번역
+StorageOpSequence  (an in-memory C++ object)
+   │  the harness translates it directly
    ▼
 heap_insert_logical() / btree_insert() / heap_get_visible_version() / ...
    ↑
-   CUBRID 내부 C/C++ API 직접 호출 — 네트워크·프로토콜·직렬화 전부 경유하지 않음
+   calling CUBRID's internal C/C++ API directly — no network, no protocol, no serialization on the way
 ```
 
-RocksDB 의 `fuzz/db_fuzzer.cc` 도 정확히 이 형태다 — `DBOperation` protobuf 메시지를
-받아 `db->Put()` / `db->Get()` / `db->Delete()` 를 *직접* 호출한다. RocksDB 역시
-protobuf 를 저장 포맷이나 프로토콜로 쓰지 않는다.
+RocksDB's `fuzz/db_fuzzer.cc` has exactly this shape — it takes a `DBOperation` protobuf message
+and calls `db->Put()` / `db->Get()` / `db->Delete()` *directly*. RocksDB does not use protobuf as a
+storage format or as a protocol either.
 
-**따라서 호환성 문제는 발생하지 않는다:**
+**So no compatibility problem arises:**
 
-| 우려 | 실제 |
+| The worry | What is actually so |
 |---|---|
-| CUBRID 프로토콜을 protobuf 로 바꿔야 하나? | 아니오. 프로토콜은 손대지 않는다 |
-| 서버/클라이언트에 protobuf 의존이 생기나? | 아니오. `cubrid-fuzz-storage` **fuzz 바이너리에만** 링크된다 |
-| 3rdparty 에 protobuf 를 vendor in 해야 하나? | fuzz 빌드(`-DENABLE_FUZZING=ON`) 경로에서만. 기본 빌드 산출물은 불변 |
-| 배포 산출물이 커지나? | 아니오. fuzz 타깃은 배포물이 아니다 |
+| Does CUBRID's protocol have to be changed to protobuf? | No. The protocol is not touched |
+| Does a protobuf dependency appear in the server or the client? | No. It is linked **only into the `cubrid-fuzz-storage` fuzz binary** |
+| Does protobuf have to be vendored into 3rdparty? | Only on the fuzz build (`-DENABLE_FUZZING=ON`) path. The default build artefacts do not change |
+| Do the shipped artefacts get bigger? | No. The fuzz target is not shipped |
 
-*(2026-09-03 확인: cubrid 본 repo 에 protobuf 의존은 **존재하지 않는다** — 소스 트리 전역
-검색 무결과, `CMakeLists.txt` / `cmake/` / `3rdparty/` 에도 언급 없음. 현행 3rdparty 는
-libedit · libexpat · libjansson · libodbc · libopenssl · libtbb · lz4 · rapidjson · re2 뿐이다.
-따라서 protobuf 는 **신규 fuzz-only 의존** 이며, 본 repo 3rdparty 정책과의 충돌 여부가
-ADR-EXT-009 의 결정 항목이다.)*
+*(Confirmed 2026-09-03: there is **no** protobuf dependency in the cubrid repository — a search
+over the whole source tree returns nothing, and there is no mention in `CMakeLists.txt`, `cmake/`
+or `3rdparty/` either. The current 3rdparty is libedit · libexpat · libjansson · libodbc ·
+libopenssl · libtbb · lz4 · rapidjson · re2, and nothing more. So protobuf would be **a new
+fuzz-only dependency**, and whether that conflicts with that repository's 3rdparty policy is a
+decision item for ADR-EXT-009.)*
 
-### 2.1 protobuf 를 쓰지 않는 대안 (ADR-EXT-009 에서 비교)
+### 2.1 The alternatives that do not use protobuf (compared in ADR-EXT-009)
 
-| 방식 | 신규 의존 | 구조 인식 mutation | crossover 품질 | 비고 |
+| Approach | New dependency | Structure-aware mutation | Crossover quality | Note |
 |---|---|---|---|---|
-| **libprotobuf-mutator** | protobuf + LPM (fuzz-only) | ★★★★ | ★★★★ | RocksDB 검증된 경로. corpus 가 사람이 읽을 수 있음(TextFormat) |
-| **FuzzedDataProvider** (libFuzzer 헤더 단독) | 없음 | ★★ | ★★ | 의존 0. byte→op 디코더를 손으로 씀. mutation 이 구조를 깨기 쉬움 |
-| 자체 IR + 자체 mutator | 없음 | ★★★ | ★★★ | 통제력 최대, 구현·유지 비용 최대 |
+| **libprotobuf-mutator** | protobuf + LPM (fuzz-only) | ★★★★ | ★★★★ | the path RocksDB has proven. The corpus can be read by a person (TextFormat) |
+| **FuzzedDataProvider** (the libFuzzer header alone) | none | ★★ | ★★ | zero dependencies. The byte→op decoder is written by hand. Mutation easily breaks the structure |
+| our own IR + our own mutator | none | ★★★ | ★★★ | maximum control, maximum cost to build and to keep |
 
-**권고(미확정):** 1차는 `FuzzedDataProvider` 로 harness 골격과 *state reset* 을 먼저
-검증하고, operation 어휘가 안정된 뒤 libprotobuf-mutator 로 승격. 이유는 §7 위험 1.
+**The recommendation (not settled):** first verify the skeleton of the harness and the *state
+reset* with `FuzzedDataProvider`, then promote to libprotobuf-mutator once the operation vocabulary
+has settled. The reason is §7 risk 1.
 
 ---
 
-## 3. 외부 호출 형태 (제안 — incubating)
+## 3. The form of the external call (proposed — incubating)
 
 ```
 testkit run fuzz --target storage [--ops <n>] [--time <sec>] [--corpus <dir>]
 ```
 
-내부 진입 (의제):
+The internal entry (agenda):
 
 ```
-StorageFuzzDriver.exec(config)          # testkit (Go) — 오케스트레이션만
-  ├─ cubrid-fuzz-storage 를 subprocess 로 구동 (ADR-001 Consequence 4)
+StorageFuzzDriver.exec(config)          # testkit (Go) — orchestration only
+  ├─ run cubrid-fuzz-storage as a subprocess (ADR-001 Consequence 4)
   │
-  │   ┌ cubrid-fuzz-storage (본 repo 바이너리, libFuzzer in-process) ─────────┐
-  │   │ 1회: 임시 volume 생성 + boot (in-process)                             │
-  │   │ 매 입력마다:                                                          │
-  │   │    reset()                       ← §5 state reset 계약                │
-  │   │    for op in sequence:                                                │
-  │   │       translate(op) -> heap_* / btree_* / log_* 직접 호출              │
-  │   │       check invariants (선택)                                         │
-  │   │    rollback or drop                                                   │
-  │   └───────────────────────────────────────────────────────────────────────┘
+  │   ┌ cubrid-fuzz-storage (a binary of that repository, libFuzzer in-process) ───┐
+  │   │ once: create a temporary volume + boot (in-process)                        │
+  │   │ for every input:                                                           │
+  │   │    reset()                       ← the §5 state reset contract             │
+  │   │    for op in sequence:                                                     │
+  │   │       translate(op) -> call heap_* / btree_* / log_* directly              │
+  │   │       check invariants (optional)                                          │
+  │   │    rollback or drop                                                        │
+  │   └────────────────────────────────────────────────────────────────────────────┘
   │
-  └─ 산출 아티팩트 ingest: crash 입력 → op sequence 텍스트 덤프 + stack hash dedup
+  └─ ingest the artefacts produced: crash input → an op sequence text dump + stack hash dedup
 ```
 
-**testkit 책임 한정:** corpus 보관 + replay + crash triage + 실행 오케스트레이션.
-**cubrid 본 repo 책임:** fuzz target build option, in-process boot/shutdown 진입점,
-`LLVMFuzzerTestOneInput` 구현, state reset 훅.
+**The limit of testkit's responsibility:** keeping the corpus + replay + crash triage +
+orchestrating the run.
+**The cubrid repository's responsibility:** the fuzz target build option, the in-process
+boot/shutdown entry points, the `LLVMFuzzerTestOneInput` implementation, the state reset hook.
 
-**외부 표면 동결(NG2) 영향:** 없음 (신규 진입점).
+**Effect on the frozen external surface (NG2):** none (a new entry point).
 
 ---
 
-## 4. operation 어휘 (1차 의제 — 실제 API 근거)
+## 4. The operation vocabulary (the first agenda — grounded in the actual API)
 
-> **재정의 2 (2026-09-04).** 아래 어휘표는 *연산을 합성한다* 는 전제로 쓰였다. 그 전제가
-> 철회됐다 — **호출 규약 문제** 때문이다. `heap_insert_logical` 등은 호출자가 세워 준 전제
-> (열린 트랜잭션·격리, 잡힌 락과 latch, `heap_create_insert_context ()` 로 채운
-> `HEAP_OPERATION_CONTEXT`, 올바르게 중첩된 `log_sysop_start`/`end`) 위에서 돈다. 합성하면
-> **실제 호출자가 만들지 않는 순서** 를 만들고, 거기서 나온 crash 는 결함이 아니라 전제
-> 위반에 대한 정당한 반응일 수 있다. 발견마다 도달 가능성 triage 가 붙는다.
+> **Redefinition 2 (2026-09-04).** The vocabulary table below was written on the premise that
+> *operations are synthesized*. That premise has been withdrawn — because of **the
+> calling-convention problem**. `heap_insert_logical` and the rest run on top of premises the
+> caller has set up: an open transaction and isolation, locks and latches already taken, a
+> `HEAP_OPERATION_CONTEXT` filled in by `heap_create_insert_context ()`, and correctly nested
+> `log_sysop_start`/`end`. Synthesizing them produces **an order no real caller ever makes**, and a
+> crash out of that may not be a defect but a legitimate response to a violated premise. Every
+> finding then comes with a reachability triage.
 >
-> 그래서 **연산은 합성하지 않고 미리 컴파일된 XASL 을 재생** 한다 (§4a). 질의 실행이 전제를
-> 다 세우므로 모든 경로가 구성상 도달 가능하고, 퍼저는 **스케줄만** 탐색한다. 아래 표는
-> Q16(b) *future work* — 내부 API 어휘 모델링 — 의 출발점으로 남긴다.
+> So operations are **not synthesized; a pre-compiled XASL is replayed instead** (§4a). Executing
+> the query sets up every premise, so every path is reachable by construction and the fuzzer
+> explores **only the schedule**. The table below is left as the starting point for Q16(b) *future
+> work* — modelling the internal API vocabulary.
 
-CUBRID 소스 확인 기준 (`src/storage/`, `src/base/`):
+As confirmed against the CUBRID source (`src/storage/`, `src/base/`):
 
-| op | 대응 내부 API | 비고 |
+| op | The internal API it maps to | Note |
 |---|---|---|
-| `INSERT` | `heap_insert_logical` (`storage/heap_file.h`) | `HEAP_OPERATION_CONTEXT` 구성 필요 |
-| `UPDATE` | `heap_update_logical` | in-place / 이동 / overflow 승격 경로 분기 |
+| `INSERT` | `heap_insert_logical` (`storage/heap_file.h`) | a `HEAP_OPERATION_CONTEXT` has to be built |
+| `UPDATE` | `heap_update_logical` | it branches into the in-place / move / overflow promotion paths |
 | `DELETE` | `heap_delete_logical` | |
-| `GET` | `heap_get_visible_version` | MVCC 스냅샷 인자 |
+| `GET` | `heap_get_visible_version` | takes an MVCC snapshot argument |
 | `SCAN` | `heap_scancache_start` → `heap_next` → `heap_scancache_end` | |
 | `IDX_INSERT` | `btree_insert` (`storage/btree.h`) | unique / non-unique |
 | `IDX_SCAN` | `btree_range_scan` | |
-| `COMMIT` / `ABORT` | transaction 경계 | §5 reset 과 직접 결합 |
-| `VACUUM` | vacuum 요청 | MVCC 간섭 탐색의 핵심 |
-| `CHECKPOINT` | log checkpoint | 순위 6 (recovery) 과의 접점 |
+| `COMMIT` / `ABORT` | the transaction boundary | directly bound up with the §5 reset |
+| `VACUUM` | a vacuum request | the heart of exploring MVCC interference |
+| `CHECKPOINT` | log checkpoint | the point of contact with rank 6 (recovery) |
 
 `record serialize/unpack` (`or_get_value` / `or_put_value` / `or_unpack_value`,
-`src/base/object_representation.h`) 은 **stateless byte-in 타깃** 이므로 본 항목이
-아니라 **E5 의 target layer** 로 귀속한다 (§6a 사다리 순위 4).
+`src/base/object_representation.h`) is **a stateless byte-in target**, so it belongs not to this
+entry but to **E5's target layer** (§6a ladder rank 4).
 
-**미정:** 어휘의 1차 범위 (heap 만 / heap+btree / +vacuum / +checkpoint),
-key/value 도메인 (고정 스키마 vs 가변 도메인), scan 결과의 검증 여부.
-
----
-
-## 4a. 무엇이 연산을 만드는가 — XASL 재생 (2026-09-04)
-
-**서버는 SQL 을 컴파일하지 않는다.** `libcubrid.so`(SERVER_MODE) 에 `parser_main`,
-`pt_compile`, `do_prepare_select`, `xts_map_xasl_to_stream` 이 **없다** — 컴파일과 직렬화는
-클라이언트 몫이다. `xqmgr_prepare_query (thrd, compile_context *, xasl_stream *)` 는 이미
-만들어진 스트림을 캐시에 등록하거나 존재를 확인할 뿐 컴파일하지 않는다.
-
-역직렬화(`stx_map_stream_to_xasl`)는 서버에 있다. 즉 **소비 절반은 있고 생산·보관 절반이
-없다.** 하네스는 미리 컴파일된 XASL 픽스처를 받아 캐시에 올리고 `XASL_ID` 로 반복 실행한다.
-
-```
-질의 생성 (E3 SQLancer / 손으로 고른 것)
-      ↓ 클라이언트 측 컴파일 + 직렬화
-  XASL 픽스처   ← §6a-E10 이 담당 (신설). 엔진에 없는 부분
-      ↓ stx_map_stream_to_xasl (엔진에 있음)
-  E9 재생 — 스케줄만 탐색
-```
-
-**E3 와 겹치지 않는다.** E3 는 *질의 모양* 을 탐색하고 매번 새로 생성한다. E9 는 질의
-생성기가 필요 없고 **경합을 만들도록 손으로 고른 소수의 플랜** 을 코퍼스로 쓴다. 탐색 축이
-다르고(질의 vs 인터리빙) 오라클도 다르다(wrong-result vs crash·손상).
-
-**픽스처 스키마** — 클라이언트가 실행 요청에 싣는 것이 정본이다
-(`sqmgr_execute_query ()` unpack): `sql_user_text`(hash text 아님 — 그건 재작성된 해시 키),
-XASL 스트림, host variable 묶음 + `data_size`, `query_flag`, `query_timeout`, 그리고
-**엔진 빌드 식별자**. 마지막 항목이 필수인 이유는 §4b.
-
-## 4b. 엔진은 스트림 버전을 검사하지 않는다
-
-`stx_map_stream_to_xasl ()` 이 확인하는 것은 포인터 non-null 과 `xasl_stream_size > 0`
-뿐이다. 곧바로 `or_unpack_int` 로 헤더 크기를 읽고 오프셋을 계산한다. **포맷·버전 검사가
-없다.** 다른 빌드의 스트림은 거부되지 않고, 의미가 달라진 오프셋으로 역직렬화된다 —
-조용히 이상하게 동작한다. 따라서 빌드 식별자 기록과 불일치 시 거부는 선택이 아니며,
-**E10 이 구현해야 할 몫** 이다.
+**Undecided:** the first scope of the vocabulary (heap only / heap+btree / +vacuum / +checkpoint),
+the key/value domain (a fixed schema vs a variable domain), and whether scan results are verified.
 
 ---
 
-## 5. 재현성 — 상태를 되돌리는 문제가 아니라 스케줄을 재생하는 문제
+## 4a. What makes the operations — XASL replay (2026-09-04)
 
-> **재정의 (2026-09-03).** 이 절은 처음에 "state reset — 본 항목의 핵심 설계 난제" 였다.
-> 단일 스레드 전제에서 나온 틀이고, 재정의로 문제 자체가 바뀌었다.
+**The server does not compile SQL.** `libcubrid.so` (SERVER_MODE) **has no** `parser_main`,
+`pt_compile`, `do_prepare_select` or `xts_map_xasl_to_stream` — compilation and serialization are
+the client's job. `xqmgr_prepare_query (thrd, compile_context *, xasl_stream *)` only registers an
+already-made stream in the cache or checks that it is there; it does not compile.
 
-libFuzzer 는 **한 프로세스 안에서 입력을 수만 번 반복** 한다. 단일 스레드였다면 필요한
-명제는 "같은 입력 → 같은 상태" 였다. **멀티스레드에서 그것은 얻을 수도 없고 원할 것도
-아니다** — 스케줄이 비결정적인 것이 바로 탐색하려는 대상이기 때문이다.
+Deserialization (`stx_map_stream_to_xasl`) is in the server. That is, **the consuming half is there
+and the producing and keeping half is not.** The harness takes a pre-compiled XASL fixture, puts it
+in the cache and runs it repeatedly by `XASL_ID`.
 
-필요한 것은 다른 형태다:
+```
+query generation (E3 SQLancer / picked by hand)
+      ↓ client-side compilation + serialization
+  the XASL fixture   ← §6a-E10 handles this (new). The part the engine does not have
+      ↓ stx_map_stream_to_xasl (the engine has this)
+  E9 replay — exploring the schedule only
+```
 
-- **스케줄을 입력의 일부로 만든다.** `(연산, 스케줄)` 쌍이 재현되면 충분하고, 상태가
-  비트 단위로 같을 필요는 없다.
-- **reset 은 게이트가 아니라 준비 단계** 로 내려간다 — 알려진 시작 DB 를 만드는 일.
-- **crash triage 의 단위가 바뀐다** — 저장할 것은 입력 바이트만이 아니라 그 입력을 재현시킨
-  스케줄이다.
+**It does not overlap with E3.** E3 explores *the shape of a query* and generates a new one every
+time. E9 needs no query generator and uses as its corpus **a small number of plans picked by hand
+to create contention**. The axis of exploration differs (query vs interleaving) and so does the
+oracle (wrong-result vs crash and corruption).
 
-### 5.1 스케줄 제어 지점은 이미 엔진에 있다
+**The fixture schema** — the canonical form is what the client puts on the execution request (the
+unpack of `sqmgr_execute_query ()`): `sql_user_text` (not the hash text — that is a rewritten hash
+key), the XASL stream, the host variable bundle + `data_size`, `query_flag`, `query_timeout`, and
+**the engine build identifier**. Why the last of those is mandatory is §4b.
 
-`src/base/fault_injection.c` 의 `fi_handler_hold` / `fi_handler_hang` 이 지정 지점에서 창을
-넓히거나 멈춘다. CBRD-27198 (2026-09-02 머지) 이 `disk_reserve_sectors_in_volume` 에
-`fi_handler_hold` 훅을 넣은 이유가 정확히 이것이다 — *"The race lasts microseconds … a test
-can only hit that window by luck."* **즉 스케줄 주입 원시 도구가 존재하고 이미 그 용도로
-쓰이고 있다.** 본 항목은 그 위에 생성기와 불변식 검사를 얹는 일이다.
+## 4b. The engine does not check the stream's version
 
-한계도 같이 기록한다: FI 지점은 **정적 enum** 이라 스케줄 공간의 커버리지가 훅이 박힌
-자리에 제한된다. 지점을 늘리면 그때 본 repo 작업이 생기고, CBRD-27198 이 그 관례(NDEBUG
-게이트 + 모듈당 예약 범위)를 이미 보여준다.
+What `stx_map_stream_to_xasl ()` checks is a non-null pointer and `xasl_stream_size > 0`, and
+nothing else. It goes straight on to read the header size with `or_unpack_int` and compute the
+offsets. **There is no format check and no version check.** A stream from a different build is not
+rejected; it is deserialized with offsets whose meaning has changed — it behaves oddly, silently.
+So recording the build identifier and refusing on a mismatch is not optional, and it is **E10's to
+implement**.
 
-### 5.2 SA 모드 스파이크 (2026-09-03) — 게이트가 아니라 준비 단계에 대한 자료
+---
 
-스파이크: cubrid `feat/fuzz-target-infrastructure` 브랜치의 `fuzz/spike/reset_spike.cpp`.
-SA 모드로 엔진을 in-process 부팅(`db_login` / `db_restart` — `compactdb`·`checksumdb` 가
-이미 쓰는 경로)하고, 연산 열을 돌리고, 리셋하고, 그 실행이 관측한 모든 것을 다이제스트로
-만든다. 다이제스트가 1종이면 결정적이다.
+## 5. Reproducibility — not a problem of putting state back but of replaying a schedule
 
-**같은 열만 반복하는 것은 약한 검증이라 쓰지 않았다.** 퍼저는 매 입력이 직전과 다르므로,
-성립해야 하는 명제는 *앞에 무엇이 오든 같은 열은 같은 다이제스트를 낸다* 이다. 그래서
-variant 0 사이에 다른 잔여 상태를 남기는 열 둘을 끼웠다 — in-place 로 갱신되지 않는 넓은
-행, 롤백된 unique violation.
+> **Redefinition (2026-09-03).** This section was first "state reset — this entry's central design
+> difficulty". That frame came out of the single-threaded premise, and the redefinition changed the
+> problem itself.
 
-| 전략 | 실행 | 결정성 | iter/sec | median | 비고 |
+libFuzzer **repeats an input tens of thousands of times inside one process**. Had it been
+single-threaded, the proposition needed would have been "the same input → the same state". **In a
+multi-threaded setting that is neither obtainable nor wanted** — the schedule being
+non-deterministic is precisely what is to be explored.
+
+What is needed has a different shape:
+
+- **Make the schedule part of the input.** Reproducing the `(operation, schedule)` pair is enough;
+  the state does not have to be identical bit for bit.
+- **reset drops from a gate to a preparation step** — the job of making a known starting DB.
+- **The unit of crash triage changes** — what is stored is not the input bytes alone but the
+  schedule that made that input reproduce.
+
+### 5.1 The schedule control points are already in the engine
+
+`fi_handler_hold` / `fi_handler_hang` in `src/base/fault_injection.c` widen the window or stop at a
+named point. That is exactly why CBRD-27198 (merged 2026-09-02) put an `fi_handler_hold` hook into
+`disk_reserve_sectors_in_volume` — *"The race lasts microseconds … a test can only hit that window
+by luck."* **So a primitive for injecting a schedule exists and is already being used for that
+purpose.** This entry is the job of laying a generator and invariant checks on top of it.
+
+The limit is recorded alongside: the FI points are **a static enum**, so coverage of the schedule
+space is limited to where a hook has been driven in. Adding points means work in that repository at
+that moment, and CBRD-27198 already shows the convention for it (an NDEBUG gate plus a reserved
+range per module).
+
+### 5.2 The SA-mode spike (2026-09-03) — evidence about the preparation step, not about the gate
+
+The spike: `fuzz/spike/reset_spike.cpp` on the cubrid `feat/fuzz-target-infrastructure` branch. It
+boots the engine in-process in SA mode (`db_login` / `db_restart` — the path `compactdb` and
+`checksumdb` already use), runs an operation sequence, resets, and turns everything that run
+observed into a digest. One kind of digest means it is deterministic.
+
+**Repeating only the same sequence is weak verification, and was not used.** Every input a fuzzer
+sends differs from the one before, so the proposition that has to hold is *whatever comes before
+it, the same sequence yields the same digest*. So two sequences that leave different residual state
+were put between the variant 0 runs — a wide row that is not updated in place, and a rolled-back
+unique violation.
+
+| Strategy | Runs | Determinism | iter/sec | median | Note |
 |---|---:|---|---:|---:|---|
-| **A. abort + 테이블 비우기** | **10,000** | **결정적** (variant-0 5,000회, 다이제스트 1종) | **126.2** | **7.6 ms** | 공개 API 만 사용. 가장 싸고 가장 빠르다 |
-| A. (같은 열 반복) | 10,000 | 결정적 | 72.0 | 12.7 ms | 약한 검증. 참고용 |
-| B. volume 재생성 (`DROP`/`CREATE`) | 500 | 결정적 | 41.2 | 23.6 ms | 예상대로 A 보다 느리다 |
-| B'. 전체 `db_shutdown` + `db_restart` | 50 | 결정적 | 2.4 | 321.8 ms | A 의 1/50 |
-| C. fork() 격리 | — | 미측정 | — | — | 결정성 확보용으로는 불필요해짐. §10 참조 |
-| ~~D. 전용 reset 훅~~ | — | — | — | — | **철회.** A 가 이미 결정적이고 더 빠르다. 본 repo 작업량이 0 이 된다 |
+| **A. abort + emptying the table** | **10,000** | **deterministic** (5,000 variant-0 runs, one kind of digest) | **126.2** | **7.6 ms** | uses only the public API. The cheapest and the fastest |
+| A. (repeating the same sequence) | 10,000 | deterministic | 72.0 | 12.7 ms | weak verification. For reference |
+| B. recreating the volume (`DROP`/`CREATE`) | 500 | deterministic | 41.2 | 23.6 ms | slower than A, as expected |
+| B'. a full `db_shutdown` + `db_restart` | 50 | deterministic | 2.4 | 321.8 ms | 1/50 of A |
+| C. fork() isolation | — | not measured | — | — | no longer needed for securing determinism. See §10 |
+| ~~D. a dedicated reset hook~~ | — | — | — | — | **withdrawn.** A is already deterministic and faster. The amount of work in that repository becomes 0 |
 
-**이 측정이 말해주는 것은 여기까지다: 트랜잭션 경계로 되돌리는 준비 단계가 성립하고 싸다.**
-진입 조건으로 삼았던 "결정적 재현" 게이트는 **이 측정으로 충족되지 않는다** — SA 는 단일
-스레드이고 본 항목의 대상 구성이 아니다 (§1.0). 대상 구성에서의 재현성은 §5 의 형태,
-즉 스케줄 재생으로 얻어야 하며 아직 측정된 바 없다.
+**This is as far as the measurement goes: a preparation step that winds back to a transaction
+boundary works, and is cheap.** The "deterministic reproduction" gate that was set as a condition
+of entry is **not met by this measurement** — SA is single-threaded and is not this entry's target
+configuration (§1.0). Reproducibility in the target configuration has to be obtained in the shape
+of §5, that is by replaying a schedule, and nothing about it has been measured yet.
 
-**측정이 덮지 않는 것:**
-- **단일 스레드(SA)에서 쟀다.** 본 항목은 SERVER_MODE 멀티스레드가 대상이다. 이것이 가장 큰 간극이다.
-- 리셋을 **SQL 레벨** 에서 쟀다. 본 항목은 `heap_insert_logical` 등 내부 API 를 직접 친다.
-  리셋이 트랜잭션 단위라 이어질 것으로 보지만 그건 *추론* 이다.
-- 초당 126 회는 libFuzzer 가 기대하는 수천 회에 못 미친다. 대부분은 리셋이 아니라 SQL 6 문장이
-  전체 스택을 도는 비용인데, 이 측정은 둘을 분리하지 않았다.
-- 연산 열 3 종은 임의의 연산 열이 아니다.
+**What the measurement does not cover:**
+- **It was measured in a single thread (SA).** This entry targets multi-threaded SERVER_MODE. That
+  is the largest gap.
+- The reset was measured **at the SQL level**. This entry hits internal APIs such as
+  `heap_insert_logical` directly. Since the reset is per transaction it looks as though it will
+  carry over, but that is an *inference*.
+- 126 a second falls short of the thousands libFuzzer expects. Most of that is not the reset but
+  the cost of six SQL statements going round the whole stack, and this measurement did not separate
+  the two.
+- Three kinds of operation sequence are not arbitrary operation sequences.
 
-**그리고 하네스 형태가 확정됐다** — 이쪽은 E5 의 무상태 타깃과 달리 **자기 완결적일 수 없다.**
-`db_restart` 가 설치된 `$CUBRID` 트리와 디스크 위의 DB 를 요구한다. 되돌릴 대상이 구조체가
-아니라 파일과 부팅된 엔진이다.
+**And the shape of the harness is settled** — unlike E5's stateless target, this one **cannot be
+self-contained.** `db_restart` demands an installed `$CUBRID` tree and a DB on disk. What is being
+wound back is not a structure but files and a booted engine.
 
-### 5.3 SERVER_MODE in-process 기동 — 된다 (2026-09-03)
+### 5.3 SERVER_MODE in-process startup — it works (2026-09-03)
 
-`fuzz/spike/server_boot_spike.cpp`. `net_server_start()` 에서 네트워크 절반을 뺀 순서 그대로다
-— 상류에서도 `boot_restart_server()` 가 `css_init()` **앞** 에 온다. 뺀 것은 둘뿐:
-`net_server_init()` (static, in-process 가 안 쓰는 요청 디스패치 테이블만 채움) 과
-`css_init()` (소켓 개방).
+`fuzz/spike/server_boot_spike.cpp`. It is `net_server_start()`'s order exactly, with the network
+half taken out — upstream too, `boot_restart_server()` comes **before** `css_init()`. Only two
+things were taken out: `net_server_init()` (static, and it only fills the request dispatch table
+that in-process does not use) and `css_init()` (opening the socket).
 
 ```
 boot_restart_server                            rc=0
@@ -308,257 +331,295 @@ live threads while booted                      15
 xboot_shutdown_server                          ok=1
 ```
 
-**스레드 15 개가 요점이다.** `rc=0` 인데 스레드가 하나였다면 이름만 다른 SA 형태였을 것이다.
-데몬이 올라와 있고, 그것이 이 라이브러리를 고른 이유다.
+**The fifteen threads are the point.** Had `rc=0` come back with one thread, it would have been the
+SA shape under a different name. The daemons are up, and that is the reason this library was
+chosen.
 
-### 5.3a 순서 공간은 이미 포화되어 있다 (2026-09-04) — 이 항목의 전제를 바꾼 측정
+### 5.3a The space of orderings is already saturated (2026-09-04) — the measurement that changed this entry's premise
 
-`noise_floor_spike.cpp`. 입력을 **고정** 하고 반복하며, 각 참가자가 연산 직전에 공유
-카운터에서 티켓을 뽑는다. 티켓 순서가 관측된 인터리빙이고, 서로 다른 순서의 개수를 센다.
+`noise_floor_spike.cpp`. The input is **fixed** and repeated, and each participant draws a ticket
+from a shared counter immediately before its operation. The ticket order is the observed
+interleaving, and the number of distinct orders is counted.
 
-| 모드 | 스레드 | 반복 | distinct 순서 | 최빈 |
+| Mode | Threads | Repetitions | Distinct orders | Most frequent |
 |---|---:|---:|---|---|
-| 대조군 (티켓만, 엔진 작업 없음) | 4 | 2000 | **24 / 24 — 100%** | 5.8 · 5.3 · 4.9 · 4.8 · 4.7 % |
+| control (tickets only, no engine work) | 4 | 2000 | **24 / 24 — 100%** | 5.8 · 5.3 · 4.9 · 4.8 · 4.7 % |
 | `file_create_heap` | 4 | 1000 | **24 / 24 — 100%** | 5.2 · 5.1 · 5.1 · 4.9 · 4.9 % |
 
-균등이면 4.17% 이고 둘 다 그 근처다. 엔진 작업 쪽이 오히려 *더* 균등하다 — **"엔진 latch 가
-순서를 좁힌다" 는 가설은 틀렸다.**
+Uniform would be 4.17%, and both are near it. The engine-work side is if anything *more* uniform —
+**the hypothesis that "the engine's latches narrow the order" is wrong.**
 
-**함의**: 스케줄 통제로 얻는 것은 탐색 커버리지가 아니다 — 반복만으로 공짜다. 얻는 것은
-**재현** 이다. 따라서 **Tier 1 이 주력** 이고(시간이 곧 발견), **Tier 2 는 triage 도구** 로서
-Tier 1 이 재현 안 되는 결함을 낸 *뒤* 에 착수하며, **libFuzzer 가 스케줄을 탐색한다는 구상은
-폐기** 한다 — 통제 지점이 없으면 입력의 스케줄 인코딩과 실제 인터리빙 사이에 상관이 없다.
+**The implication**: what schedule control buys is not exploration coverage — repetition alone gives
+that for free. What it buys is **reproduction**. So **Tier 1 is the main effort** (time is
+discovery), **Tier 2 is a triage tool** to be started *after* Tier 1 has produced a defect that
+will not reproduce, and **the idea of libFuzzer exploring the schedule is discarded** — without
+control points there is no correlation between the schedule encoded in the input and the actual
+interleaving.
 
-*범위 한정*: 작업 한 종류, 참가자 4 명, 관측 지점은 엔진 내부 이벤트가 아니라 티켓이다.
-단일 hot page 에 실제 경합이 걸리는 작업은 더 제약될 수 있다.
+*The limits of the scope*: one kind of work, four participants, and the observation point is the
+ticket rather than an event inside the engine. Work that puts real contention on a single hot page
+may be more constrained.
 
-### 5.3b 오라클을 넓혔다 (2026-09-04) — §5.3a 가 지목한 다음 개선
+### 5.3b The oracle was widened (2026-09-04) — the next improvement §5.3a pointed at
 
-§5.3a 는 "다음 개선은 스케줄이 아니라 오라클" 로 끝났다. 그 작업의 결과다. 구현체는
-`cubrid` 본 repo `feat/fuzz-target-infrastructure`, 설계 근거는 roadmap
-`N66/10-design_fi-rendezvous.md` §9.2·§9.3.
+§5.3a ended with "the next improvement is the oracle, not the schedule". This is the result of that
+work. The implementation is on `feat/fuzz-target-infrastructure` in the `cubrid` repository, and
+the design rationale is the roadmap's `N66/10-design_fi-rendezvous.md` §9.2 and §9.3.
 
-**정합성 검사 — 어디에 둘 수 있는지는 비용이 정한다.**
+**The consistency checks — cost decides where they can go.**
 
-| 검사 | 비용 | 실행 위치 |
+| Check | Cost | Where it runs |
 |---|---:|---|
-| `disk_check ()` | 0.000 s | 매 입력 |
-| `file_tracker_check ()` | 0.007 s | 매 입력 |
-| `xboot_check_db_consistency (CHECKDB_ALL_CHECK_EXCEPT_PREV_LINK)` | **7.0 s** | 세션 시작·끝 |
+| `disk_check ()` | 0.000 s | every input |
+| `file_tracker_check ()` | 0.007 s | every input |
+| `xboot_check_db_consistency (CHECKDB_ALL_CHECK_EXCEPT_PREV_LINK)` | **7.0 s** | the start and the end of a session |
 
-초당 수십 회가 목표이므로 전체 검사 1 회는 입력 수백 개어치다. "N 회마다" 가 아니라
-**세션 경계에만** 둔다. 검사는 **워크로드 전후 모두** 돌린다 — 사후에만 돌리면 이 입력이
-만든 결함과 DB 가 원래 갖고 있던 것을 구분할 수 없다.
+The target is tens of runs a second, so one full check is worth hundreds of inputs. It goes **only
+at the session boundaries**, not "every N runs". The check is run **both before and after the
+workload** — run only afterwards, and the defect this input made cannot be told apart from what the
+DB already had.
 
-**TSan 빌드는 플래그 하나다** — `-DFUZZ_SANITIZERS=thread`. ASan 과 배타적이라 엔진을 따로
-빌드해야 하지만 소스 트리는 하나고, 스파이크는 대상 빌드의 `flags.make` 에서 컴파일 플래그를
-되읽어 만든다. **ASan/UBSan 과 TSan 은 택일이 아니라 같은 하네스의 두 실행이다.**
+**A TSan build is one flag** — `-DFUZZ_SANITIZERS=thread`. It is exclusive with ASan so the engine
+has to be built separately, but the source tree is one, and the spike is built by reading the
+compile flags back out of the target build's `flags.make`. **ASan/UBSan and TSan are not a choice
+between two; they are two runs of the same harness.**
 
-**베이스라인이 없으면 새니타이저는 오라클이 아니다.** 깨끗한 4 스레드 실행이 TSan 222 건,
-UBSan 10 건을 매번 낸다. `sanitizer_triage.py` 가 종류와 지점으로 묶고(TSan 은 최상위 *엔진*
-프레임 기준), `--suppress` 로 억제 파일을 뽑는다.
+**Without a baseline a sanitizer is not an oracle.** A clean four-thread run produces 222 TSan
+reports and 10 UBSan reports every time. `sanitizer_triage.py` groups them by kind and by site (for
+TSan, by the topmost *engine* frame) and `--suppress` pulls out a suppression file.
 
-| 파일 | 규칙 | 베이스라인 적용 시 |
+| File | Rules | With the baseline applied |
 |---|---:|---|
 | `tsan-baseline.supp` | 42 | 222 → **0** |
 | `ubsan-baseline.supp` | 3 | 10 → **0** |
 
-**베이스라인은 판정이 아니다.** 어느 항목도 적부를 판정하지 않았다 — page buffer 와 log
-append 는 손으로 짠 atomic 을 쓰므로 TSan 이 믿을 이유가 없다. 유일한 목적은 **침묵이 의미를
-갖게 하는 것** 이고, 실제로 그 값을 했다: 워크로드를 넓혀 `xheap_destroy` 를 넣자
-`vacuum_add_dropped_file ()` 에 닿았고 TSan 이 거기서 새 race 를 40 회 보고했다. 기존 179 건
-사이였다면 안 보였을 것이 침묵 위에서는 화면에 그것 하나였다. ASan 은 **의도적으로 베이스라인
-대상에서 제외** 한다 — ASan 리포트는 실행을 멈추는 메모리 오류이므로 억제하면 결함을 감춘다.
+**A baseline is not a verdict.** Not one entry was judged sound or unsound — the page buffer and
+the log append use hand-written atomics, so TSan has no reason to be believed there. The only
+purpose is **to make silence mean something**, and it was worth that in practice: widening the
+workload to bring in `xheap_destroy` reached `vacuum_add_dropped_file ()`, and TSan reported a new
+race there 40 times. What would have been invisible among the 179 existing reports was, on top of
+silence, the one thing on the screen. ASan is **deliberately left out of the baseline** — an ASan
+report is a memory error that stops the run, so suppressing it hides the defect.
 
-**함정 두 가지 (둘 다 조용히 실패한다).**
-- `DEBUGINFOD_URLS=` 를 비워야 한다. 안 그러면 첫 리포트에서 프로세스가 **CPU 시간 0 으로**
-  멈춘다 — `llvm-symbolizer` 가 디버그 정보를 HTTP 로 받으러 가서 블록되고, TSan 이 심볼라이즈
-  동안 trace-part 세마포어를 쥐고 있어 나머지 스레드가 전부 뒤에 쌓인다. 엔진 데드락과
-  구분되지 않는다.
-- UBSan 억제는 **행 단위가 없다.** 규칙이 `<check>:<file>` 이므로 한 규칙이 그 파일 전체를
-  덮는다. 조용히 넓어지는 베이스라인은 없느니만 못하므로 정밀한 도구는 컴파일 타임
-  `-fsanitize-ignorelist` 라고 명시해 둔다.
+**Two traps (both fail silently).**
+- `DEBUGINFOD_URLS=` has to be emptied. Otherwise the process stops on the first report **with zero
+  CPU time** — `llvm-symbolizer` goes off to fetch debug info over HTTP and blocks, and TSan holds
+  the trace-part semaphore while it symbolizes, so every other thread piles up behind it. It is
+  indistinguishable from an engine deadlock.
+- UBSan suppression has **no line granularity.** A rule is `<check>:<file>`, so one rule covers
+  that whole file. A baseline that silently widens is worse than none, so it is stated here that
+  the precise tool is the compile-time `-fsanitize-ignorelist`.
 
-**하네스 스레드는 `TT_WORKER` 를 자칭하려면 실제로 그것이어야 한다.** 엔진은 타입을 약속으로
-되읽는다 — `log_tran_table.c:2896` 이 주석으로 "Only TT_WORKER threads use pl_session" 라고
-적어 두었고, 연결 엔트리 없는 `TT_WORKER` 에서는 **모든 `log_sysop_start ()` 가 부수효과로
-`ER_SES_SESSION_EXPIRED` 를 설정** 한다. 대부분 경로는 무시하지만 `heap_insert_logical ()` 은
-반환하므로 모든 삽입이 실패한다. 해결은 다른 타입을 고르는 것이 아니라 **약속을 지키는 것**
-이다: `CSS_CONN_ENTRY` 배열은 `boot_restart_server` 안에서 할당되고
-`css_initialize_conn ()` 은 소켓을 건드리지 않으므로 `css_make_conn (INVALID_SOCKET)` 이
-연결 없는 진짜 연결 엔트리를 준다. 이것은 **in-process 하네스 일반에 적용되는 제약** 이라
-여기에 적는다.
+**A harness thread that calls itself `TT_WORKER` has to actually be one.** The engine reads the
+type back as a promise — `log_tran_table.c:2896` records in a comment that "Only TT_WORKER threads
+use pl_session", and in a `TT_WORKER` with no connection entry **every `log_sysop_start ()` sets
+`ER_SES_SESSION_EXPIRED` as a side effect**. Most paths ignore it, but `heap_insert_logical ()`
+returns on it, so every insert fails. The fix is not to pick a different type but **to keep the
+promise**: the `CSS_CONN_ENTRY` array is allocated inside `boot_restart_server` and
+`css_initialize_conn ()` does not touch a socket, so `css_make_conn (INVALID_SOCKET)` gives a real
+connection entry with no connection. This is **a constraint that applies to in-process harnesses in
+general**, which is why it is recorded here.
 
-**돌리는 방법 — `soak.sh`.** §5.3a 가 "통제할 것이 없다" 로 끝났으므로 Tier 1 의 탐색은
-곧 시간이고, 남는 질문은 그 시간을 어떻게 쓰느냐뿐이다. **세션 단위** 로 쓴다 — 부팅 ·
-before 검사 · 워크로드 · after 검사 · 셧다운. 한 번의 긴 실행이 아닌 이유 둘 다 위 표에서
-나온다: 전체 검사는 7 s 라 경계에만 둘 수 있고, 4 스레드가 변경하는 *중* 의 검사는 틀린
-상태가 아니라 **찢어진** 상태를 보고한다. 세션 반복은 부팅·셧다운 자체도 매번 재시험한다는
-부수 효과가 있다. 멈추는 조건은 비정상 종료 · 오라클 실패 · **베이스라인이 덮지 않는**
-새니타이저 리포트 셋뿐이고, 나머지는 침묵이다.
+**How it is run — `soak.sh`.** §5.3a ended with "there is nothing to control", so Tier 1's
+exploration is just time, and the only question left is how that time is spent. It is spent **in
+sessions** — boot · the before check · the workload · the after check · shutdown. Both reasons it is
+not one long run come out of the table above: the full check takes 7 s so it can only go at the
+boundaries, and a check taken *while* four threads are changing things reports not a wrong state
+but a **torn** one. Repeating sessions has the side effect of re-testing boot and shutdown
+themselves every time. The stopping conditions are just three — an abnormal exit, an oracle
+failure, and a sanitizer report **the baseline does not cover** — and the rest is silence.
 
-**첫 소크 결과 (2026-09-04, 2 시간).** 205 세션 · heap 164,000 · 레코드 1,312,000 ·
-**베이스라인 밖 0 건**. 매 세션 오라클이 전후로 통과했다. 이것은 엔진에 대한 결론이 아니라
-**이 워크로드가 이 규모에서 아무것도 못 잡는다** 는 음성 결과이고, 다음 판단이 상대해야 할
-숫자다 — **시간은 더 이상 지렛대가 아니다.**
+**The first soak result (2026-09-04, two hours).** 205 sessions · 164,000 heaps · 1,312,000
+records · **0 reports outside the baseline**. The oracle passed before and after in every session.
+This is not a conclusion about the engine but a negative result — **this workload catches nothing
+at this scale** — and it is the number the next judgement has to answer to: **time is no longer the
+lever.**
 
-소크가 확인한 것 둘. **워크로드가 DB 를 돌려주지 않는다** — 세션당 199 MB 씩 늘고 회수되지
-않는다(heap drop 은 회수를 지연시킨다). 8 GB 상한에 대해 러너가 5 회 재생성했고, 약 41 세션당
-1 회다. 그리고 **그 증가가 오라클을 느리게 만든 원인이다**: `file_tracker_check` 가 세션 190
-에서 1.359 s 였다가 재생성 직후 세션 191 에서 **0.012 s** 로 돌아왔다. 비용이 누적을 정확히
-따라가고 함께 리셋되므로, 앞서 관측한 선형 상승은 성능 저하가 아니라 파일이 쌓인 것이다.
+Two things the soak did confirm. **The workload does not give the DB back** — it grows by 199 MB a
+session and is not reclaimed (dropping a heap defers reclamation). Against the 8 GB cap the runner
+recreated five times, about once every 41 sessions. And **that growth is what made the oracle
+slow**: `file_tracker_check` was 1.359 s at session 190 and came back to **0.012 s** at session 191,
+right after a recreation. The cost tracks the accumulation exactly and resets with it, so the linear
+rise observed earlier is files piling up, not a performance regression.
 
-그 전 32 세션 소크는 호스트 파일시스템을 채우고 멈추면서 그것을 **발견처럼 보고했다.**
-발견이 아니었다. 러너가 이제 둘을 구분하지만, 교훈은 그 구분 자체다 — "엔진이 실패했다" 와
-"이 머신이 자리가 없다" 를 구분 못 하는 무인 러너는 결국 늑대소년이 되고, 실제로 됐다.
+The 32-session soak before it filled the host filesystem and stopped, and **reported that as though
+it were a finding.** It was not a finding. The runner now tells the two apart, but the lesson is
+that distinction itself — an unattended runner that cannot tell "the engine failed" from "this
+machine has no room" ends up crying wolf, and it did.
 
-### 5.4 그런데 FI 로는 스케줄을 *재생* 할 수 없다 (2026-09-03)
+### 5.4 But FI cannot *replay* a schedule (2026-09-03)
 
-§5.1 이 "스케줄 주입 원시 도구가 이미 있다"고 적었다. 절반만 맞다. API 를 읽고 정정한다.
+§5.1 recorded that "a primitive for injecting a schedule already exists". That is only half right.
+Corrected after reading the API.
 
-**있는 것:**
-- **스레드별 무장.** FI 상태는 `thread_p->fi_test_array` 에 있다 (`fi_thread_init`,
-  SERVER_MODE 한정). `fi_set (thread_p, code, state)` 는 *특정 스레드* 에만 훅을 건다.
-  "A 스레드만 이 지점에서 멈춰라" 가 표현된다
-- **이름 붙은 주입 지점** — FI_TEST_CODE enum
+**What is there:**
+- **Arming per thread.** The FI state lives in `thread_p->fi_test_array` (`fi_thread_init`,
+  SERVER_MODE only). `fi_set (thread_p, code, state)` hooks *one particular thread* and no other.
+  "Only thread A stops at this point" can be expressed
+- **Named injection points** — the FI_TEST_CODE enum
 
-**없는 것 — 그리고 이것이 게이트를 막는다:**
+**What is not there — and this is what blocks the gate:**
 
-| 핸들러 | 구현 | 스케줄 원시 도구로서 |
+| Handler | Implementation | As a schedule primitive |
 |---|---|---|
-| `fi_handler_hold` | `sleep (seconds)` | **시간 기반**. 창을 넓힐 뿐 순서를 정하지 않는다 |
-| `fi_handler_hang` | `while (true) sleep (1);` | **영구 정지. 해제 경로가 없다** |
+| `fi_handler_hold` | `sleep (seconds)` | **time-based**. It widens the window; it does not fix the order |
+| `fi_handler_hang` | `while (true) sleep (1);` | **a permanent stop. There is no path to release it** |
 
-둘 다 sleep 중에 상태를 다시 보지 않으므로, 다른 스레드가 `fi_set` 으로 깨울 수 없다.
-즉 **"A 는 B 가 지점 Y 에 도달할 때까지 여기서 기다린다" 를 표현할 수 없다.**
+Neither looks at the state again while sleeping, so another thread cannot wake it with `fi_set`.
+That is, **"A waits here until B reaches point Y" cannot be expressed.**
 
-**결론 — 두 단계로 갈린다:**
+**The conclusion — it splits into two tiers:**
 
-- **Tier 1 (오늘 가능).** 창 넓히기 + 불변식 검사. race 를 *확률적으로* 노출시킨다.
-  CBRD-27198 이 하는 일이 정확히 이것이고 실제로 유용하다. 다만 재생이 안 되므로 triage 는
-  FI 설정과 seed 를 기록해 두는 수준에 머문다
-- **Tier 2 (엔진에 핸들러 하나 추가하면).** 조건 변수에서 대기하고 하네스가 깨우는
-  rendezvous 핸들러 — `fi_handler_wait` 같은 것. 그것이 생기면 인터리빙을 결정적으로 재생할
-  수 있다. **작업량은 기존 네 핸들러 옆에 하나를 더하는 정도이고, CBRD-27198 이 이미 그
-  관례(핸들러 + 훅 추가)를 보여준다**
+- **Tier 1 (possible today).** Widening the window + invariant checks. It exposes a race
+  *probabilistically*. That is exactly what CBRD-27198 does, and it is genuinely useful. But there
+  is no replay, so triage stays at the level of recording the FI settings and the seed
+- **Tier 2 (once one handler is added to the engine).** A rendezvous handler that waits on a
+  condition variable and is woken by the harness — something like `fi_handler_wait`. Once that
+  exists, an interleaving can be replayed deterministically. **The amount of work is about adding
+  one more beside the four existing handlers, and CBRD-27198 already shows the convention for it
+  (adding a handler plus a hook)**
 
-따라서 이 항목이 엔진에 요구하는 것은 reset 훅도, 스케줄 지점 확대도 아닌 **rendezvous
-핸들러 하나** 다. 그것이 ADR-EXT-009 의 핵심 결정 항목이 된다.
-
----
-
-## 6. 사용자 요구사항 (incubating 추정)
-
-1. **operation sequence 생성** — 구조적으로 유효한 연산 열을 mutate
-2. **결정적 재현** — 같은 입력 → 같은 crash. reset 계약이 이를 보장
-3. **사람이 읽는 reproducer** — crash 입력을 `INSERT/UPDATE/SCAN/COMMIT` 텍스트로 덤프
-4. **invariant 훅** — crash 없이도 위반을 잡을 수 있는 검사점 (page 무결성 / OID 유효성)
-5. **crash dedup** — stack hash 기반
-6. **regression seed 누적** — 과거 crash 열을 새 빌드에서 재실행
-7. **time / iteration budget** — CI 시간 통제
-8. **E5 와의 인프라 공유** — corpus 보관·triage·coverage 보고는 같은 것을 쓴다
+So what this entry asks of the engine is neither a reset hook nor more schedule points but **one
+rendezvous handler**. That becomes the central decision item of ADR-EXT-009.
 
 ---
 
-## 7. 비기능 요구
+## 6. User requirements (incubating estimate)
 
-| 항목 | 의제 | 새 시스템에서의 의미 |
+1. **operation sequence generation** — mutate a structurally valid operation sequence
+2. **deterministic reproduction** — the same input → the same crash. The reset contract guarantees
+   it
+3. **a reproducer a person can read** — dump the crashing input as `INSERT/UPDATE/SCAN/COMMIT` text
+4. **invariant hooks** — checkpoints that can catch a violation even without a crash (page
+   integrity / OID validity)
+5. **crash dedup** — based on the stack hash
+6. **accumulating regression seeds** — re-run past crash sequences against a new build
+7. **a time / iteration budget** — controlling CI time
+8. **sharing the infrastructure with E5** — keeping the corpus, triage and coverage reporting use
+   the same thing
+
+---
+
+## 7. Non-functional requirements
+
+| Item | Agenda | What it means in the new system |
 |------|------|---------------------|
-| 도입 비용 | **높음** | E5 (중) 보다 높다 — state reset 설계가 추가됨 |
-| 즉시 ROI | ★★★ | 도달 시 가치 큼. 단 선행 비용이 커서 사다리 후순위 |
-| 선결 의존 | E5 의 `-DENABLE_FUZZING` 인프라 + in-process boot 진입점 | testkit 단독 결정 불가 |
-| 책임 경계 | testkit = corpus + replay + triage / cubrid = target + reset 훅 | **C-055** — 엔진 쪽은 **N66-fuzz-target-infrastructure** |
-| 라이선스 | libFuzzer Apache 2.0 · protobuf BSD-3 · libprotobuf-mutator Apache 2.0 | 자유. fuzz-only 링크 |
-| 처리량 | 입력당 reset 비용에 지배됨 | §5 전략 선택이 곧 처리량 결정 |
-| E3 (SQLancer) 와의 관계 | 상보 — E3 는 SQL 층 wrong-result, 본 항목은 내부 API 상태 | 중복 아님 |
+| Cost of adoption | **high** | higher than E5 (medium) — the state reset design is added |
+| Immediate ROI | ★★★ | great value once reached. But the cost that comes first is large, so it is low on the ladder |
+| Prerequisites | E5's `-DENABLE_FUZZING` infrastructure + the in-process boot entry point | testkit cannot decide alone |
+| Responsibility boundary | testkit = corpus + replay + triage / cubrid = the target + the reset hook | **C-055** — on the engine side, **N66-fuzz-target-infrastructure** |
+| Licence | libFuzzer Apache 2.0 · protobuf BSD-3 · libprotobuf-mutator Apache 2.0 | free. Linked fuzz-only |
+| Throughput | dominated by the reset cost per input | the choice of strategy in §5 is the throughput decision |
+| Relation to E3 (SQLancer) | complementary — E3 is wrong-result at the SQL layer, this entry is internal API state | not a duplicate |
 
 ---
 
-## 8. 의존하는 외부 자원
+## 8. External resources it depends on
 
-- **cubrid 본 repo fuzz 인프라** — `-DENABLE_FUZZING` (E5 와 공유) + storage fuzz target + reset 훅. *선결*
-- **sanitizer 빌드** — ASan / UBSan (본 repo 책임). MSan 은 서버 전체 재빌드 필요성 검토
-- **libFuzzer** — in-process coverage-guided fuzzer
-- **protobuf + libprotobuf-mutator** — 구조 인식 mutation (§2.1 에서 대안과 비교 후 결정)
-- **seed corpus** — 의미 있는 operation 열 (§ test-corpus.md)
-- **crash corpus storage** — NG1 점검 (testcases 레포 밖)
+- **The fuzz infrastructure in the cubrid repository** — `-DENABLE_FUZZING` (shared with E5) + the
+  storage fuzz target + the reset hook. *Comes first*
+- **Sanitizer builds** — ASan / UBSan (that repository's responsibility). Whether MSan needs the
+  whole server rebuilt is to be examined
+- **libFuzzer** — the in-process coverage-guided fuzzer
+- **protobuf + libprotobuf-mutator** — structure-aware mutation (decided after the comparison with
+  the alternatives in §2.1)
+- **A seed corpus** — meaningful operation sequences (§ test-corpus.md)
+- **Crash corpus storage** — NG1 check (outside the testcases repository)
 
 ---
 
-## 9. incubating 진입 조건 (조건부)
+## 9. Conditions for entering incubating (conditional)
 
-다음이 *충족된 후* 정식 incubating 진입 (owner: hgryoo):
+Formal entry into incubating *after* the following are met (owner: hgryoo):
 
-1. **E5 선행** — `-DENABLE_FUZZING` 과 crash triage 인프라가 먼저 서야 한다. 본 항목은 그 위에 얹힌다.
-   **부분 충족 (2026-09-03)**: `-DENABLE_FUZZING` 과 첫 타깃(사다리 순위 4, `or_get_value ()`)이
-   cubrid `feat/fuzz-target-infrastructure` 에 존재하고 동작한다. corpus·replay·triage 는 아직 없다
-2. ~~**SERVER_MODE in-process 기동**~~ → **충족 (2026-09-03, §5.3).** 리스너 없이 기동하고
-   데몬 15 스레드가 뜨며 깨끗이 내려간다. ~~SA 모드 `db_restart`~~ 는 대상이 아니다 (§1.0)
-3. **스케줄 재생 — 현행 FI 로는 불가 (2026-09-03 확인, §5.4).** 결정적 재생에는 rendezvous
-   원시 도구가 필요한데 FI 에 없다. **엔진에 핸들러 하나를 추가하면 해소된다** — 그 전까지는
-   Tier 1(창 넓히기, 확률적 노출)까지만 가능하다. 전략 D(전용 reset 훅)는 철회된 채로 둔다 —
-   문제가 reset 이 아니게 됐다
-4. **XASL 픽스처 설비 (§6a-E10) 선결** — 서버가 SQL 을 컴파일하지 않으므로 (§4a) 이것
-   없이는 Tier 2 를 착수할 수 없다. **Tier 1 은 이 조건과 무관하게 진행 가능** 하며 실제로
-   진행 중이다 — 다만 Tier 1 은 스토리지 내부 API 를 직접 부르므로 §4 의 호출 규약 문제를
-   그대로 안고 있고, 그 발견에는 도달 가능성 triage 가 붙는다.
-   **2026-09-04 에 그 비용이 측정됐다**: 워크로드를 heap 의 일생(생성 → 페이지를 걸치는
-   레코드 8 개 → drop 또는 rollback)으로 넓히는 데 호출 규약 위반 3 건을 거쳤고, **셋 다
-   엔진이 아니라 하네스 결함** 이었다 — `file_create_heap ()` 직접 호출(→ `xheap_create ()`),
-   NULL class OID(→ root class), 그리고 세션 없는 `TT_WORKER`(§5.3b). 매번 오라클이 잡았고
-   매번 "엔진인가 나인가" 를 소스로 확인해야 했다. 상세: roadmap N66 §5
-5. **참가자 수 상한 확정** — 스레드 수는 입력에 포함하되 엔진이 강제하는 상한으로
-   **clamp**(거부 아님). 상한은 `m_max_threads` 중 이 구성에서 노는 connection 몫이며,
-   리스너가 없으므로 여유다. 설정 변경은 여전히 불필요하되 **2026-09-04 정정**: 참가자마다
-   진짜 `CSS_CONN_ENTRY` 를 하나씩 쓰므로(§5.3b) `max_clients` 는 무관한 값이 아니라
-   **참가자 상한** 이다 — `css_make_conn ()` 이 그 위에서 `NULL` 을 반환한다
-6. **입력 IR 결정** — 연산이 아니라 **스케줄과 참가자 수** 를 기술한다. libprotobuf-mutator vs
-   FuzzedDataProvider (§2.1)
-7. **corpus 위치** — NG1 점검. 스케줄이 입력에 포함되므로 저장 단위가 커진다
-8. **스케줄 제어 지점 범위** — 기존 FI enum 만 쓸지, 지점을 늘릴지 (§5.4)
-9. **C-055** — roadmap cross-cutting 에 등록됨 (2026-09-03). 엔진 쪽 작업은
-   **N66-fuzz-target-infrastructure**. 그 §9 Q1 (*testing 전용 reset 훅*) 은 **무의미해졌다** —
-   측정 결과 훅 없이도 게이트를 통과하므로, 본 항목의 도달 범위를 그 답이 결정하지 않는다
+1. **E5 first** — `-DENABLE_FUZZING` and the crash triage infrastructure have to stand first. This
+   entry is laid on top of them.
+   **Partly met (2026-09-03)**: `-DENABLE_FUZZING` and the first target (ladder rank 4,
+   `or_get_value ()`) exist and work on cubrid `feat/fuzz-target-infrastructure`. The corpus,
+   replay and triage are not there yet
+2. ~~**SERVER_MODE in-process startup**~~ → **met (2026-09-03, §5.3).** It starts with no listener,
+   fifteen daemon threads come up and it goes down cleanly. ~~SA-mode `db_restart`~~ is not the
+   target (§1.0)
+3. **Schedule replay — not possible with FI as it stands (confirmed 2026-09-03, §5.4).**
+   Deterministic replay needs a rendezvous primitive, and FI does not have one. **Adding one
+   handler to the engine resolves it** — until then only Tier 1 (widening the window, probabilistic
+   exposure) is possible. Strategy D (a dedicated reset hook) is left withdrawn — the problem
+   stopped being reset
+4. **The XASL fixture equipment (§6a-E10) comes first** — since the server does not compile SQL
+   (§4a), Tier 2 cannot be started without it. **Tier 1 can go ahead regardless of this condition**
+   and is in fact going ahead — but Tier 1 calls the storage internal APIs directly, so it carries
+   the calling-convention problem of §4 as it stands, and its findings come with a reachability
+   triage.
+   **That cost was measured on 2026-09-04**: widening the workload to a heap's whole life (create →
+   8 records that straddle pages → drop or rollback) took three calling-convention violations, and
+   **all three were harness defects rather than engine ones** — calling `file_create_heap ()`
+   directly (→ `xheap_create ()`), a NULL class OID (→ the root class), and a `TT_WORKER` with no
+   session (§5.3b). The oracle caught each one, and each time "is it the engine or is it me?" had
+   to be settled against the source. Details: roadmap N66 §5
+5. **The cap on participants settled** — the thread count is part of the input but is **clamped**
+   (not rejected) to the cap the engine enforces. The cap is the connection share of
+   `m_max_threads` that goes unused in this configuration, and with no listener there is room. No
+   configuration change is needed still, but **corrected 2026-09-04**: each participant uses one
+   real `CSS_CONN_ENTRY` (§5.3b), so `max_clients` is not an irrelevant value but **the cap on
+   participants** — `css_make_conn ()` returns `NULL` above it
+6. **The input IR decided** — it describes **the schedule and the number of participants**, not the
+   operations. libprotobuf-mutator vs FuzzedDataProvider (§2.1)
+7. **Where the corpus lives** — NG1 check. The schedule is part of the input, so the unit of
+   storage gets bigger
+8. **The scope of the schedule control points** — whether to use only the existing FI enum or to
+   add points (§5.4)
+9. **C-055** — registered in the roadmap's cross-cutting list (2026-09-03). The work on the engine
+   side is **N66-fuzz-target-infrastructure**. Its §9 Q1 (*a testing-only reset hook*) **has become
+   moot** — the measurements pass the gate without the hook, so the answer to it does not decide
+   how far this entry reaches
 
 **ADR placeholder:**
-- **ADR-EXT-009** — 입력 IR (protobuf/LPM vs FDP) + state reset 전략 + operation 어휘 1차 범위 + corpus 위치 + 본 repo 책임 경계
+- **ADR-EXT-009** — the input IR (protobuf/LPM vs FDP) + the state reset strategy + the first scope
+  of the operation vocabulary + where the corpus lives + the responsibility boundary in that
+  repository
 
-> **번호 주의.** `E8` / `ADR-EXT-008` 은 축 8 *Hybrid CI 통합* 자리로 이미 예약되어 있다
-> (`extensions/README.md` 카탈로그). 본 항목이 `E9` 인 이유가 이것이다 — 순위 사다리의
-> 순번(5)과 카탈로그 ID(9)는 **별개 번호 공간**이다.
-
----
-
-## 10. 위험 / 정합성 메모
-
-1. **스케줄 재생이 성립하지 않을 수 있다 (최대 위험).** `(연산, 스케줄)` 쌍을 재현하려면
-   FI 훅이 박힌 지점만으로 인터리빙을 충분히 결정할 수 있어야 한다. 훅 사이 구간은 여전히
-   OS 스케줄러가 정하므로, 재현이 확률적으로만 될 가능성이 있다. 그러면 crash triage 가
-   무의미해진다 — 진입 조건 3 이 게이트인 이유.
-1b. **2026-09-03 정정 기록.** 이 자리에는 "state reset 이 안 될 수 있다"가 있었고, SA 스파이크
-   결과로 "해소"라고 적었다. **범위를 넘은 주장이었다** — SA 는 단일 스레드라 대상 구성이
-   아니다. 그 측정이 남기는 것은 준비 단계가 싸다는 사실뿐이다 (§5.2).
-2. **protobuf 신규 의존에 대한 본 repo 반발.** fuzz-only 링크라도 3rdparty 정책상
-   거부될 수 있다 → §2.1 의 FuzzedDataProvider 경로가 fallback.
-3. **E5 를 건너뛰고 본 항목부터 시도.** 인프라 중복 구축이 된다 → 사다리 순서 준수.
-4. **NG1 충돌.** crash corpus 를 testcases 레포에 두면 동결 위반 → 외부 storage.
-5. **NG2 / NG4 충돌 없음.**
-5b. **fault injection 을 연산 열에 합치면 `fork()` 격리가 필수가 된다.** 엔진의 FI 핸들러
-   (`fi_handler_exit` / `fi_handler_hang`, `src/base/fault_injection.c`) 는 프로세스를 끝낸다.
-   libFuzzer 의 in-process 모델과 양립하지 않으므로, crash 지점 × 연산 열을 함께 탐색하려면
-   전략 C 가 차선이 아니라 전제 조건이다. §5.1 이 결정성 목적의 C 를 불필요하게 만든 것과는
-   별개 사안이다.
-6. **축 7 (E7 stateful workload) 과의 경계 혼동.** E7 은 *SQL/노드 레벨* long-running
-   시나리오, 본 항목은 *내부 API 레벨* 단일 프로세스. C-004 경계 정의에 함께 기재.
-7. **분기 게이트 §7** — strangler-fig 우선원칙. Phase 3·4 와 자원 충돌 시 후순위.
+> **A note on the numbering.** `E8` / `ADR-EXT-008` is already reserved for the axis 8 slot,
+> *Hybrid CI integration* (the `extensions/README.md` catalogue). That is why this entry is `E9` —
+> the ladder's rank (5) and the catalogue ID (9) are **separate number spaces**.
 
 ---
 
-## 11. 참조
+## 10. Risk and consistency notes
+
+1. **Schedule replay may not work (the biggest risk).** To reproduce the `(operation, schedule)`
+   pair, the points where FI hooks are driven in have to be enough to determine the interleaving.
+   The stretches between hooks are still the OS scheduler's to decide, so reproduction may only be
+   probabilistic. Crash triage then becomes meaningless — which is why condition of entry 3 is a
+   gate.
+1b. **A correction recorded 2026-09-03.** What stood here was "state reset may not work", and the
+   result of the SA spike was written up as "resolved". **That was a claim beyond its scope** — SA
+   is single-threaded and is not the target configuration. All that measurement leaves is the fact
+   that the preparation step is cheap (§5.2).
+2. **Resistance in that repository to a new protobuf dependency.** Even linked fuzz-only it may be
+   refused on 3rdparty policy → the FuzzedDataProvider path in §2.1 is the fallback.
+3. **Trying this entry first and skipping E5.** It means building the infrastructure twice → keep
+   to the ladder's order.
+4. **NG1 conflict.** Putting the crash corpus in the testcases repository violates the freeze →
+   external storage.
+5. **No conflict with NG2 / NG4.**
+5b. **Folding fault injection into the operation sequence makes `fork()` isolation mandatory.** The
+   engine's FI handlers (`fi_handler_exit` / `fi_handler_hang`, `src/base/fault_injection.c`) end
+   the process. That is incompatible with libFuzzer's in-process model, so exploring the crash
+   point × the operation sequence together makes strategy C not a second best but a precondition.
+   That is a separate matter from §5.1 having made C unnecessary for the purpose of determinism.
+6. **Confusing the boundary with axis 7 (E7 stateful workload).** E7 is a long-running scenario at
+   *the SQL/node level*; this entry is a single process at *the internal API level*. To be recorded
+   together in the C-004 boundary definition.
+7. **The branch gate, §7** — the strangler fig comes first. Lower priority where it conflicts with
+   phases 3 and 4 for resources.
+
+---
+
+## 11. References
 
 - RocksDB fuzzing: <https://github.com/facebook/rocksdb/tree/main/fuzz>
 - libprotobuf-mutator: <https://github.com/google/libprotobuf-mutator>
 - libFuzzer: <https://llvm.org/docs/LibFuzzer.html>
 - libFuzzer `FuzzedDataProvider`: <https://llvm.org/docs/LibFuzzer.html#fuzzer-friendly-build-mode>
 - OSS-Fuzz: <https://google.github.io/oss-fuzz/>
-- 내부: `../E5-parser-fuzzing/requirements.md` · `../../../project/ROADMAP.md` §6a 사다리 · `../../../project/survey/dbms-testing-ecosystem.md` §7.4
+- Internal: `../E5-parser-fuzzing/requirements.md` · `../../../project/ROADMAP.md` §6a ladder · `../../../project/survey/dbms-testing-ecosystem.md` §7.4

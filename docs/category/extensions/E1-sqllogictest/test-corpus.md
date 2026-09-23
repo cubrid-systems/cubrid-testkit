@@ -1,42 +1,47 @@
 # E1 — Test Corpus (STUB)
 
-**Status:** STUB — 코퍼스 정책은 ADR-EXT-001 incubating 정식 진입 후.
+*English · [한국어](test-corpus.ko.md)*
+
+**Status:** STUB — the corpus policy comes after formal entry into incubating through ADR-EXT-001.
 **Source:** `requirements.md` §5, ROADMAP §8 risk 6
 
 ---
 
-## 1. 입력 코퍼스 출처 (의제)
+## 1. Where the input corpus comes from (agenda)
 
-| 후보 | 규모 | 라이선스 | 비고 |
+| Candidate | Size | Licence | Note |
 |---|---|---|---|
-| SQLite sqllogictest 원형 | 5.8M rows | Public Domain | 원형 — baseline 우선순위 |
-| DuckDB test suite (`.slt` 부분) | 다수 | MIT | DuckDB 내부 추정 결합 case 다수 |
-| CockroachDB logictest | 다수 | Apache 2.0 | 분산 / SERIAL 의존 case 다수 |
-| RisingWave logictest | 다수 | Apache 2.0 | streaming SQL — CUBRID 적용성 낮음 |
+| The SQLite sqllogictest original | 5.8M rows | Public Domain | the original — first in line for the baseline |
+| DuckDB test suite (the `.slt` part) | many | MIT | many cases tied to DuckDB's internal estimates |
+| CockroachDB logictest | many | Apache 2.0 | many cases depending on distribution or SERIAL |
+| RisingWave logictest | many | Apache 2.0 | streaming SQL — little applicability to CUBRID |
 
-ADR-EXT-001 의 *spec target* 결정에 종속.
+Subordinate to the *spec target* decision in ADR-EXT-001.
 
-## 2. 라이선스 점검 (필수)
+## 2. Licence check (required)
 
-- SQLite Public Domain — vendoring 자유
-- DuckDB MIT — vendoring 자유 (NOTICE 포함)
-- CockroachDB Apache 2.0 — vendoring 자유 (NOTICE 포함)
+- SQLite Public Domain — vendoring is free
+- DuckDB MIT — vendoring is free (include the NOTICE)
+- CockroachDB Apache 2.0 — vendoring is free (include the NOTICE)
 
-각 코퍼스의 *부분집합* 만 vendor in 하는 경우에도 출처/라이선스 표기 의무.
+Even where only a *subset* of a corpus is vendored in, stating the source and the licence is
+obligatory.
 
-## 3. 보관 정책 (NG1 점검)
+## 3. Keeping policy (the NG1 check)
 
-testcases 레포 (cubrid-testcases / -private / -private-ex) 는 *동결 대상*. 본 코퍼스는:
+The testcases repositories (cubrid-testcases / -private / -private-ex) are *what the freeze covers*.
+This corpus:
 
-- ❌ testcases 레포 안에 두지 않음 (NG1 위반)
-- ✅ testkit 내부 별 트리 (예: `corpus/sqllogictest/`) 또는 외부 storage
-- ✅ full mirror 대신 *의미 있는 부분집합 vendor in* (ROADMAP §8 risk 6)
-- ✅ 외부 트리 자동 동기화 시 sync 스크립트로 운영
+- ❌ is not put inside a testcases repository (that violates NG1)
+- ✅ a separate tree inside testkit (`corpus/sqllogictest/`, say), or external storage
+- ✅ *vendor in a meaningful subset* rather than a full mirror (ROADMAP §8 risk 6)
+- ✅ where the external tree is synchronised automatically, it is run by a sync script
 
-## 4. dialect-skip 정책 (의제)
+## 4. The dialect-skip policy (agenda)
 
-CUBRID 가 지원하지 않는 SQL 기능 (예: PostgreSQL extension 의존, SQLite specific) 의 case 는 *skip* 분류. 동결 형식: ADR-EXT-001 후.
+Cases using SQL features CUBRID does not support (a dependency on a PostgreSQL extension, say, or
+something SQLite-specific) are classified as *skip*. The frozen form: after ADR-EXT-001.
 
-## 5. 후속 작성 트리거
+## 5. The trigger for writing the rest
 
-ADR-EXT-001 의 *코퍼스 정책* 결정 후 본 문서 FULL 로 보강.
+Once ADR-EXT-001 decides the *corpus policy*, this document is filled in to FULL.

@@ -42,6 +42,16 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 └── internal/              구현 (Phase 3+)
 ```
 
+> **이 트리는 계획이지 현황이 아니다 (2026-09-23 주석).** Phase 0 에 세운 배치이며, 기록으로
+> 남긴다. 실제로 갈라진 곳은 넷이다 — `docs/` 밑이 `docs/project/` 와 `docs/category/` 로
+> 갈라져 `adr/` `analysis/` `concept/` `design/` `survey/` 는 `docs/project/` 아래에 있고,
+> `extensions/E1~E10` 문서는 `docs/category/extensions/` 에 있다. `extensions/` 서브모듈은
+> `cubrid-sqlancer` 하나가 아니라 `cluster-sandbox` 가 함께 있다. `design/ (미착수)` 와
+> `inventory/ (0/5 미착수)` 는 더 이상 맞지 않다 — Phase 2 는 완료됐고, `ha_repl` 은
+> `design/module-ha.md` · [ADR-022](adr/ADR-022-topology-provider.md) ·
+> [`evidence/ha/`](evidence/ha/README.md) 를 거쳐 네이티브 러너까지 갔다.
+> **현재 배치의 단일 출처는 루트 `README.md` 의 Layout 절이다.**
+
 **레포 이름 결정 근거 (ADR-000 자리)**:
 - `cubrid-testkit` — "kit"이 단일 runner를 넘어 분석/실행/리포트/생성 도구를 포괄. CTP라는 약어와 결별하여 새 정체성을 강조하면서, "cubrid-" 접두로 CUBRID 생태계 소속을 분명히.
 - 거부된 대안: `cubrid-ctp-next`(레거시 단어를 영구 동결), `cubrid-testrunner`(역할을 좁게 고정)

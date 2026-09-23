@@ -1,27 +1,32 @@
 # E4 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-004 incubating 정식 진입 후. 또한 N24 / N11 graduation 선결.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-004, and
+N24 / N11 graduation is a prerequisite besides.
 **Source:** ROADMAP §6a-E4, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §6
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 모듈 위치 (의제)
+## 1. Where the module sits (agenda)
 
 ```
 internal/runner/isolationdist/
-   ├── topology/         # HA / streaming-replication 자동 deploy (shell.DeployHA 재사용)
-   ├── workload/         # randomized tx generator (KV-style 또는 SQL-style)
+   ├── topology/         # automatic deploy of HA / streaming-replication (reusing shell.DeployHA)
+   ├── workload/         # randomized tx generator (KV-style or SQL-style)
    ├── fault/            # network partition (iptables) / process kill / clock skew
-   ├── history/          # per-client tx start/commit/abort 로그
+   ├── history/          # per-client tx start/commit/abort logs
    └── analyzer/
          ├── awdit/      # weak isolation anomaly + history graph cycle
-         └── jepsen/     # external spec checker (linearizability/causal/SI) — Clojure 외부 호출
+         └── jepsen/     # external spec checker (linearizability/causal/SI) — called out to Clojure
 ```
 
-*단일노드 축 4* (PostgreSQL `.spec` + Hermitage) 는 본 모듈 외 — 기존 `project/analysis/isolation` 의 strangler-fig 1차 대체 (ADR-004) 검토 시 결정.
+*Single-node axis 4* (the PostgreSQL `.spec` format plus Hermitage) is outside this module — decided
+when the strangler fig's first replacement of the existing `project/analysis/isolation` (ADR-004) is
+reviewed.
 
-## 2. 데이터 흐름 (의제)
+## 2. Data flow (agenda)
 
 ```
 seed → topology.deploy(HA|streaming, N nodes)
@@ -32,32 +37,32 @@ seed → topology.deploy(HA|streaming, N nodes)
                                             └─ violation? corpus.save({seed, fault seq, witness})
 ```
 
-## 3. fault injection 채널 (의제)
+## 3. The fault injection channel (agenda)
 
-| 채널 | 검출 가능 | 비고 |
+| Channel | What it can detect | Note |
 |---|---|---|
-| iptables network partition | replication split-brain | 권한 sudo |
-| process kill (SIGKILL) | recovery invariant | shell 모듈 재사용 |
-| clock skew (faketime) | causal / linearizability | 라이브러리 의존 |
-| cgroup CPU/IO throttle | timing race | 운영 dependency |
+| iptables network partition | replication split-brain | needs sudo |
+| process kill (SIGKILL) | recovery invariant | reuses the shell module |
+| clock skew (faketime) | causal / linearizability | depends on a library |
+| cgroup CPU/IO throttle | timing race | an operational dependency |
 
-E7 (workload) 와 *공유 가능* — 어느 항목이 owner 인가 ADR 필요.
+*Can be shared* with E7 (workload) — an ADR is needed on which entry owns it.
 
-## 4. 외부 의존
+## 4. External dependencies
 
-- N24 streaming-replication / N11 logical-replication-extension graduation (선결)
-- shell 모듈 DeployHA + ha_repl 자산
-- AWDIT 본체 (정확한 repo 확인 보강 대상)
+- N24 streaming-replication / N11 logical-replication-extension graduation (prerequisites)
+- the shell module's DeployHA plus the ha_repl assets
+- AWDIT itself (the exact repository is to be confirmed and filled in)
 - Jepsen (jepsen.io / Clojure)
-- engine-suite C-004 책임 경계 (E7 와 결합)
+- the engine-suite C-004 responsibility boundary (bound up with E7)
 
-## 5. 결정 보류 항목 → ADR-EXT-004
+## 5. Held over for decision → ADR-EXT-004
 
-- AWDIT vs Jepsen 1차 선택
-- fault injection 채널 단일화
-- E7 와의 fault injector 공유 owner
-- history corpus 위치 (NG1 점검)
+- AWDIT or Jepsen first
+- settling on a single fault injection channel
+- who owns the fault injector shared with E7
+- where the history corpus lives (the NG1 check)
 
-## 6. design 작성 트리거
+## 6. The trigger for writing the design
 
-ADR-EXT-004 합의 후 + N24/N11 graduation 후. 현 시점 stub.
+After ADR-EXT-004 is agreed, and after N24/N11 graduation. A stub for now.

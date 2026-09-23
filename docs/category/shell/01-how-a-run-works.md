@@ -1,5 +1,7 @@
 # 1. How a run works
 
+*English · [한국어](01-how-a-run-works.ko.md)*
+
 [← back to the shell category](README.md)
 
 - [The stages](#the-stages)

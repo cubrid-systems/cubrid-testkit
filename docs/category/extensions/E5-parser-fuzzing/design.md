@@ -1,51 +1,56 @@
 # E5 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-005 incubating 정식 진입 후. cubrid 본 repo `-DENABLE_FUZZING` 선결.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-005.
+`-DENABLE_FUZZING` in the cubrid repository comes first.
 **Source:** ROADMAP §6a-E5, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §7
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 책임 경계 (cross-repo)
+## 1. The responsibility boundary (cross-repo)
 
 ```
-cubrid 본 repo                          testkit (이 모듈)
-─────────────                          ───────────────
-fuzz target build option           →   corpus 보관
-sanitizer 빌드 (ASan/UBSan/MSan)   →   replay (regression)
-in-process harness 함수            →   crash triage (stack hash dedup)
-                                       coverage 보고
+the cubrid repository                  testkit (this module)
+─────────────────────                  ─────────────────────
+fuzz target build option           →   keeping the corpus
+sanitizer build (ASan/UBSan/MSan)  →   replay (regression)
+in-process harness function        →   crash triage (stack hash dedup)
+                                       coverage reporting
 ```
 
-testkit 단독으로는 시작 불가. roadmap repo 의 **C-055** cross-cutting 으로 등록되어 있고, 엔진 쪽 작업은 **N66-fuzz-target-infrastructure** (00-pending-review) 다.
+It cannot be started by testkit alone. It is registered as the **C-055** cross-cutting in the
+roadmap repository, and the engine-side work is **N66-fuzz-target-infrastructure**
+(00-pending-review).
 
-## 2. 모듈 위치 (의제)
+## 2. Where the module sits (agenda)
 
 ```
 internal/runner/fuzzharness/
-   ├── runner/           # libFuzzer / AFL / honggfuzz 호출
-   ├── corpus/           # seed + crash 보관
-   ├── triage/           # stack hash dedup + sanitizer 분류
-   └── coverage/         # build 별 coverage 비교
+   ├── runner/           # calls libFuzzer / AFL / honggfuzz
+   ├── corpus/           # keeps the seeds and the crashes
+   ├── triage/           # stack hash dedup + sanitizer classification
+   └── coverage/         # compares coverage build by build
 ```
 
-## 3. fuzz target layer (의제)
+## 3. The fuzz target layer (agenda)
 
-| Layer | target | 추정 ROI | cubrid 본 repo 작업량 |
+| Layer | target | Estimated ROI | Work in the cubrid repository |
 |---|---|---|---|
-| lexer | `lex_consume` 입구 | ★★ | 적음 |
-| parser | `parser_main` 입구 | ★★★★ | 적음 |
-| binder | catalog resolution | ★★★ | 중 |
-| planner | optimizer 입구 | ★★★ | 중 |
-| CCI protocol | binary message handler | ★★★★ | 중 (handler 분리 필요) |
-| JDBC protocol | wire protocol parser | ★★★★ | 중 |
-| record ser/unpack | `or_get_value` / `or_unpack_value` | ★★★ | 적음 (순수 함수) |
+| lexer | the `lex_consume` entrance | ★★ | little |
+| parser | the `parser_main` entrance | ★★★★ | little |
+| binder | catalog resolution | ★★★ | middling |
+| planner | the optimizer entrance | ★★★ | middling |
+| CCI protocol | binary message handler | ★★★★ | middling (the handler has to be split out) |
+| JDBC protocol | wire protocol parser | ★★★★ | middling |
+| record ser/unpack | `or_get_value` / `or_unpack_value` | ★★★ | little (pure functions) |
 
-ADR-EXT-005 에서 1차 layer 선정 (parser 권장 — 비용 ↓, 가치 ↑).
-착수 순서는 ROADMAP **§6a 사다리**: parser(1) → CCI/JDBC(3) → record ser/unpack(4).
-그 다음 순위 5(storage operation sequence)는 본 항목이 아니라 **E9** 다.
+ADR-EXT-005 chooses the first layer (the parser is recommended — cost ↓, value ↑).
+The order of starting is the ROADMAP **§6a ladder**: parser(1) → CCI/JDBC(3) → record ser/unpack(4).
+Rank 5 after that (storage operation sequence) is not this entry but **E9**.
 
-## 4. 데이터 흐름 (의제)
+## 4. Data flow (agenda)
 
 ```
 seed corpus → fuzzer (libFuzzer) → fuzz target (cubrid in-process)
@@ -55,20 +60,20 @@ seed corpus → fuzzer (libFuzzer) → fuzz target (cubrid in-process)
                                                    └─ corpus.save({input, stack, sanitizer})
 ```
 
-## 5. 외부 의존
+## 5. External dependencies
 
-- cubrid 본 repo 의 `-DENABLE_FUZZING` build option (선결)
-- ASan / UBSan / MSan 빌드 산출물 (cubrid 본 repo 책임)
+- the `-DENABLE_FUZZING` build option in the cubrid repository (a prerequisite)
+- the ASan / UBSan / MSan build outputs (the cubrid repository's responsibility)
 - libFuzzer / AFL / honggfuzz
-- seed corpus (test-corpus.md 참조)
+- a seed corpus (see test-corpus.md)
 
-## 6. 결정 보류 항목 → ADR-EXT-005
+## 6. Held over for decision → ADR-EXT-005
 
-- fuzz target layer 1차 선정
-- fuzzer 본체 (libFuzzer in-process / AFL subprocess / honggfuzz)
-- corpus 위치 (NG1 점검)
-- C-055 책임 경계 ADR (엔진 쪽 = N66)
+- which fuzz target layer comes first
+- the fuzzer itself (libFuzzer in-process / AFL subprocess / honggfuzz)
+- where the corpus lives (the NG1 check)
+- the C-055 responsibility boundary ADR (on the engine side, N66)
 
-## 7. design 작성 트리거
+## 7. The trigger for writing the design
 
-cubrid 본 repo PR + ADR-EXT-005 후. 현 시점 stub.
+After the PR to the cubrid repository and ADR-EXT-005. A stub for now.

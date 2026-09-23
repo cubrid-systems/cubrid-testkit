@@ -1,22 +1,24 @@
 # E7 — Test Corpus (STUB)
 
-**Status:** STUB — 코퍼스 정책은 ADR-EXT-007 incubating 정식 진입 후.
+*English · [한국어](test-corpus.ko.md)*
+
+**Status:** STUB — the corpus policy comes after formal entry into incubating through ADR-EXT-007.
 **Source:** `requirements.md` §5
 
 ---
 
-## 1. 코퍼스 종류
+## 1. Kinds of corpus
 
-| 코퍼스 | 입력/출력 | 용도 |
+| Corpus | Input/output | Purpose |
 |---|---|---|
-| invariant catalog | 입력 | 검증 invariant 정의 (testkit 자산) |
-| seed corpus | 입력 | regression seed — 과거 violation 의 fault sequence |
-| violation corpus | 출력 | invariant violation 누적 |
-| (engine-suite handoff) | 입력 | benchbase / HammerDB 의 workload 정의 — *재사용* |
+| invariant catalogue | input | the definition of the invariants verified (a testkit asset) |
+| seed corpus | input | regression seeds — the fault sequences of past violations |
+| violation corpus | output | accumulated invariant violations |
+| (engine-suite handoff) | input | the workload definitions of benchbase / HammerDB — *reused* |
 
-본 항목은 *입력 SQL 코퍼스 없음* — workload 가 random generation.
+This entry has *no input SQL corpus* — the workload is randomly generated.
 
-## 2. invariant catalog (testkit 자산)
+## 2. The invariant catalogue (a testkit asset)
 
 ```
 catalog/
@@ -27,15 +29,17 @@ catalog/
    └── no_phantom_after_failover.yaml
 ```
 
-각 yaml: invariant 이름 / SQL 쿼리 / threshold / scope (per-table / per-tx) — ADR-EXT-007 후 schema 동결.
+Each yaml: the invariant's name / the SQL query / the threshold / the scope (per-table / per-tx) —
+the schema is frozen after ADR-EXT-007.
 
-## 3. 보관 정책 (NG1 점검)
+## 3. Storage policy (NG1 check)
 
-- ❌ testcases 레포에 두지 않음
-- ✅ testkit 내부 (invariant catalog) + 외부 storage (violation corpus)
-- ✅ E4 와 corpus 위치 정책 *공유 권장* (history 거대해질 가능성 — GC 정책 명시 필요)
+- ❌ not kept in the testcases repository
+- ✅ inside testkit (the invariant catalogue) + external storage (the violation corpus)
+- ✅ *sharing the corpus location policy with E4 is recommended* (the history may grow very large —
+  a GC policy has to be stated)
 
-## 4. violation 항목 구조 (의제)
+## 4. The structure of a violation entry (agenda)
 
 ```
 violations/<invariant>/<witness-hash>/
@@ -43,27 +47,28 @@ violations/<invariant>/<witness-hash>/
    ├── topology.json          # cluster config
    ├── workload_mix.json
    ├── fault_seq.json
-   ├── state_dump.txt         # violation 시점의 DB 상태 일부
-   ├── invariant_report.txt   # checker 출력
+   ├── state_dump.txt         # part of the DB state at the moment of the violation
+   ├── invariant_report.txt   # the checker's output
    └── reproducer.sh
 ```
 
-## 5. engine-suite 자산 재사용 (C-004 결합)
+## 5. Reusing engine-suite assets (combined with C-004)
 
-| engine-suite 자산 | 재사용 가능성 | 비고 |
+| engine-suite asset | Can it be reused | Note |
 |---|---|---|
-| benchbase TPCC schema | 가능 | sum_conservation invariant 와 정합 |
-| HammerDB schema/workload | 가능 | randomized DDL/DML 와 결합 |
-| 자체 생성 KV workload | 별도 | invariant 디버깅에 적합 |
+| benchbase TPCC schema | yes | consistent with the sum_conservation invariant |
+| HammerDB schema/workload | yes | combines with randomized DDL/DML |
+| a KV workload generated here | separate | suits debugging an invariant |
 
-ADR-EXT-007 에서 재사용 범위 결정.
+ADR-EXT-007 decides the scope of reuse.
 
-## 6. 라이선스
+## 6. Licence
 
-- benchbase: Apache 2.0 (engine-suite 측 결정 사항)
-- HammerDB: GPLv3 (engine-suite 측 — testkit 가 동일 license 의무 받지 않도록 *프로세스 경계* 권장)
-- invariant catalog: testkit 자산
+- benchbase: Apache 2.0 (a decision on the engine-suite side)
+- HammerDB: GPLv3 (on the engine-suite side — a *process boundary* is recommended so that testkit
+  does not take on the same licence obligation)
+- invariant catalogue: a testkit asset
 
-## 7. 후속 작성 트리거
+## 7. The trigger for the follow-up
 
-C-004 결론 + ADR-EXT-007 후 본 문서 FULL 로 보강.
+After the C-004 conclusion and ADR-EXT-007, this document is brought up to FULL.

@@ -35,6 +35,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
+	"github.com/cubrid-systems/cubrid-testkit/internal/runner/hareplsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/isolationsuite"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/legacy"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner/shellsuite"
@@ -119,6 +120,15 @@ func run(args []string) int {
 		return replay(args[1:])
 	}
 
+	// watch is replay's other half: the same page, over a run that has not
+	// finished, read from the ledger it is writing as it goes. The run needs no
+	// flag and no restart and does not know it is watched, which is the whole
+	// point -- the moment you want to look at a run is never the moment you
+	// started it.
+	if len(args) > 0 && args[0] == "watch" {
+		return watchCmd(args[1:])
+	}
+
 	// failures turns a finished run into the list of cases to try again. It is
 	// the other half of testcase_from_file, and it is new rather than inherited.
 	if len(args) > 0 && args[0] == "failures" {
@@ -177,6 +187,14 @@ func run(args []string) int {
 	if native("isolation") {
 		reg.Register(isolationsuite.New())
 	}
+	// ha_repl is behind the same switch and for a different reason: there is no
+	// gate to clear, because there is nothing to clear it against. CTP reaches
+	// its nodes over SSH and a sandbox node runs no sshd, so the two runners
+	// cannot be pointed at the same pair and compared (ADR-022). What this one
+	// produces is the pair's own verdict, and it says so.
+	if native("ha_repl") {
+		reg.Register(hareplsuite.New())
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -200,6 +218,7 @@ func run(args []string) int {
 			fmt.Fprintf(os.Stderr, "testkit: no runner for %q\n", task)
 			continue
 		}
+		sayWhoRunsIt(os.Stderr, task)
 
 		req := runner.Request{
 			Task:        task,
@@ -493,6 +512,91 @@ options:
   --http ADDR   where to serve; "on" or a bare port are accepted, as in shell.conf
 `
 
+const watchUsage = `usage: watch [OPTION] [-c <conf>]...
+
+Serve one status page for the ha_repl runs that are going, from outside them.
+
+The page is normally served by the run's own process, so a run started without
+status_http cannot be looked at afterwards. This reads what the run writes for
+its own resumability instead -- one line per case in
+<difference_dir>/verdicts.tsv, flushed as it goes -- and asks csb directly for
+what the pair is doing. Nothing is asked of the run: no flag, no port, no
+signal, no restart. It works on a run that has already finished, and two people
+can watch the same run from two machines.
+
+With no -c it finds the runs itself, by reading the conf each one was started
+with out of its own command line. A corpus sharded over eight pairs is eight
+processes, and the machine already knows which -- so one page draws all of
+them, a lane and a pair panel each, rather than eight pages on eight ports.
+
+options:
+  -c, --config PATH   the conf a run was given; repeatable, and comma-separated
+                      lists are accepted. Omit it to watch whatever is running
+  --http ADDR         where to serve; "on" or a bare port are accepted
+`
+
+// confList collects a repeated -c, so one watcher can follow several runs.
+type confList []string
+
+func (c *confList) String() string { return strings.Join(*c, ",") }
+
+func (c *confList) Set(v string) error {
+	for _, one := range strings.Split(v, ",") {
+		if one = strings.TrimSpace(one); one != "" {
+			*c = append(*c, one)
+		}
+	}
+	return nil
+}
+
+func watchCmd(args []string) int {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	addr := fs.String("http", "on", "")
+	var confPaths confList
+	fs.Var(&confPaths, "c", "")
+	fs.Var(&confPaths, "config", "")
+	help := fs.Bool("h", false, "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
+		fmt.Fprint(os.Stderr, watchUsage)
+		return exitPreflight
+	}
+	if *help {
+		fmt.Fprint(os.Stdout, watchUsage)
+		return exitOK
+	}
+	// Told nothing, it finds the runs itself. A run was started with `-c <conf>`
+	// and that argument is still in its command line for as long as it is
+	// running -- so the machine already holds the list the operator would
+	// otherwise have to keep and retype. One run now drives several pairs, so
+	// this is usually one conf; it stays a list because several corpora can be
+	// going at once, each in its own run.
+	if len(confPaths) == 0 {
+		confPaths = hareplsuite.Running()
+		if len(confPaths) == 0 {
+			fmt.Fprintln(os.Stderr, "watch: no ha_repl run is going on this machine, and no -c was given")
+			fmt.Fprint(os.Stderr, watchUsage)
+			return exitPreflight
+		}
+		fmt.Fprintf(os.Stdout, "found %d run(s) going on this machine\n", len(confPaths))
+	}
+	where := status.Addr(*addr)
+	if where == "" {
+		where = status.DefaultAddr
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	// CTP_HOME is only what ${CTP_HOME} in the conf expands to, and a watcher
+	// reads the same conf the run was given, so it resolves the same way or
+	// not at all.
+	if err := hareplsuite.Watch(ctx, &conf.Home{Path: os.Getenv("CTP_HOME")}, confPaths, where, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
+		return exitPreflight
+	}
+	return exitOK
+}
+
 func replay(args []string) int {
 	fs := flag.NewFlagSet("replay", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -653,6 +757,48 @@ func caseFragment(p string) string {
 		}
 	}
 	return p
+}
+
+// sayWhoRunsIt names the switch when a task has a native runner and is about to
+// be handed to CTP anyway.
+//
+// It exists because the two runners are hard to tell apart from their output.
+// A reader who meets CTP's failure goes looking in this repository for the code
+// that produced it, finds this project's faithful port of the same checker, and
+// debugs the wrong program. That happened: a peer session spent an hour on
+// `Check directory '${CTP_HOME}/bin' ...... FAIL` reading
+// `internal/runner/shellsuite/check.go`, which was not running. The tell was a
+// list of command names -- CTP checks dos2unix and not expect, this port does
+// the opposite and says why -- which is not a thing anyone should have to know.
+//
+// **On standard error, and that is the point.** Standard output is the frozen
+// surface (ADR-003) and the thing the regression diff compares (ADR-013); a
+// line added there would appear as a difference between the two runners in
+// every comparison, produced by the harness talking about itself. This is an
+// aside to the operator and belongs where the other asides are.
+func sayWhoRunsIt(w io.Writer, task cli.Task) {
+	for _, f := range []struct {
+		family string
+		tasks  []cli.Task
+	}{
+		{"shell", shellsuite.NewShell().Tasks()},
+		{"sql", sqlsuite.New().Tasks()},
+		{"isolation", isolationsuite.New().Tasks()},
+		{"ha_repl", hareplsuite.New().Tasks()},
+	} {
+		if native(f.family) {
+			continue
+		}
+		for _, t := range f.tasks {
+			if t != task {
+				continue
+			}
+			fmt.Fprintf(w,
+				"[INFO] %s is running as CTP's, in a subprocess. "+
+					"Set TESTKIT_NATIVE=%s to run it here instead.\n", task, f.family)
+			return
+		}
+	}
 }
 
 // native says whether a family runs here rather than being handed to CTP.

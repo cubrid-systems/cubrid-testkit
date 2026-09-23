@@ -1,34 +1,37 @@
 # E3 — I/O Contract (STUB)
 
-**Status:** STUB — contract 동결은 ADR-EXT-003 incubating 정식 진입 후.
+*English · [한국어](io-contract.ko.md)*
+
+**Status:** STUB — the contract is frozen after formal entry into incubating through ADR-EXT-003.
 **Source:** `requirements.md` §2
 
 ---
 
-## 1. CLI (제안)
+## 1. CLI (proposed)
 
 ```
 ctp.sh sqlancer [-c <sqlancer.conf>] [--oracle norec|tlp|pqs]
-   또는
+   or
 testkit run sqlancer [-c <conf>] [--oracle <name>] [--seed <N>] [--time <sec>] [--client jdbc|cci]
 ```
 
-복수 oracle 동시 지정 의제: `--oracle norec,tlp` (mismatch 분류 시 oracle 태깅).
+Naming several oracles at once is on the agenda: `--oracle norec,tlp` (a mismatch is tagged with its
+oracle when it is classified).
 
-## 2. conf 스키마 (TBD)
+## 2. conf schema (TBD)
 
-| 키 (의제) | 값 | 출처 |
+| Key (agenda) | Value | Source |
 |---|---|---|
-| `seed` | `<int>` | 재현용 |
-| `time_budget_sec` | `<int>` | CI 시간 통제 |
-| `oracle` | csv `norec,tlp,pqs` | oracle 선택 |
-| `client` | `jdbc \| cci` | SUT 구동 채널 |
-| `corpus_root` | `<dir>` | mismatch corpus 위치 |
-| `dialect_extensions` | (E2 와 공유) | CUBRID 확장 가산 |
+| `seed` | `<int>` | for reproduction |
+| `time_budget_sec` | `<int>` | controlling CI time |
+| `oracle` | csv `norec,tlp,pqs` | choice of oracle |
+| `client` | `jdbc \| cci` | the channel that drives the SUT |
+| `corpus_root` | `<dir>` | where the mismatch corpus lives |
+| `dialect_extensions` | (shared with E2) | the CUBRID extensions added on |
 
-ADR-EXT-003 후 키/의미 동결.
+Keys and meanings are frozen after ADR-EXT-003.
 
-## 3. 출력 포맷 (TBD)
+## 3. Output format (TBD)
 
 ```
 <resultDir>/
@@ -36,21 +39,21 @@ ADR-EXT-003 후 키/의미 동결.
    ├── mismatch/
    │     └── <oracle>/<seed>/
    │           ├── q1.sql
-   │           ├── q2.sql           # NoREC: rewrite / TLP: partition triple
+   │           ├── q2.sql           # NoREC: the rewrite / TLP: the partition triple
    │           ├── schema.sql
    │           ├── result_q1.tsv
    │           └── result_q2.tsv
    └── stats.json                   # iterations / unique mismatches / per-oracle hit
 ```
 
-## 4. 종료 코드 (TBD)
+## 4. Exit codes (TBD)
 
-| 값 | 의미 |
+| Value | Meaning |
 |---|---|
-| 0 | 시간 내 mismatch 없음 |
-| 1 | mismatch 발견 |
-| ≥2 | infra 오류 |
+| 0 | no mismatch within the time |
+| 1 | a mismatch was found |
+| ≥2 | an infrastructure error |
 
-## 5. NG2 / NG4 점검
+## 5. The NG2 / NG4 check
 
-신규 진입점 — 충돌 없음. NG4 (CUBRID 가 SUT) 와도 직교.
+A new entry point — no conflict. Orthogonal to NG4 as well (CUBRID is the SUT).

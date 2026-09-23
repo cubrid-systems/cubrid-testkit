@@ -1,50 +1,54 @@
 # E3 — Test Corpus (STUB)
 
-**Status:** STUB — 코퍼스 정책은 ADR-EXT-003 incubating 정식 진입 후.
-**Source:** `requirements.md` §5, ROADMAP §8 risk (E2/E3 corpus NG1)
+*English · [한국어](test-corpus.ko.md)*
+
+**Status:** STUB — the corpus policy comes after formal entry into incubating through ADR-EXT-003.
+**Source:** `requirements.md` §5, ROADMAP §8 risk (the E2/E3 corpus and NG1)
 
 ---
 
-## 1. 코퍼스 종류
+## 1. Kinds of corpus
 
-E2 와 동일 — *입력 코퍼스 없음* (random generation). 코퍼스는 *mismatch 누적 보관소*.
+The same as E2 — *no input corpus* (generation is random). The corpus is *an accumulating store of
+mismatches*.
 
-| 코퍼스 | 입력/출력 | 용도 |
+| Corpus | In/out | Use |
 |---|---|---|
-| seed corpus | 입력 | regression seed — 과거 mismatch query pair 를 새 빌드에서 replay |
-| mismatch corpus | 출력 | oracle violation 누적 |
+| seed corpus | input | regression seed — replaying past mismatching query pairs against a new build |
+| mismatch corpus | output | oracle violations, accumulated |
 
-## 2. 보관 정책 (NG1 점검)
+## 2. Keeping policy (the NG1 check)
 
-- ❌ testcases 레포에 두지 않음
-- ✅ testkit 내부 별 트리 또는 외부 storage
-- ✅ E2 와 corpus 위치 정책 *공유* (Open Question 3 와 결합)
+- ❌ not put into a testcases repository
+- ✅ a separate tree inside testkit, or external storage
+- ✅ *shares* the corpus location policy with E2 (bound up with Open Question 3)
 
-## 3. mismatch 항목 구조 (의제)
+## 3. The shape of a mismatch entry (agenda)
 
 ```
 mismatch/<oracle>/<witness-hash>/
    ├── seed
    ├── q1.sql
-   ├── q2.sql              # NoREC: rewrite / TLP: 3-way partition
+   ├── q2.sql              # NoREC: the rewrite / TLP: the 3-way partition
    ├── schema.sql
    ├── result_q1.tsv
    ├── result_q2.tsv
    └── reproducer.sh
 ```
 
-## 4. dedup 정책 (의제)
+## 4. The dedup policy (agenda)
 
-- witness-hash = (oracle, AST shape after literal normalize, schema fingerprint) 의 hash
-- 같은 witness 의 여러 mismatch 는 1 entry
+- witness-hash = the hash of (oracle, AST shape after literal normalisation, schema fingerprint)
+- several mismatches with the same witness are one entry
 
-ADR-EXT-003 에서 normalize 규칙 동결.
+ADR-EXT-003 freezes the normalisation rules.
 
-## 5. 라이선스
+## 5. Licence
 
-- SQLancer 본체 (재사용 시): MIT — vendoring 자유 (survey §12.8)
-- 입력 corpus 의무 없음
+- SQLancer itself (if reused): MIT — vendoring is free (survey §12.8)
+- no obligation over an input corpus
 
-## 6. 후속 작성 트리거
+## 6. The trigger for writing the rest
 
-ADR-EXT-003 의 corpus 위치 + dedup 규칙 결정 후 본 문서 FULL 로 보강.
+Once ADR-EXT-003 decides where the corpus lives and the dedup rules, this document is filled in to
+FULL.

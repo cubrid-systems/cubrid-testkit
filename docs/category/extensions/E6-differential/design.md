@@ -1,65 +1,68 @@
 # E6 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-006 incubating 정식 진입 후. N13 pg-wire-compat selected 이상 권장.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-006.
+N13 pg-wire-compat at *selected* or beyond is recommended.
 **Source:** ROADMAP §6a-E6, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §8
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 모듈 위치 (의제)
+## 1. Where the module sits (agenda)
 
 ```
 internal/runner/differential/
-   ├── input/            # case corpus loader (E1 / E2 / 직접 작성)
+   ├── input/            # case corpus loader (E1 / E2 / written by hand)
    ├── runner/
-   │     ├── cubrid/     # JDBC | CCI | pg-wire (N13 후)
+   │     ├── cubrid/     # JDBC | CCI | pg-wire (after N13)
    │     └── peer/       # PostgreSQL JDBC
    ├── rewrite/          # dialect rewrite layer (DATE / NULL / float / collation / JSON / overflow)
-   ├── compare/          # row 단위 비교 + sort 처리
-   └── classify/         # mismatch 분류: real wrong-result / known dialect / float / collation
+   ├── compare/          # row-by-row comparison + sort handling
+   └── classify/         # mismatch classification: real wrong-result / known dialect / float / collation
 ```
 
-## 2. mode 분기 (의제)
+## 2. The mode branch (agenda)
 
 ```
 canonical mode:
   case → run on both → compare assert identical
-  적용 범위: SQL-92 core 부분집합
+  scope: the SQL-92 core subset
 
 rewrite mode:
   case → rewrite_for_peer(case) → run peer
        → run cubrid raw → compare
-  적용 범위: dialect rewrite catalog 가 cover 하는 영역
+  scope: whatever the dialect rewrite catalogue covers
 ```
 
-## 3. dialect rewrite catalog (의제)
+## 3. The dialect rewrite catalogue (agenda)
 
-| 카테고리 | 차이 예 | rewrite 패턴 |
+| Category | Example of the difference | Rewrite pattern |
 |---|---|---|
-| DATE 함수 | `DATE_ADD` ↔ `+ INTERVAL` | 함수 매핑 |
-| NULL 정렬 | NULLS FIRST 디폴트 차이 | 명시 추가 |
-| float 정밀도 | precision / rounding 차이 | tolerance compare |
-| collation | 디폴트 collation 차이 | COLLATE 명시 |
-| JSON 함수 | 함수명 차이 | 함수 매핑 |
-| 정수 overflow | wrap vs error 차이 | 범위 제한 |
+| DATE functions | `DATE_ADD` ↔ `+ INTERVAL` | function mapping |
+| NULL ordering | different NULLS FIRST default | state it explicitly |
+| float precision | precision / rounding differences | tolerance compare |
+| collation | different default collation | state COLLATE explicitly |
+| JSON functions | different function names | function mapping |
+| integer overflow | wrap vs error | restrict the range |
 
-ADR-EXT-006 에서 1차 카테고리 선정.
+ADR-EXT-006 picks the first categories.
 
-## 4. 외부 의존
+## 4. External dependencies
 
-- N13 pg-wire-compat (selected 이상 권장)
-- PostgreSQL 인스턴스 + JDBC driver
-- 케이스 코퍼스 (E1 / E2 / 직접)
-- dialect rewrite catalog (testkit 자체 자산)
+- N13 pg-wire-compat (at *selected* or beyond recommended)
+- A PostgreSQL instance + the JDBC driver
+- A case corpus (E1 / E2 / by hand)
+- The dialect rewrite catalogue (testkit's own asset)
 
-## 5. 결정 보류 항목 → ADR-EXT-006
+## 5. Decisions held over → ADR-EXT-006
 
-- mode 1차 (canonical vs rewrite)
-- dialect rewrite catalog 1차 카테고리
-- peer DBMS 1차 (PostgreSQL 만 / + MySQL / + SQLite)
-- 케이스 코퍼스 input source
-- mismatch corpus 위치 (NG1 점검)
+- the first mode (canonical vs rewrite)
+- the first categories of the dialect rewrite catalogue
+- the first peer DBMS (PostgreSQL only / + MySQL / + SQLite)
+- the input source for the case corpus
+- where the mismatch corpus lives (NG1 check)
 
-## 6. design 작성 트리거
+## 6. The trigger for writing the design
 
-N13 selected 진입 + ADR-EXT-006 후. 현 시점 stub.
+After N13 enters selected and ADR-EXT-006. A stub for now.

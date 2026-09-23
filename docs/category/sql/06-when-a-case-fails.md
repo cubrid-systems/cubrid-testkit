@@ -1,5 +1,7 @@
 # 6. When a case fails
 
+*English · [한국어](06-when-a-case-fails.ko.md)*
+
 [← back to the sql category](README.md)
 
 - [What a verdict is](#what-a-verdict-is)

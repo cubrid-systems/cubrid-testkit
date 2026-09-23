@@ -33,7 +33,7 @@ func openBoard(cfg *conf.Config, cases []string, slots []*contain.Slot, onDisk b
 	}
 	fmt.Fprintf(os.Stderr, "[INFO] status page at http://%s/\n", where)
 	board.Watch(os.Getenv("CUBRID"), "", 0)
-	board.Detail(feedbackLog)
+	board.DetailSince(feedbackLog)
 
 	lane := "disk"
 	if contain.Volatile() {

@@ -60,6 +60,28 @@ Four, and all four. Without them this is a wish list with a letter in front of i
    its own gate. This is not process for its own sake: equivalence cannot be proven against a
    system that has already been improved, so improving first destroys the evidence that the rewrite
    was faithful.
+
+   **Where the baseline cannot express the question, this criterion does not apply** — added
+   2026-09-23. The reason above is the whole of it: the criterion protects evidence of
+   faithfulness, and where there is no such evidence to destroy it has nothing to protect. CTP's
+   `ha_repl` reaches the sql corpus through a conversion that deletes **every statement beginning
+   with `CALL`** and every `SELECT` that does not say `INCR` or `DECR`
+   (`SQLFileReader.shouldBeDeleted`, read and counted in
+   [`evidence/ha/ctp-ha-repl-deletes-the-call.md`](../evidence/ha/ctp-ha-repl-deletes-the-call.md)).
+   Parity on that task is therefore a statement about a **different corpus**: 1,707 catalog-method
+   calls and 10,257 procedure calls are not in it, and neither are the cases' own reads, which are
+   this suite's oracle. Three of the HA findings are about statements a CTP run never executes, so
+   there is no verdict of CTP's they could be diffed against — they ship on their own
+   reproductions, which is what axis B says evidence is.
+
+   Consequence 3 below already named this shape — *"places where there was no parity to ship
+   first"* — and found it by construction, in the dispatch sort. This is the same thing found by
+   measurement.
+
+   **What it does not license.** The baseline is still owed for what CTP *can* run. P1's sleep
+   patches claim *"no verdict changed"*, which needs a left-hand side; ADR-013's shell gate is
+   untouched; and a difference this suite reports on a statement CTP also runs is still a
+   difference that wants explaining rather than exempting.
 3. **It says in advance what would show it worked.** T and O prove themselves by diffing against
    CTP. B has nothing to diff against, so the evidence has to be named before the work starts — a
    number with a baseline, a task someone completes in less time, a class of failure that gets

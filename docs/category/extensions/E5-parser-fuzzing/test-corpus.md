@@ -1,54 +1,57 @@
 # E5 — Test Corpus (STUB)
 
-**Status:** STUB — 코퍼스 정책은 ADR-EXT-005 incubating 정식 진입 후.
+*English · [한국어](test-corpus.ko.md)*
+
+**Status:** STUB — the corpus policy comes after formal entry into incubating through ADR-EXT-005.
 **Source:** `requirements.md` §5
 
 ---
 
-## 1. 코퍼스 종류
+## 1. Kinds of corpus
 
-| 코퍼스 | 입력/출력 | 용도 |
+| Corpus | In/out | Use |
 |---|---|---|
-| seed corpus | 입력 | 의미 있는 SQL / protocol 메시지의 초기 seed (coverage 부트스트랩) |
-| crash corpus | 출력 | fuzz run 의 crash 누적 — stack hash 기반 dedup |
-| coverage corpus | 출력 | edge coverage 갱신 입력 (libFuzzer 가 자동 관리) |
+| seed corpus | input | an initial seed of meaningful SQL and protocol messages (bootstrapping coverage) |
+| crash corpus | output | the crashes of a fuzz run, accumulated — deduplicated on the stack hash |
+| coverage corpus | output | the input that updates edge coverage (libFuzzer manages it automatically) |
 
-## 2. seed corpus 출처 (의제)
+## 2. Where the seed corpus comes from (agenda)
 
-| 후보 | 비용 | 비고 |
+| Candidate | Cost | Note |
 |---|---|---|
-| 기존 sql 모듈 케이스 → byte 입력 변환 | 낮음 | 17,411 .sql 의 *부분집합* 을 fuzz seed 로 |
-| sqllogictest (E1) 코퍼스 | 낮음 | external corpus 차용 |
-| cubrid 자체 grammar 기반 합성 seed | 중 | hand-crafted edge case |
-| CCI / JDBC capture replay | 중 | client 통신 capture (privacy 점검) |
+| converting the existing sql module's cases into byte inputs | low | a *subset* of the 17,411 .sql files as fuzz seeds |
+| the sqllogictest (E1) corpus | low | borrowing an external corpus |
+| a seed synthesised from CUBRID's own grammar | middling | hand-crafted edge cases |
+| CCI / JDBC capture replay | middling | capturing client traffic (check privacy) |
 
-ADR-EXT-005 에서 seed 정책 결정.
+ADR-EXT-005 decides the seed policy.
 
-## 3. 보관 정책 (NG1 점검)
+## 3. Keeping policy (the NG1 check)
 
-- ❌ testcases 레포에 crash corpus 두지 않음
-- ✅ testkit 내부 별 트리 또는 외부 storage
-- ✅ seed corpus 는 *생성* 가능 (sql 모듈 케이스 변환) — 보관 불필요 시 cache 처리
+- ❌ the crash corpus is not put into a testcases repository
+- ✅ a separate tree inside testkit, or external storage
+- ✅ the seed corpus can be *generated* (by converting the sql module's cases) — treated as a cache
+  where there is no need to keep it
 
-## 4. crash 항목 구조 (의제)
+## 4. The shape of a crash entry (agenda)
 
 ```
 crash/<stack-hash>/
-   ├── input.bin               # raw bytes (libFuzzer 형식)
-   ├── input.repr              # human-readable 표현 (가능한 경우)
+   ├── input.bin               # raw bytes (libFuzzer's format)
+   ├── input.repr              # a human-readable representation (where one is possible)
    ├── stack.txt
    ├── sanitizer.txt
    ├── target_layer            # parser / cci / jdbc
    └── reproducer.sh
 ```
 
-## 5. 라이선스
+## 5. Licence
 
 - libFuzzer: Apache 2.0
 - AFL: Apache 2.0
 - honggfuzz: Apache 2.0
-- 외부 seed corpus 사용 시 출처 license 점검
+- where an external seed corpus is used, check the licence of its source
 
-## 6. 후속 작성 트리거
+## 6. The trigger for writing the rest
 
-cubrid 본 repo PR + ADR-EXT-005 후 본 문서 FULL 로 보강.
+After the PR to the cubrid repository and ADR-EXT-005, this document is filled in to FULL.

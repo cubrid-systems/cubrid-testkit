@@ -31,7 +31,17 @@ import (
 // service, and not 8080, which everything else on a developer's machine is
 // already using. The digits are CUBRID's own 1523 with a 5 in front, which is
 // the only reason this number rather than another.
-const DefaultAddr = "127.0.0.1:51523"
+//
+// Every interface, not loopback. This was loopback until 2026-09-23 on the
+// argument that a run should not become a page the rest of the network can
+// read; the owner's answer is that the exposure is controlled where exposure
+// belongs -- these machines are on a private network -- and that a page nobody
+// but the host can open is a page nobody opens. The run that made the case was
+// one whose pair died unwatched for an hour.
+//
+// The host is still whatever an operator writes. `status_http=127.0.0.1:51523`
+// is loopback again, in one line, for a machine that is not on such a network.
+const DefaultAddr = ":51523"
 
 // NearDefault is the nth port after the default, for a machine already running a
 // run. Two runs on one machine is a normal thing to want -- a long one and a
@@ -49,10 +59,9 @@ func NearDefault(n int) string {
 }
 
 // Addr reads what the configuration said. A bare "on" takes DefaultAddr, a bare
-// port takes every interface, and anything else is passed through as written.
-//
-// Loopback by default rather than every interface: a QA machine's run should not
-// become a page the rest of the network can read because someone turned it on.
+// port takes every interface, and anything else is passed through as written --
+// including a host, which is how a machine outside a private network asks for
+// loopback back.
 func Addr(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "":
@@ -99,6 +108,11 @@ type Board struct {
 	corpusDir string
 	ramDir    string
 	ramCap    int
+	// machines is one row per machine the run touches, filled by whoever knows
+	// -- the local sampler for this host's numbers, a cluster sampler for what
+	// is standing on it.
+	machines  map[string]*Machine
+	machineAt map[string]time.Time
 	// sampler reads the machine on its own ticker, because CPU and disk are
 	// counters and a rate needs two readings.
 	sampler *sampler
@@ -125,6 +139,12 @@ type Board struct {
 	// templates is the database-template cache, when a run uses one. Nil when it
 	// does not, which is every run that leaves CTP_DB_TEMPLATE_CACHE off.
 	templates *templates
+	// pair is the HA topology panel, set by the runner rather than sampled
+	// here: what a pair is belongs to internal/sandbox, and this package draws
+	// what it is handed.
+	pairs  map[string]*Pair
+	pairAt map[string]time.Time
+	note   string
 	// replaying says this board is playing a finished run back rather than
 	// watching one happen, and the page says so -- an old run and a live one look
 	// identical otherwise, and mistaking the first for the second is the kind of
@@ -376,6 +396,48 @@ func (b *Board) End(slot, name string, ok bool) {
 // endWith is End with a duration supplied rather than measured, which is what a
 // replay needs: the wall clock is compressed but the durations reported are the
 // ones the run really had.
+// Note is what the page says about itself: a watcher whose source has stopped
+// growing says so here, because a page that merely stops advancing reads
+// exactly like a run that is slow. Empty clears it.
+func (b *Board) Note(s string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.note = s
+}
+
+// Reset empties the board.
+//
+// A board is an accumulation and there is nothing to subtract from it, so a
+// reader whose source rewrote its own history -- a ledger whose earlier verdict
+// for a case was replaced by a later one -- starts again rather than counting
+// both. Replay does the same thing when it seeks backwards.
+func (b *Board) Reset() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.reset()
+}
+
+// Record is one finished case with the time it took, for a page built from a
+// record rather than from the run that made it.
+//
+// Begin/End is for a runner watching its own work: it holds the start and the
+// board takes the duration off the clock. A watcher reading a run's ledger has
+// the duration written down and no start to hold, and a page that timed those
+// cases from when it happened to read the line would draw the reader's own
+// latency as the corpus's.
+func (b *Board) Record(slot, name string, ok bool, took time.Duration) {
+	if b == nil {
+		return
+	}
+	b.endWith(slot, name, ok, took)
+}
+
 func (b *Board) endWith(slot, name string, ok bool, took time.Duration) {
 	if b == nil {
 		return
@@ -530,10 +592,19 @@ type view struct {
 	// Templates is nil unless the run uses the database-template cache, and the
 	// page leaves the panel out when it is.
 	Templates *templateView `json:"templates,omitempty"`
-	Machine   machineView   `json:"machine"`
-	Finished  bool          `json:"finished"`
-	Replaying bool          `json:"replaying,omitempty"`
-	Replay    *replayView   `json:"replay,omitempty"`
+	// Pair is the topology an HA run measures against, and is nil for a run
+	// that has only one node to ask.
+	Pairs []Pair `json:"pairs,omitempty"`
+	// Note is one sentence the page has to say about itself rather than about
+	// the run: that its source has gone quiet, and for how long. A run's own
+	// board never sets it -- it cannot go quiet without the process it lives in
+	// going with it -- and a watcher reading a file can.
+	Note      string      `json:"note,omitempty"`
+	Machine   machineView `json:"machine"`
+	Machines  []Machine   `json:"machines,omitempty"`
+	Finished  bool        `json:"finished"`
+	Replaying bool        `json:"replaying,omitempty"`
+	Replay    *replayView `json:"replay,omitempty"`
 }
 
 type slotView struct {
@@ -709,8 +780,11 @@ func (b *Board) snapshot() view {
 	v.NPatched = len(b.patched)
 	v.NRefused = len(b.refused)
 	v.Templates = b.templates.snapshot()
+	v.Pairs = b.pairViews()
+	v.Note = b.note
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()
+	v.Machines = b.machineViews()
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]
 		v.Recent = append(v.Recent, doneView{

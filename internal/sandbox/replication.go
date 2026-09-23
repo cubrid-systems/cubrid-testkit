@@ -29,6 +29,12 @@ import (
 // The marker is a table of its own, created and dropped per call, so a case's
 // own tables are untouched. It is visible to a query that lists the catalog
 // while the wait is in flight, which is the one thing a caller has to know.
+// ProbeTimeout bounds one poll of the slave. Thirty seconds is far more than a
+// one-row read needs and far less than the wait it lives inside, which is the
+// only relationship that matters: a probe must never be the reason the wait
+// overshoots its own deadline.
+const ProbeTimeout = 30 * time.Second
+
 func (p *Pair) WaitForReplication(ctx context.Context, timeout time.Duration) (time.Duration, error) {
 	if p.DB == "" {
 		return 0, fmt.Errorf("sandbox: cluster %q named no database, so there is nothing to replicate", p.Cluster)
@@ -61,7 +67,16 @@ func (p *Pair) WaitForReplication(ctx context.Context, timeout time.Duration) (t
 		}
 		read := fmt.Sprintf("csql -u dba -c \"SELECT i FROM %s;\" %s 2>&1", marker, p.DB)
 		for {
-			res, rerr := slave.Run(ctx, read)
+			// A probe is a read and is bounded like one, not like a case. The
+			// channel carries CaseTimeout because everything a Pair hands out
+			// runs case SQL -- but a `SELECT i FROM marker` is not that, and
+			// leaving it at the case bound means a slave that stops answering
+			// holds this loop for ten minutes while the deadline it is being
+			// measured against is smaller. The deadline below is only consulted
+			// between probes, so a probe that outlives it makes it a suggestion.
+			probeCtx, cancelProbe := context.WithTimeout(ctx, ProbeTimeout)
+			res, rerr := slave.Run(probeCtx, read)
+			cancelProbe()
 			if rerr != nil {
 				return time.Since(start), rerr
 			}

@@ -1,5 +1,7 @@
 # The `shell` category
 
+*English · [한국어](README.ko.md)*
+
 `shell` is CTP's largest test category and the first one testkit rewrote. These documents are the
 as-built guide.
 

@@ -1,5 +1,7 @@
 # 2. Writing a case
 
+*English · [한국어](02-writing-a-case.ko.md)*
+
 [← back to the shell category](README.md)
 
 The corpus this runner is tested against — `cubrid-testcases-private-ex` — is private, so this

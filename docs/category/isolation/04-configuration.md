@@ -1,5 +1,7 @@
 # 4. Configuration
 
+*English · [한국어](04-configuration.ko.md)*
+
 [← back to the isolation category](README.md)
 
 - [The conf](#the-conf)

@@ -1,5 +1,7 @@
 # 3. Running it
 
+*English · [한국어](03-running-it.ko.md)*
+
 [← back to the shell category](README.md)
 
 Both ways run the same binary with the same conf. Only what the environment brings differs.

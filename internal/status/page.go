@@ -133,9 +133,31 @@ const page = `<!doctype html>
  .panels table{min-width:0}
  .panels .num{width:auto;min-width:2.6rem;padding-right:.6rem}
  .panels th,.panels td{padding-right:.6rem}
+ .mblock{border-top:1px solid var(--line);padding-top:.7rem;margin-top:.7rem}
+ .mblock:first-child{border-top:0;padding-top:0;margin-top:0}
+ .mhead{display:flex;gap:.7rem;align-items:baseline;margin-bottom:.5rem;flex-wrap:wrap}
+ .mhead b{font-size:.78rem;letter-spacing:.06em}
+ .mwhere,.mnote{font-size:.68rem;color:var(--ink-faint);letter-spacing:.06em}
+ .mnote{color:var(--warn)}
+ .mclusters{margin-top:.6rem}
+ .mclusters h3{font-size:.66rem;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--ink-faint);margin:0 0 .25rem}
+ .mclusters table{min-width:0}
+ .mclusters td:not(:first-child){text-align:right;width:6rem}
+ .mclusters tr.mine td:first-child{color:var(--accent)}
+ .dim{color:var(--ink-faint)}
  /* The machine panel is an instrument rather than a summary, so it gets a row
     of its own and the numbers are grouped by the question they answer. */
  .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.9rem 1.6rem}
+ /* One block per pair. A shard is read as a unit, so its nodes and its
+    artifact stay together and the next pair starts on a rule of its own. */
+ .pairblock{padding:.5rem 0}
+ .pairblock + .pairblock{border-top:1px solid var(--rule);margin-top:.5rem}
+ .pairblock h3{margin:0 0 .3rem 0;font-weight:600}
+ /* Built role first and in its own column, so a slave with a lag and a fail
+    count cannot push the rest of its line off the edge. */
+ .pairblock td.built{color:var(--ink-faint);padding-right:.7rem;white-space:nowrap}
+ .pairblock td{white-space:nowrap}
  .mg h3{margin:0 0 .3rem;font-size:.66rem;font-weight:600;letter-spacing:.12em;
    text-transform:uppercase;color:var(--ink-faint)}
  .mg table{min-width:0}
@@ -231,6 +253,7 @@ const page = `<!doctype html>
   </div>
 </div>
 <div class=bar><i id=fill></i></div>
+<div id=note class=warn hidden style="margin:.5rem 0"></div>
 
 <section class=panel id=replaywrap hidden style="margin-bottom:1.6rem">
   <h2>replay <span class=count id=rpwhen></span></h2>
@@ -252,8 +275,13 @@ const page = `<!doctype html>
 </section>
 
 <section class=panel id=machinewrap style="margin-bottom:1.6rem">
-  <h2>machine <span class=count id=mwhen>every second</span></h2>
-  <div class=mgrid id=machine></div>
+  <h2>machines <span class=count id=mwhen>every second</span></h2>
+  <div id=machines></div>
+</section>
+
+<section class=panel id=pairwrap hidden style="margin-bottom:1.6rem">
+  <h2>the pairs <span class=count id=pairwhen></span></h2>
+  <div id=pairs></div>
 </section>
 
 <section class=panel id=setupwrap hidden style="margin-bottom:1.6rem">
@@ -537,7 +565,7 @@ async function tick() {
   // the wrong thing is worse than no panel.
   $('machinewrap').hidden = !!v.replaying
   replayBar(v.replay)
-  machine(v.machine || {})
+  machines(v.machines || [])
   hist(v.hist || [], v.histSecs || [], v.histEdge || [])
   $('nfamily').textContent = (v.family || []).length + ' groups, slowest first'
   groups('family', v.family || [], false)
@@ -546,6 +574,11 @@ async function tick() {
   lanes(v.lanes || [])
   setup(v.setup || [])
   templates(v.templates)
+  pairs(v.pairs || [])
+  // What the page has to say about itself, which is not the same as what the
+  // run has to say: a watcher's source can stop growing while the page is fine.
+  $('note').textContent = v.note || ''
+  $('note').hidden = !v.note
   lastView = v
   draw(v)
 }
@@ -617,7 +650,47 @@ function machine(m) {
     ['headroom', gb(Math.max(0, m.ramCap - m.ram)), m.ram > m.ramCap * 0.9],
   ], bar(m.ram, m.ramCap, m.ram > m.ramCap * 0.9)) : ''
 
-  $('machine').innerHTML = cpu + load + mem + disk + corpus
+  return cpu + load + mem + disk + corpus
+}
+
+// One block per machine: what it is, how it is doing, and what is standing on
+// it. The list has one entry until a cluster can be placed somewhere else, and
+// that entry is where every cluster actually is -- not a placeholder.
+function machines(list) {
+  if (!list.length) { $('machines').innerHTML = ''; return }
+  $('machines').innerHTML = list.map(mm => {
+    const where = mm.local ? 'this machine' : 'reported ' + age(mm.ageMs) + ' ago'
+    const head = '<div class=mhead><b>' + esc(mm.name) + '</b>' +
+      '<span class=mwhere>' + where + '</span>' +
+      (mm.note ? '<span class=mnote>' + esc(mm.note) + '</span>' : '') + '</div>'
+    return '<div class=mblock>' + head +
+      '<div class=mgrid>' + machine(mm.stats || {}) + '</div>' +
+      clusters(mm.clusters || []) + '</div>'
+  }).join('')
+}
+
+// The clusters on one machine, biggest first. Biggest because the question this
+// answers is which one to remove: a filesystem at 98% does not say, and eleven
+// pairs reached 53 GB here while the page reported only the filesystem.
+function clusters(list) {
+  if (!list.length) return ''
+  const gbytes = n => n >= 1073741824 ? (n/1073741824).toFixed(1) + 'G'
+    : n >= 1048576 ? Math.round(n/1048576) + 'M' : Math.round(n/1024) + 'K'
+  const total = list.reduce((a, c) => a + (c.bytes || 0), 0)
+  const rows = list.slice().sort((a, b) => (b.bytes || 0) - (a.bytes || 0)).map(c =>
+    '<tr' + (c.mine ? ' class=mine' : '') + '><td>' + esc(c.name) +
+    '<td>' + (c.containers || 0) +
+    '<td>' + gbytes(c.bytes || 0) +
+    '<td>' + (c.run ? esc(c.run) : '<span class=dim>&mdash;</span>') + '</tr>').join('')
+  return '<div class=mclusters><h3>clusters <span class=dim>' + list.length +
+    ', ' + gbytes(total) + '</span></h3><table><thead><tr>' +
+    '<th>name<th>up<th>disk<th>run</tr></thead><tbody>' + rows + '</tbody></table></div>'
+}
+
+function age(ms) {
+  if (ms == null) return '\u2014'
+  const s = Math.round(ms / 1000)
+  return s < 60 ? s + 's' : Math.round(s / 60) + 'm'
 }
 
 function hist(h, secsIn, edges) {
@@ -667,6 +740,71 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowLeft') rpSend('step=-10')
   if (e.key === 'ArrowRight') rpSend('step=10')
 })
+
+// The pair an HA run measures against. Absent for every other suite, which is
+// why the panel is hidden rather than empty -- a table of dashes would read as
+// "the pair is broken" where the truth is "this run has no pair".
+//
+// A role is the one thing on this page that is wrong rather than merely stale
+// when it disagrees with what the run assumes, so it carries the colour: two
+// actives is a split brain, none is a group that has not settled, and a node
+// that is not live is why every case after it will time out.
+// The pairs an HA run measures against. Absent for every other suite, which is
+// why the section hides itself rather than drawing an empty one and implying
+// "the pair is broken" where the truth is "this run has no pair".
+//
+// One block per pair, because a run sharded across several of them is watched
+// on one screen or not at all. Each block carries its own age and its own note:
+// a shard whose sampler stopped is stale by itself and must not make the others
+// look stale too.
+function pairs(list) {
+  $('pairwrap').hidden = !list || !list.length
+  if (!list || !list.length) return
+  $('pairwhen').textContent = list.length === 1 ? '' : list.length + ' pairs'
+  $('pairs').innerHTML = list.map(pairBlock).join('')
+}
+
+// A node is four columns and not a sentence. What it was built as comes first,
+// because that is the question a reader asks before any other -- and it is the
+// one the old row put last, after a detail string that ran off the edge as soon
+// as a slave had a lag and a fail count to report.
+function pairBlock(p) {
+  const actives = (p.nodes || []).filter(n => (n.role || '').toLowerCase() === 'active').length
+  const nodes = (p.nodes || []).map(n => {
+    const bad = !n.live || actives !== 1
+    const lag = (n.applyLag || 0) + (n.copyLag || 0)
+    const numbers = [
+      n.fail ? n.fail + ' failed' : '',
+      lag ? lag + ' page' + (lag === 1 ? '' : 's') + ' behind' : '',
+      n.live ? '' : 'not live',
+    ].filter(Boolean).join(' \u00b7 ')
+    return '<tr>' +
+      '<td class=built>' + esc(n.built || '?') + '</td>' +
+      '<td>' + esc(n.name) + '</td>' +
+      '<td class="' + (bad ? 'warn' : '') + '">' + esc(n.state || n.role || '?') + '</td>' +
+      '<td class="' + (n.fail ? 'warn' : '') + '">' + numbers + '</td>' +
+      '</tr>'
+  }).join('') || '<tr><td colspan=4 class=empty>no node answered</tr>'
+
+  const rows = [
+    ['engine', p.engine], ['database', p.db], ['backend', p.backend],
+    ['network', p.network], ['ping', p.ping], ['image', p.image],
+  ].filter(r => r[1])
+  // A fault is deliberate while group B runs and a mystery afterwards, so it is
+  // listed either way rather than folded into the node lines.
+  const what = rows.map(r => '<tr><td>' + r[0] + '<td>' + esc(r[1]) + '</tr>').join('') +
+    (p.faults || []).map(f => '<tr><td>fault<td class=warn>' + esc(f) + '</tr>').join('')
+
+  const when = p.cluster + (p.age > 5 ? '  \u00b7 read ' + p.age + 's ago' : '')
+  return '<div class=pairblock>' +
+    '<h3>' + esc(when) + '</h3>' +
+    '<div class=mgrid>' +
+      '<div class=mg><table><tbody>' + nodes + '</tbody></table></div>' +
+      '<div class=mg><table><tbody>' + what + '</tbody></table></div>' +
+    '</div>' +
+    (p.note ? '<div class=warn style="margin-top:.3rem">' + esc(p.note) + '</div>' : '') +
+    '</div>'
+}
 
 // A lane is one word, and an unset one is nothing rather than a placeholder.
 const lane = l => l ? '<span class="lane ' + l + '">' + l + '</span>' : ''

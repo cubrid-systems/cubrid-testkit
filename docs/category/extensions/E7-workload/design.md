@@ -1,36 +1,39 @@
 # E7 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-007 incubating 정식 진입 후. C-004 책임 경계 정의 선결.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-007.
+The C-004 responsibility boundary has to be defined first.
 **Source:** ROADMAP §6a-E7, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §9
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 책임 경계 (C-004 선결)
+## 1. The responsibility boundary (C-004 comes first)
 
 ```
-testkit (이 모듈)                    engine-suite (HammerDB / benchbase)
+testkit (this module)                engine-suite (HammerDB / benchbase)
 ─────────────                       ──────────────────────────────────
-correctness invariant 검증     ↔    throughput 측정
-randomized fault injection           workload 발생기
-deterministic seed replay            performance regression
+verifying correctness invariants ↔  measuring throughput
+randomized fault injection          the workload generator
+deterministic seed replay           performance regression
 ```
 
-C-004 cross-cutting 결론 *없이는 시작 불가*.
+*It cannot start* without the C-004 cross-cutting conclusion.
 
-## 2. 모듈 위치 (의제)
+## 2. Where the module sits (agenda)
 
 ```
 internal/runner/workload/
-   ├── topology/         # cluster deploy (E4 와 공유)
-   ├── workload/         # KV-style 또는 SQL-style stateful tx generator
-   ├── fault/            # E4 와 공유 가능 — owner ADR 필요
-   ├── invariant/        # invariant 카탈로그 + checker
-   ├── history/          # tx / fault timeline 기록
-   └── corpus/           # violation 보관
+   ├── topology/         # cluster deploy (shared with E4)
+   ├── workload/         # KV-style or SQL-style stateful tx generator
+   ├── fault/            # can be shared with E4 — an owner ADR is needed
+   ├── invariant/        # the invariant catalogue + checker
+   ├── history/          # recording the tx / fault timeline
+   └── corpus/           # keeping violations
 ```
 
-## 3. 데이터 흐름 (의제)
+## 3. Data flow (agenda)
 
 ```
 seed → topology.deploy()
@@ -41,43 +44,43 @@ seed → topology.deploy()
                                                └─ violation? corpus.save({seed, fault, witness})
 ```
 
-## 4. invariant 카탈로그 (의제)
+## 4. The invariant catalogue (agenda)
 
-| invariant | 검증 SQL/method | 비고 |
+| invariant | The verifying SQL/method | Note |
 |---|---|---|
-| row_count_consistency | SELECT COUNT(*) — replica 간 일치 | replication 검증 |
-| referential_integrity | FK violation 0 | concurrent DDL/DML |
-| sum_conservation | 송금 시나리오 잔액 sum 보존 | linearizability proxy |
-| monotonicity | seq 단조 증가 | snapshot isolation 검증 |
-| no_phantom_after_failover | failover 직후 phantom 부재 | HA 검증 |
+| row_count_consistency | SELECT COUNT(*) — agreement between replicas | verifies replication |
+| referential_integrity | 0 FK violations | concurrent DDL/DML |
+| sum_conservation | the balance sum is conserved in a transfer scenario | a linearizability proxy |
+| monotonicity | seq increases monotonically | verifies snapshot isolation |
+| no_phantom_after_failover | no phantom immediately after failover | verifies HA |
 
-ADR-EXT-007 에서 1차 invariant 선정.
+ADR-EXT-007 picks the first invariants.
 
-## 5. scenario 1차 후보 (의제)
+## 5. First candidates for the scenario (agenda)
 
-| scenario | 출처 | 도입 비용 | 즉시 ROI |
+| scenario | Origin | Cost of adoption | Immediate ROI |
 |---|---|---|---|
-| roachtest 류 randomized | CockroachDB | 중 | ★★★ |
-| FoundationDB 류 deterministic simulation | FoundationDB | 매우 높음 | ★★ (장기) |
-| benchbase / HammerDB 위에 invariant 얹기 | engine-suite | 낮음 | ★★ (의존성 ↑) |
+| roachtest-style randomized | CockroachDB | medium | ★★★ |
+| FoundationDB-style deterministic simulation | FoundationDB | very high | ★★ (long term) |
+| invariants laid on top of benchbase / HammerDB | engine-suite | low | ★★ (more dependency) |
 
-ADR-EXT-007 에서 scenario 1차 선정.
+ADR-EXT-007 picks the first scenario.
 
-## 6. 외부 의존
+## 6. External dependencies
 
-- C-004 cross-cutting 결론 (선결)
-- engine-suite 자산 (HammerDB / benchbase) — 재사용 범위 결정
-- E4 의 fault injection (공유)
+- The C-004 cross-cutting conclusion (comes first)
+- engine-suite assets (HammerDB / benchbase) — the scope of reuse to be decided
+- E4's fault injection (shared)
 - CUBRID HA / streaming-replication
 
-## 7. 결정 보류 항목 → ADR-EXT-007
+## 7. Decisions held over → ADR-EXT-007
 
-- scenario 1차 (roachtest / simulation / benchbase 결합)
-- invariant 카탈로그 1차 항목
-- engine-suite 자산 재사용 범위
-- E4 와 fault injector 공유 owner
-- violation corpus 위치 (NG1 점검)
+- the first scenario (roachtest / simulation / combined with benchbase)
+- the first items of the invariant catalogue
+- the scope of engine-suite asset reuse
+- who owns the fault injector shared with E4
+- where the violation corpus lives (NG1 check)
 
-## 8. design 작성 트리거
+## 8. The trigger for writing the design
 
-C-004 결론 + ADR-EXT-007 후. 현 시점 stub.
+After the C-004 conclusion and ADR-EXT-007. A stub for now.

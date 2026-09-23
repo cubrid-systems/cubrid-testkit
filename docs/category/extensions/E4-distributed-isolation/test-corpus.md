@@ -1,48 +1,51 @@
 # E4 — Test Corpus (STUB)
 
-**Status:** STUB — 코퍼스 정책은 ADR-EXT-004 incubating 정식 진입 후.
+*English · [한국어](test-corpus.ko.md)*
+
+**Status:** STUB — the corpus policy comes after formal entry into incubating through ADR-EXT-004.
 **Source:** `requirements.md` §5
 
 ---
 
-## 1. 코퍼스 종류
+## 1. Kinds of corpus
 
-| 코퍼스 | 입력/출력 | 용도 |
+| Corpus | In/out | Use |
 |---|---|---|
-| anomaly catalog | 입력 | Adya/Bailis taxonomy + Hermitage — 의미 카탈로그 (지식 자산) |
-| seed corpus | 입력 | regression seed — 과거 violation 의 fault sequence replay |
-| violation corpus | 출력 | analyzer 가 검출한 anomaly 누적 |
+| anomaly catalogue | input | the Adya/Bailis taxonomy plus Hermitage — a semantic catalogue (a knowledge asset) |
+| seed corpus | input | regression seed — replaying the fault sequence of a past violation |
+| violation corpus | output | the anomalies the analyzer detected, accumulated |
 
-## 2. anomaly catalog (Hermitage 차용)
+## 2. The anomaly catalogue (borrowed from Hermitage)
 
-- Adya 분류: dirty read / lost update / read skew / write skew / phantom 등
-- Bailis 분류: causal / monotonic / read-your-writes 등
-- testkit 자체 자산으로 보관 — 외부 license 의무 없음 (지식)
+- the Adya classification: dirty read / lost update / read skew / write skew / phantom and the rest
+- the Bailis classification: causal / monotonic / read-your-writes and the rest
+- kept as testkit's own asset — no external licence obligation (it is knowledge)
 
-## 3. 보관 정책 (NG1 점검)
+## 3. Keeping policy (the NG1 check)
 
-- ❌ testcases 레포에 두지 않음
-- ✅ testkit 내부 또는 외부 storage
-- ✅ history 가 거대해질 수 있음 (AWDIT 의 *huge history scalability* 고려) — GC 정책 명시 필요
+- ❌ not put into a testcases repository
+- ✅ inside testkit, or external storage
+- ✅ a history can grow huge (consider AWDIT's *huge history scalability*) — a GC policy has to be
+  stated
 
-## 4. violation 항목 구조 (의제)
+## 4. The shape of a violation entry (agenda)
 
 ```
 violations/<witness-hash>/
    ├── seed
    ├── topology.json       # node count / version / config
-   ├── fault_seq.json      # 재현용 fault timeline
-   ├── history_excerpt.log # cycle 또는 violation 직전 / 직후
-   ├── analyzer_report.txt # AWDIT 또는 Jepsen 의 진단
+   ├── fault_seq.json      # the fault timeline for reproduction
+   ├── history_excerpt.log # the cycle, or just before and just after the violation
+   ├── analyzer_report.txt # AWDIT's or Jepsen's diagnosis
    └── reproducer.sh
 ```
 
-## 5. 라이선스
+## 5. Licence
 
-- AWDIT: 정확한 repo / artifact 확인 필요 (incubating 진입 시 보강)
+- AWDIT: the exact repository / artifact needs confirming (filled in on entry to incubating)
 - Jepsen: Eclipse Public License 1.0 (Clojure)
-- Hermitage / Elle: 지식 자산 (직접 도구 도입 아님)
+- Hermitage / Elle: knowledge assets (not the adoption of the tools themselves)
 
-## 6. 후속 작성 트리거
+## 6. The trigger for writing the rest
 
-ADR-EXT-004 + N24/N11 graduation 후 본 문서 FULL 로 보강.
+After ADR-EXT-004 and N24/N11 graduation, this document is filled in to FULL.

@@ -1,5 +1,7 @@
 # 5. When a case fails
 
+*English · [한국어](05-when-a-case-fails.ko.md)*
+
 [← back to the isolation category](README.md)
 
 - [Where to look](#where-to-look)

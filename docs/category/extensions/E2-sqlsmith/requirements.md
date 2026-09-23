@@ -1,44 +1,50 @@
-# E2 — Random SQL Fuzzing (SQLsmith 포팅) (Requirements)
+# E2 — Random SQL Fuzzing (the SQLsmith port) (Requirements)
 
-**Source:** survey/dbms-testing-ecosystem.md §4 + §11 (ROADMAP §6a 카탈로그 신규 후보)
-**Status:** incubating (정식 진입 전 — ADR-EXT-002 자리)
-**축 매핑:** 축 2 (Random SQL generation)
-**Companion docs (후속):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
+*English · [한국어](requirements.ko.md)*
+
+**Source:** survey/dbms-testing-ecosystem.md §4 + §11 (a new candidate for the ROADMAP §6a catalogue)
+**Status:** incubating (before formal entry — the ADR-EXT-002 slot)
+**Axis mapping:** axis 2 (Random SQL generation)
+**Companion docs (to follow):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
 
 ---
 
-## 1. 이 확장이 해결하는 문제
+## 1. The problem this extension solves
 
-CUBRID 의 **parser / planner / executor 강건성** 을 *valid 하지만 광범위한 random SQL* 로 검증한다.
+It verifies the **robustness of CUBRID's parser, planner and executor** with *random SQL that is
+valid but wide-ranging*.
 
-기존 testkit (sql / medium / shell / isolation) 에는 *random generation 축이 부재*. 케이스 작성자가 손으로 만든 케이스만 회귀하므로 다음 영역이 사각지대:
+The existing testkit (sql / medium / shell / isolation) *has no random generation axis*. Only the
+cases a case author wrote by hand are regressed, which leaves these areas blind:
 - parser crash / UB
 - planner assert / stack overflow
 - executor segfault / OOM
-- 깊게 nested 된 expression / window / lateral / subquery 조합에서의 internal state corruption
+- internal state corruption in deeply nested combinations of expression / window / lateral /
+  subquery
 
-SQLsmith 는 PostgreSQL ecosystem 에서 *100+ 버그* 의 출처. 동작:
-1. 대상 DB schema introspect
-2. type-correct random AST 생성 (parser 통과 = valid SQL)
-3. 임의 깊이의 nested expression / window / lateral / subquery
-4. crash / signal / process exit 만으로 판정 (oracle 없음)
+SQLsmith is the source of *100+ bugs* in the PostgreSQL ecosystem. How it works:
+1. introspect the target DB's schema
+2. generate a type-correct random AST (passing the parser = valid SQL)
+3. nested expression / window / lateral / subquery to an arbitrary depth
+4. judge on crash / signal / process exit alone (no oracle)
 
-**잡는 버그 종류:** crash·assert·UB. *wrong-result 는 못 잡음* (그 영역은 §6a-E3).
+**The kind of bug it catches:** crash, assert, UB. *It cannot catch wrong results* (that area is
+§6a-E3).
 
 ---
 
-## 2. 외부 호출 형태 (제안 — incubating)
+## 2. How it is called from outside (proposed — incubating)
 
 ```
 ctp.sh sqlsmith [-c <sqlsmith.conf>]
-   또는
+   or
 testkit run sqlsmith [-c <conf>] [--seed <N>] [--time <sec>] [--max-depth <D>]
 ```
 
-내부 진입 (의제):
+The internal entry point (agenda):
 ```
 SqlsmithDriver.exec(config)
-  ├─ schema introspect (CUBRID dialect — information_schema 또는 db_class/db_attribute)
+  ├─ schema introspect (CUBRID dialect — information_schema or db_class/db_attribute)
   ├─ AST generator loop:
   │    while time_left:
   │      query = generate(seed, depth)
@@ -47,67 +53,86 @@ SqlsmithDriver.exec(config)
   └─ report: { runs, crashes, top stack hashes }
 ```
 
-**SUT 구동 채널:** JDBC 또는 CCI (case-format ingestion 인터페이스 공유).
-**외부 표면 동결 영향:** 없음 (신규 진입점).
+**The channel that drives the SUT:** JDBC or CCI (sharing the case-format ingestion interface).
+**Effect on the external surface freeze:** none (a new entry point).
 
 ---
 
-## 3. 사용자 요구사항 (incubating 추정)
+## 3. What users need (an incubating estimate)
 
-1. **CUBRID schema introspect** — db_class / db_attribute / db_index 등 CUBRID system catalog 로 SQLsmith 의 PostgreSQL information_schema 의존을 대체
-2. **CUBRID 확장 SQL 생성 옵션** — object-oriented constructs (path expression, class hierarchy), serial, hierarchical query (CONNECT BY), method 등 *CUBRID dialect 가산*
-3. **crash detection** — process signal (SIGSEGV/SIGABRT) + cubrid server connection 끊김 + core file 발견
-4. **corpus 누적** — crash 유발 query 를 *재현 가능 seed + 정규화된 query text* 로 보관
-5. **stack hash dedup** — 같은 stack 의 여러 crash 를 1 항목으로 묶음
-6. **time / iteration / depth budget** — CI 안에서 정해진 시간 내 fuzzing
-7. **continue 모드** — corpus 의 과거 crash query 를 새 빌드에서 재실행 (regression seed 기능)
+1. **CUBRID schema introspection** — replacing SQLsmith's dependence on PostgreSQL's
+   information_schema with CUBRID's system catalog: db_class, db_attribute, db_index and the rest
+2. **An option to generate CUBRID's extended SQL** — object-oriented constructs (path expression,
+   class hierarchy), serial, hierarchical query (CONNECT BY), method and so on: *the CUBRID dialect
+   added on*
+3. **crash detection** — process signal (SIGSEGV/SIGABRT) + the cubrid server connection dropping +
+   a core file turning up
+4. **Accumulating a corpus** — keeping the query that caused a crash as a *reproducible seed plus
+   normalised query text*
+5. **stack hash dedup** — several crashes with the same stack collapsed into one entry
+6. **A time / iteration / depth budget** — fuzzing within a fixed time inside CI
+7. **A continue mode** — re-running the corpus's past crash queries against a new build (the
+   regression seed function)
 
 ---
 
-## 4. 비기능 요구
+## 4. Non-functional requirements
 
-| 항목 | 의제 | 새 시스템에서의 의미 |
+| Item | Agenda | What it means in the new system |
 |------|------|---------------------|
-| 도입 비용 | 낮음 (schema introspect 경로만 CUBRID 화) | survey §4 결론 — 즉시 후보 |
-| 즉시 ROI | ★★★★ | testkit 이 비어 있는 영역 직접 채움 |
-| §6a-E3 (SQLancer) 와의 관계 | 상보적 (SQLancer 는 wrong-result, SQLsmith 는 crash) | hybrid CI (E8) 시 함께 도입 |
-| AST nesting 깊이 | SQLsmith 강점 (deep) | SQLancer 보다 *더 깊은 AST* 가 핵심 자산 |
-| 라이선스 | SQLsmith custom — vendoring 정책 점검 필요 | ROADMAP §8 risk 6 동일 패턴 |
-| testcases 레포 동결 (NG1) | 충돌 없음 (corpus 외부 보관) | 단, corpus 위치 ADR 필요 |
+| Cost of adoption | low (only the schema introspection path is made CUBRID's) | the survey §4 conclusion — a candidate now |
+| Immediate ROI | ★★★★ | it fills directly an area testkit is empty in |
+| Relation to §6a-E3 (SQLancer) | complementary (SQLancer for wrong results, SQLsmith for crashes) | adopted together when hybrid CI (E8) comes |
+| AST nesting depth | SQLsmith's strength (deep) | *an AST deeper* than SQLancer's is the core asset |
+| Licence | SQLsmith is custom — the vendoring policy needs checking | the same pattern as ROADMAP §8 risk 6 |
+| The testcases repository freeze (NG1) | no conflict (the corpus is kept outside) | but an ADR for where the corpus lives is needed |
 
 ---
 
-## 5. 의존하는 외부 자원
+## 5. External resources it depends on
 
-- **CUBRID 클라이언트** — JDBC / CCI 중 SUT 구동 채널
-- **CUBRID system catalog** — db_class / db_attribute / db_serial / db_method 등
-- **SQLsmith 본체** — github.com/anse1/sqlsmith (C++) 또는 *재구현* (ADR-001 구현 언어 결정에 종속)
-- **core dump 인프라** — sql / isolation 모듈과 *core 정책 공유* 필요 (analysis/sql/requirements.md §4 의 core file 처리 ADR 와 결합)
-- **fuzz corpus storage** — testkit 내부 또는 별도 storage (ADR-EXT-002 입력)
+- **A CUBRID client** — the channel that drives the SUT, JDBC or CCI
+- **The CUBRID system catalog** — db_class / db_attribute / db_serial / db_method and the rest
+- **SQLsmith itself** — github.com/anse1/sqlsmith (C++), or *a reimplementation* (subordinate to
+  ADR-001's implementation language decision)
+- **Core dump infrastructure** — it needs to *share the core policy* with the sql and isolation
+  modules (bound up with the ADR on handling core files in analysis/sql/requirements.md §4)
+- **Fuzz corpus storage** — inside testkit or separate storage (an input to ADR-EXT-002)
 
 ---
 
-## 6. incubating 진입 조건
+## 6. The conditions for entering incubating
 
-다음이 결정되어야 ADR-EXT-002 작성 가능 (owner: hgryoo):
+ADR-EXT-002 can be written once these are decided (owner: hgryoo):
 
-1. **재사용 vs 재구현** — SQLsmith C++ 본체를 *subprocess* 로 사용할지, ADR-001 결정 언어로 *재구현* 할지
-2. **dialect 가산 범위** — CUBRID 확장 SQL (path expression / serial / connect-by / method) 을 어디까지 random AST 에 포함
-3. **fuzz corpus 위치** — testkit 내부 / cubrid 본 repo / 별도 storage. testcases 레포 동결 (NG1) 위반 여부 점검
-4. **crash 판정 채널** — signal vs core file vs cubrid server log — 단일 채널 확정
-5. **CI 통합 모드** — 매 PR 마다 short fuzz vs nightly long fuzz vs 별도 lane
-6. **§6a-E3 (SQLancer) 와 dialect adapter 공유** — survey Open Question 3 (dialect adapter 위치) 와 결합
-7. **strangler-fig 분기 게이트 §7 충돌 점검** — Phase 3·4 1차 대체와 자원 충돌 시 strangler-fig 우선
+1. **Reuse vs reimplement** — whether to use the SQLsmith C++ body as a *subprocess*, or to
+   *reimplement* it in the language ADR-001 decides
+2. **How far the dialect is extended** — how much of CUBRID's extended SQL (path expression /
+   serial / connect-by / method) goes into the random AST
+3. **Where the fuzz corpus lives** — inside testkit / in the cubrid repository / separate storage.
+   Check whether it violates the testcases repository freeze (NG1)
+4. **Which channel decides a crash** — signal vs core file vs cubrid server log — settle on a single
+   channel
+5. **The CI integration mode** — a short fuzz on every PR vs a nightly long fuzz vs a lane of
+   its own
+6. **Sharing the dialect adapter with §6a-E3 (SQLancer)** — bound up with survey Open Question 3
+   (where the dialect adapter sits)
+7. **Checking for a conflict with the strangler fig's branch gate, §7** — where it competes for
+   resources with the first replacement of phases 3 and 4, the strangler fig comes first
 
 **ADR placeholder:**
-- ADR-EXT-002 — SQLsmith 재사용/재구현 선택 + dialect 가산 범위 + corpus 위치 + crash 판정 채널
+- ADR-EXT-002 — reuse or reimplement SQLsmith, how far the dialect is extended, where the corpus
+  lives, which channel decides a crash
 
 ---
 
-## 7. 위험 / 정합성 메모
+## 7. Notes on risk and consistency
 
-- **NG1 충돌 가능** — fuzz corpus 가 testcases 레포에 들어가면 동결 위반. *외부 corpus storage* 가 안전
-- **NG2 충돌 없음** — 신규 진입점
-- **NG4 충돌 없음** — CUBRID 가 SUT
-- **§6a-E3 (SQLancer) + E2 (SQLsmith) 결합** — survey §4.4 / §11: PostgreSQL ecosystem 의 *de facto* 모범. 함께 도입 권장
-- **§6a-E5 (parser fuzzing) 와 보완** — SQLsmith 는 *문법 내 random*; libFuzzer 는 *문법 외 byte-level*. 둘 다 parser crash 를 잡지만 영역이 다름
+- **Possible conflict with NG1** — putting the fuzz corpus into a testcases repository violates the
+  freeze. *External corpus storage* is the safe course
+- **No conflict with NG2** — a new entry point
+- **No conflict with NG4** — CUBRID is the SUT
+- **§6a-E3 (SQLancer) together with E2 (SQLsmith)** — survey §4.4 / §11: the *de facto* practice of
+  the PostgreSQL ecosystem. Adopting them together is recommended
+- **Complementary to §6a-E5 (parser fuzzing)** — SQLsmith is *random inside the grammar*; libFuzzer
+  is *byte-level outside the grammar*. Both catch parser crashes, but over different areas

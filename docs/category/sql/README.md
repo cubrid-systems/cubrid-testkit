@@ -1,5 +1,7 @@
 # The `sql` category
 
+*English · [한국어](README.ko.md)*
+
 `sql` and `medium` are CTP's two SQL corpora — 17,459 cases and 975 — and the second family testkit
 rewrote. These documents are the as-built guide.
 

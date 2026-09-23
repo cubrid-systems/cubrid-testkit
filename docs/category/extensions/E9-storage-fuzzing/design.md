@@ -1,27 +1,29 @@
 # E9 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-009 incubating 정식 진입 후.
-E5 의 `-DENABLE_FUZZING` 인프라 + state reset 스파이크가 선결.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-009.
+E5's `-DENABLE_FUZZING` infrastructure plus the state reset spike come first.
 **Source:** ROADMAP §6a-E9, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §7.4
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 책임 경계 (cross-repo)
+## 1. The responsibility boundary (cross-repo)
 
 ```
-cubrid 본 repo                            testkit (이 모듈)
+the cubrid repository                     testkit (this module)
 ─────────────                            ───────────────
-storage fuzz target                  →   corpus 보관 (seed + crash)
-in-process boot / shutdown 진입점    →   replay (regression)
-state reset 훅                       →   crash triage (stack hash dedup)
-sanitizer 빌드 (ASan/UBSan)          →   op sequence → 사람이 읽는 reproducer 덤프
-LLVMFuzzerTestOneInput 구현          →   coverage 보고
+the storage fuzz target              →   keeping the corpus (seed + crash)
+in-process boot / shutdown entry     →   replay (regression)
+the state reset hook                 →   crash triage (stack hash dedup)
+sanitizer builds (ASan/UBSan)        →   op sequence → a reproducer dump a person can read
+the LLVMFuzzerTestOneInput impl      →   coverage reporting
 ```
 
-E5 와 **같은 인프라를 공유** 한다. 본 항목이 추가로 요구하는 것은 *reset 훅* 뿐이다.
+It **shares the same infrastructure** as E5. All this entry asks for on top is the *reset hook*.
 
-## 2. 계층 (의제)
+## 2. The layers (agenda)
 
 ```
 libFuzzer
@@ -29,42 +31,42 @@ libFuzzer
    ▼
 StorageOpSequence (in-memory)
    ▼
-translate()  ── op → heap_* / btree_* / log_* 직접 호출
+translate()  ── op → calling heap_* / btree_* / log_* directly
    ▼
-CUBRID storage engine (in-process, 임시 volume)
+CUBRID storage engine (in-process, a temporary volume)
    ▲
-reset()  ── 매 입력 경계에서 호출
+reset()  ── called at every input boundary
 ```
 
-protobuf 는 **mutator 층에만** 존재한다. `translate()` 아래로는 protobuf 가 없고,
-CUBRID 자체 프로토콜/직렬화는 *전혀 경유하지 않는다* (`requirements.md` §2).
+protobuf exists **only in the mutator layer**. Below `translate()` there is no protobuf, and
+CUBRID's own protocol and serialization are *not gone through at all* (`requirements.md` §2).
 
-## 3. 모듈 위치 (의제)
+## 3. Where the module sits (agenda)
 
 ```
-internal/runner/fuzzharness/          # E5 와 공유
+internal/runner/fuzzharness/          # shared with E5
    ├── runner/
    ├── corpus/
    ├── triage/
    ├── coverage/
-   └── storage/                       # ← 본 항목 신규
-         ├── opdump/                  # op sequence → 텍스트 reproducer
-         └── invariant/               # 선택적 검사점 결과 수집
+   └── storage/                       # ← new in this entry
+         ├── opdump/                  # op sequence → a text reproducer
+         └── invariant/               # collecting the results of optional checkpoints
 ```
 
-## 4. state reset 전략 — 결정 보류
+## 4. The state reset strategy — held over
 
-`requirements.md` §5 의 A/B/C/D 비교표. 스파이크 결과로 결정.
-**본 문서의 나머지는 이 결정에 종속되므로 지금 쓸 수 없다.**
+The A/B/C/D comparison table in `requirements.md` §5. Decided by the result of the spike.
+**The rest of this document depends on that decision and so cannot be written yet.**
 
-## 5. 결정 보류 항목 → ADR-EXT-009
+## 5. Decisions held over → ADR-EXT-009
 
-- 입력 IR (libprotobuf-mutator vs FuzzedDataProvider vs 자체)
-- state reset 전략
-- operation 어휘 1차 범위 (heap 단독 / +btree / +vacuum / +checkpoint)
-- corpus 위치 (NG1 점검)
-- invariant 훅 유무
+- the input IR (libprotobuf-mutator vs FuzzedDataProvider vs our own)
+- the state reset strategy
+- the first scope of the operation vocabulary (heap alone / +btree / +vacuum / +checkpoint)
+- where the corpus lives (NG1 check)
+- whether there are invariant hooks
 
-## 6. design 작성 트리거
+## 6. The trigger for writing the design
 
-E5 인프라 + state reset 스파이크 + ADR-EXT-009 후. 현 시점 stub.
+After the E5 infrastructure, the state reset spike and ADR-EXT-009. A stub for now.

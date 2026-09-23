@@ -1,24 +1,27 @@
 # E1 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-001 incubating 정식 진입 후.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-001.
 **Source:** ROADMAP §6a-E1, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §3
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 모듈 위치 (의제)
+## 1. Where the module sits (agenda)
 
 ```
-internal/runner/sqllogictest/        # 신 모듈 — case-format ingestion 인터페이스 통해 testkit 골격에 결합
-   ├── parser/            # .slt record 파서 (statement / query)
-   ├── runner/            # SUT 구동 (JDBC | CCI | cubrid-cli)
-   ├── compare/           # hash 비교 + values 비교 + sort 옵션 처리
-   └── report/            # pass / fail / hash mismatch / dialect-skip 분류
+internal/runner/sqllogictest/        # new module — joined to the testkit skeleton through the case-format ingestion interface
+   ├── parser/            # .slt record parser (statement / query)
+   ├── runner/            # drives the SUT (JDBC | CCI | cubrid-cli)
+   ├── compare/           # hash comparison + values comparison + sort option handling
+   └── report/            # classifies pass / fail / hash mismatch / dialect-skip
 ```
 
-ADR-001 (구현 언어) 결정에 따라 sqllogictest-rs 를 직접 의존할지(`Rust`) / 자체 구현할지 결정됨.
+Whether sqllogictest-rs is depended on directly (`Rust`) or the thing is implemented here is decided
+by ADR-001 (implementation language).
 
-## 2. 데이터 흐름 (의제)
+## 2. Data flow (agenda)
 
 ```
 .slt file
@@ -29,19 +32,20 @@ ADR-001 (구현 언어) 결정에 따라 sqllogictest-rs 를 직접 의존할지
                       └─ report.classify
 ```
 
-## 3. 외부 의존
+## 3. External dependencies
 
-- ADR-001 결정 언어 + JDBC/CCI 클라이언트
-- 외부 sqllogictest 코퍼스 (test-corpus.md 참조)
-- Phase 2 `project/design/contracts.md` 의 case-format ingestion 인터페이스
+- the language ADR-001 decides, plus a JDBC/CCI client
+- an external sqllogictest corpus (see test-corpus.md)
+- the case-format ingestion interface in phase 2's `project/design/contracts.md`
 
-## 4. 결정 보류 항목 → ADR-EXT-001
+## 4. Held over for decision → ADR-EXT-001
 
-- spec variant (SQLite / DuckDB / CockroachDB)
-- 결과 비교 모드 (hash vs values vs CUBRID expected 추가)
-- SUT 구동 클라이언트 (JDBC / CCI / cubrid-cli)
-- sqllogictest-rs 재사용 vs 자체 구현
+- the spec variant (SQLite / DuckDB / CockroachDB)
+- the result comparison mode (hash vs values vs adding a CUBRID expected file)
+- the client that drives the SUT (JDBC / CCI / cubrid-cli)
+- reusing sqllogictest-rs vs implementing it here
 
-## 5. design 작성 트리거
+## 5. The trigger for writing the design
 
-ADR-EXT-001 합의 후 본 문서를 *FULL* 로 보강. 현 시점에는 의제 보관소.
+Once ADR-EXT-001 is agreed, this document is filled in to *FULL*. For now it is a holding place for
+the agenda.

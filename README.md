@@ -1,5 +1,7 @@
 ![cubrid-testkit — finds the cases, runs them, judges them, records what happened. Every task it takes over keeps the same commands and the same output. Shown: a run marking cases OK and NOK, and the summary it writes out.](docs/assets/banner.svg)
 
+*English · [한국어](README.ko.md)*
+
 **cubrid-testkit** runs CUBRID's functional tests. Find the cases, run them against an engine,
 decide whether each one passed, write down what happened — and nothing else.
 
@@ -17,7 +19,7 @@ For engine developers and QA. Part of
 | [Quick start](#quick-start) | build it and run a suite |
 | [What runs where](#what-runs-where) | which of the fourteen tasks is native yet, and what each gate needs |
 | [Using it](#using-it) | the command line, the tasks, `run-shell`, and what a run leaves behind |
-| [The categories](#the-categories) | the as-built guide for `shell`, `sql` and `isolation` |
+| [The categories](#the-categories) | the as-built guide for `shell`, `sql`, `isolation` and the two HA suites |
 | [How it works](#how-it-works) | routing, the shim, the three decisions that are the whole design, and the frozen surface |
 | [Why you can trust it](#why-you-can-trust-it) | what each gate has actually produced, family by family |
 | [Layout](#layout) | the repository, and where to start reading |
@@ -41,7 +43,7 @@ family.
 | | Why |
 |---|---|
 | **Go 1.25+** | to build the binary (`go.mod`) |
-| **A CTP checkout** | any task that has not been rewritten runs the original as a subprocess: `CTP_HOME`, and `JAVA_HOME` for that path |
+| **A CTP checkout** | **two different reasons, and both apply.** A task that has not been rewritten runs the original as a subprocess, which needs `CTP_HOME` and `JAVA_HOME`. And the rewritten `shell` task needs it too: every case in the corpus begins `. $init_path/init.sh`, that file is CTP's, and `write_ok`, `write_nok`, `compare_result_between_files`, `finish` and `cubrid_createdb` are all in it. The corpus is frozen (NG1), so the dependency is the corpus's rather than the runner's — it ends when the corpus is freed, not when a task is rewritten |
 | **A CUBRID build** | the engine under test, with its own install and `CUBRID_DATABASES` |
 | **A testcases checkout** | the cases themselves, for the tasks that read a corpus |
 
@@ -82,11 +84,12 @@ This is the one place the migration's state is recorded; everything else in this
 | `sql` · `medium` | natively behind `TESTKIT_NATIVE=sql` | [ADR-017](docs/project/adr/ADR-017-sql-equivalence.md) — gate **passed** |
 | `isolation` | natively behind `TESTKIT_NATIVE=isolation`, `runone.sh` still executing every case | [ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md) — gate **met** |
 | `isolation`, with its controller too | `TESTKIT_ISOLATION_CTL=1` as well: testkit's own controller in place of ctltool's `qactl`, keeping `qacsql` and `runone.sh`. 15.7% faster over the whole corpus | [ADR-019](docs/project/adr/ADR-019-isolation-controller.md) — gate **does not pass**: 27 cases whose answers record the order `qactl`'s pauses produced. Six are carried as patches here; the rest need an answer re-recorded, and the gate is then run on the patched corpus ([ADR-018](docs/project/adr/ADR-018-isolation-equivalence.md) 3a, 6) |
-| `kcc` `neis05` `neis08` `sql_by_cci` `ha_repl` `cdc_repl` `jdbc` `webconsole` — and any family above whose switch is unset | CTP, as a subprocess, unchanged | — |
+| `ha_repl` | natively behind `TESTKIT_NATIVE=ha_repl`, against a pair `cluster-sandbox` stands up | **no parity gate, and the reason is recorded.** CTP reaches this corpus through a conversion that deletes every `CALL` and almost every `SELECT`, so parity would be a claim about a different corpus ([ADR-015](docs/project/adr/ADR-015-beyond-axis.md), amended 2026-09-23) |
+| `kcc` `neis05` `neis08` `sql_by_cci` `cdc_repl` `jdbc` `webconsole` — and any family above whose switch is unset | CTP, as a subprocess, unchanged | — |
 
 `TESTKIT_NATIVE` names the families, comma-separated, and `all` is every one of them.
 `TESTKIT_NATIVE_<FAMILY>=1` — `TESTKIT_NATIVE_SHELL=1`, `TESTKIT_NATIVE_SQL=1`,
-`TESTKIT_NATIVE_ISOLATION=1` — does the same for one family. Either turns the same registration on;
+`TESTKIT_NATIVE_ISOLATION=1`, `TESTKIT_NATIVE_HA_REPL=1` — does the same for one family. Either turns the same registration on;
 neither turns the other off.
 
 A switch is opt-in until its **gate** clears. A gate is not an opinion about the code — it is a
@@ -193,13 +196,16 @@ private, and its README says what each one is for.
 ## The categories
 
 Each family has an as-built guide — the stages, every configuration key with what it costs, how to
-run it on a host and in Docker, and how to read a failure.
+run it on a host and in Docker, and how to read a failure. `ha-shell` is the one that is still
+shorter, and deliberately: the parts that are not built are named rather than described.
 
 | | |
 |---|---|
 | **[`category/shell/`](docs/category/shell/README.md)** | the task this project rewrote first, and the one with options: parallel slots on one machine, a corpus that cleans itself up, per-case patches, a progress page, and the memory ceiling that fails a run when it is sized wrong |
 | **[`category/sql/`](docs/category/sql/README.md)** | `sql` and `medium` — the stages and the executor, what parallel buys and what it costs on the machine you have, and how to read a failure that is the corpus's order rather than the engine's |
 | **[`category/isolation/`](docs/category/isolation/README.md)** | the stages and what `runone.sh` does with a case, the `.ctl` language as `qactl` reads it, every key, and the cases CTP cannot reproduce either |
+| **[`category/ha-shell/`](docs/category/ha-shell/README.md)** | the `shell` task against a pair — what it establishes, the verbs a case gets, and the three rules the frozen corpus breaks |
+| **[`category/ha-repl/`](docs/category/ha-repl/README.md)** | the `sql` corpus run across a pair, with the case's own reads as the oracle — the nine verdicts, every key, running one corpus over several pairs from one process, the status page and `testkit watch` |
 | **[`category/extensions/`](docs/category/extensions/README.md)** | testing axes CTP never had — E1–E10 over eight axes: sqllogictest, SQLancer, SQLsmith, distributed isolation, parser and storage fuzzing, differential, workload, XASL fixtures |
 
 ## How it works
@@ -311,6 +317,16 @@ behind would otherwise hand it to whichever runner goes second. The 48 cases tha
 machine but the one they were written on are patched **in the corpus**, before either runner, so both
 read the same source and the report names which they were.
 
+**`ha_repl` — no gate, and that is the finding.** Reading CTP's conversion showed it deletes every
+statement beginning with `CALL` — 1,707 catalog-method calls and 10,257 procedure calls across the
+corpus — and every `SELECT` that does not say `INCR` or `DECR`, which is to say the cases' own reads.
+So there is no CTP verdict for several of these findings to be diffed against, and
+[ADR-015](docs/project/adr/ADR-015-beyond-axis.md) was amended rather than waived: where the
+baseline cannot express the question, parity is not the gate. What this runner ships on instead is
+its own reproductions — each finding in
+[`project/evidence/ha/`](docs/project/evidence/ha/README.md) carries one, small enough to re-run by
+hand on a pair.
+
 **Corrections are recorded where the mistake was made** — the CLI survey that justified the project,
 the freeze specification, the corpus counts, the first difference this runner was wrongly cleared
 of, and 33 more found while measuring sql, medium and isolation under CTP — and reading `qactl` —
@@ -323,7 +339,8 @@ before rewriting them
 CONTEXT.md               the glossary — task ≠ suite ≠ module ≠ runner
 cmd/testkit/             the entry point
 internal/                cli · conf · registry · dispatch · runshell · exec · result · feedback ·
-                         topology · runner (legacy, shellsuite, sqlsuite, isolationsuite) ·
+                         topology · runner (legacy, shellsuite, sqlsuite, isolationsuite,
+                         hareplsuite) · sandbox (drives cluster-sandbox, reads its JSON) ·
                          contain (namespaces per slot) · plan (case durations) ·
                          patch (per-case patches) · sizing (how many slots, from what this
                          machine measured) · coredump (a dead server's stack, and the crash
@@ -345,6 +362,8 @@ docs/
   category/              how to run each test category, and what to set
     shell/  sql/         the as-built guides
     isolation/           the same, for isolation
+    ha-repl/             the sql corpus across a pair, with the case's own reads as the oracle
+    ha-shell/            the shell task against a pair; its corpus is still CTP's
     extensions/          testing axes CTP never had
   project/               why the rewrite exists and how it is built
     ROADMAP.md           phases, exit conditions, risks, the re-evaluation gate
@@ -365,6 +384,7 @@ docs/
 | how to run the shell suite | [`category/shell/`](docs/category/shell/README.md) |
 | how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
 | how to run isolation | [`category/isolation/`](docs/category/isolation/README.md) |
+| how to test HA replication across a pair | [`category/ha-repl/`](docs/category/ha-repl/README.md) |
 | what this system is for | [`project/concept/north-star.md`](docs/project/concept/north-star.md) |
 | what may never change | [`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) |
 | what was left out, and why | [`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md) |
@@ -376,8 +396,14 @@ docs/
 | what happens next | [`project/ROADMAP.md`](docs/project/ROADMAP.md) · [`project/design/module-shell.md`](docs/project/design/module-shell.md) · [`project/design/module-isolation.md`](docs/project/design/module-isolation.md) |
 | every decision so far | [`project/adr/README.md`](docs/project/adr/README.md) |
 
-The guides for shell, sql and isolation, the evidence, and the later ADRs are in English. The
-analysis, the concept and design documents, the roadmap, the extension notes under
-`docs/category/extensions/` and the first ADRs are in Korean and stay that way — a freeze
-specification is worth exactly what its sentences are worth, and re-writing six thousand lines of
-analysis buys nothing but a chance to introduce errors.
+### The documentation's languages
+
+**The root README and everything under `docs/category/` exist in both English and Korean.** One
+rule: `X.md` is the English page and `X.ko.md` is the Korean one. The two carry the same content,
+and changing only one of them is treated as a bug.
+
+Everything under `docs/project/` — the roadmap, the ADRs, concept, design, analysis and survey —
+**stays in Korean.** Those are the project's direction and its design record rather than pages
+aimed at a user, and a freeze specification is worth exactly what its sentences are worth: rewriting
+six thousand lines of analysis buys nothing but a chance to introduce errors. The later ADRs and
+`evidence/` were written in English and stay that way.

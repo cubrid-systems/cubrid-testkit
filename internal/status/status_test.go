@@ -132,8 +132,17 @@ func TestAddr(t *testing.T) {
 	}
 	// Loopback by default: turning the page on should not publish a run to the
 	// network.
-	if !strings.HasPrefix(DefaultAddr, "127.0.0.1:") {
-		t.Errorf("the default address is not loopback: %q", DefaultAddr)
+	// Every interface by default, decided 2026-09-23: exposure is controlled by
+	// the network these machines are on, and a page only the host can open is a
+	// page nobody opens. An operator who needs loopback writes the host.
+	if strings.Contains(DefaultAddr, "127.0.0.1") {
+		t.Errorf("the default address is loopback again: %q", DefaultAddr)
+	}
+	if !strings.HasPrefix(DefaultAddr, ":") {
+		t.Errorf("the default address should name a port and every interface: %q", DefaultAddr)
+	}
+	if got := Addr("127.0.0.1:51523"); got != "127.0.0.1:51523" {
+		t.Errorf("an operator's own host was not passed through: %q", got)
 	}
 }
 
@@ -1167,5 +1176,83 @@ func TestTheDefaultPortMovesAlongAndAPinnedOneDoesNot(t *testing.T) {
 	pinned := New(1)
 	if _, _, err := pinned.Open(elsewhere); err == nil {
 		t.Errorf("%s was taken, and a run that pinned it was moved along rather than refused", elsewhere)
+	}
+}
+
+// feedback.log is appended to and a result directory is reused, so a case that
+// ran in an earlier run still has a block in it. The page must not hand that
+// block over as though it were this run's: a reader who clicks a case and gets
+// yesterday's trace debugs yesterday. The same accumulation in test_<env>.log
+// cost a reader an hour on 2026-09-23, silently.
+func TestTheDetailPaneReadsOnlyThisRunsPartOfTheLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "feedback.log")
+	old := "[NOK]: /corpus/_01/cases/a.sh 10 EnvId=local[slot0]\n" +
+		"yesterday's trace, which is not this run's\n"
+	if err := os.WriteFile(path, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := New(1)
+	b.DetailSince(path) // the run starts here: everything above belongs to a run that is over
+
+	// Nothing of this run's yet, so there is nothing to show -- not the old block.
+	if got := b.detail.block("/corpus/_01/cases/a.sh"); got != "" {
+		t.Errorf("handed over an earlier run's block:\n%s", got)
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("[OK]: /corpus/_01/cases/a.sh 11 EnvId=local[slot0]\nthis run's trace\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	got := b.detail.block("/corpus/_01/cases/a.sh")
+	if !strings.Contains(got, "this run's trace") {
+		t.Errorf("did not find this run's block:\n%s", got)
+	}
+	if strings.Contains(got, "yesterday") {
+		t.Errorf("mixed an earlier run into this one:\n%s", got)
+	}
+
+	// A file that shrank was replaced rather than appended to, so the offset
+	// means nothing and the whole of it is this run's.
+	if err := os.WriteFile(path, []byte("[OK]: /corpus/_01/cases/a.sh 12 EnvId=local[slot0]\nfresh file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.detail.block("/corpus/_01/cases/a.sh"); !strings.Contains(got, "fresh file") {
+		t.Errorf("a replaced file was read from a stale offset:\n%s", got)
+	}
+}
+
+// A run sharded across several pairs is watched on one screen or not at all.
+// The panel therefore keys by cluster and upserts: one sampler gets one block,
+// eight get eight, in a stable order, and a second reading of the same cluster
+// replaces the first rather than adding to it.
+func TestThePairPanelHoldsOnePerCluster(t *testing.T) {
+	b := New(1)
+	if got := b.snapshot().Pairs; len(got) != 0 {
+		t.Fatalf("a run with no pair reported %d", len(got))
+	}
+	b.Pair(&Pair{Cluster: "sh2", DB: "sh2", Nodes: []PairNode{{Name: "sh2-n1", Built: "master"}}})
+	b.Pair(&Pair{Cluster: "sh1", DB: "sh1", Nodes: []PairNode{{Name: "sh1-n1", Built: "master"}}})
+	got := b.snapshot().Pairs
+	if len(got) != 2 {
+		t.Fatalf("two clusters gave %d panel(s)", len(got))
+	}
+	// Sorted, so the eighth shard does not move about between refreshes.
+	if got[0].Cluster != "sh1" || got[1].Cluster != "sh2" {
+		t.Errorf("out of order: %s, %s", got[0].Cluster, got[1].Cluster)
+	}
+
+	b.Pair(&Pair{Cluster: "sh1", DB: "sh1", Note: "the group would not answer"})
+	got = b.snapshot().Pairs
+	if len(got) != 2 {
+		t.Fatalf("a second reading of sh1 made %d panels", len(got))
+	}
+	if got[0].Note == "" {
+		t.Error("the newer reading of sh1 did not replace the older one")
 	}
 }

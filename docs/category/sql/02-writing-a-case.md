@@ -1,5 +1,7 @@
 # 2. Writing a case
 
+*English · [한국어](02-writing-a-case.ko.md)*
+
 [← back to the sql category](README.md)
 
 - [The layout](#the-layout)

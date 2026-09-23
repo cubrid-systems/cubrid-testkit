@@ -1,42 +1,44 @@
 # E4 — I/O Contract (STUB)
 
-**Status:** STUB — contract 동결은 ADR-EXT-004 incubating 정식 진입 후.
+*English · [한국어](io-contract.ko.md)*
+
+**Status:** STUB — the contract is frozen after formal entry into incubating through ADR-EXT-004.
 **Source:** `requirements.md` §2
 
 ---
 
-## 1. CLI (제안)
+## 1. CLI (proposed)
 
 ```
 ctp.sh isolation-dist [-c <isolation-dist.conf>] [--mode awdit|jepsen]
-   또는
+   or
 testkit run isolation-dist --mode <name> [--topology ha|streaming] [--time <sec>] [--seed <N>]
 ```
 
-## 2. conf 스키마 (TBD)
+## 2. conf schema (TBD)
 
-| 키 (의제) | 값 | 출처 |
+| Key (agenda) | Value | Source |
 |---|---|---|
-| `seed` | `<int>` | 재현용 |
-| `time_budget_sec` | `<int>` | CI 시간 통제 |
-| `mode` | `awdit \| jepsen` | analyzer 선택 |
-| `topology` | `ha \| streaming` | 클러스터 구성 |
-| `nodes` | `<int>` | 노드 수 |
-| `fault_channels` | csv `partition,kill,clock,cgroup` | fault injection 활성화 |
-| `corpus_root` | `<dir>` | history / violation corpus 위치 |
-| `client_count` | `<int>` | 동시 클라이언트 수 |
+| `seed` | `<int>` | for reproduction |
+| `time_budget_sec` | `<int>` | controlling CI time |
+| `mode` | `awdit \| jepsen` | choice of analyzer |
+| `topology` | `ha \| streaming` | the cluster's shape |
+| `nodes` | `<int>` | the number of nodes |
+| `fault_channels` | csv `partition,kill,clock,cgroup` | which fault injection is enabled |
+| `corpus_root` | `<dir>` | where the history / violation corpus lives |
+| `client_count` | `<int>` | the number of concurrent clients |
 
-ADR-EXT-004 후 키/의미 동결.
+Keys and meanings are frozen after ADR-EXT-004.
 
-## 3. 출력 포맷 (TBD)
+## 3. Output format (TBD)
 
 ```
 <resultDir>/
    ├── main.info
    ├── history/
-   │     └── <client-id>.tx.log    # tx start / commit / abort 로그
+   │     └── <client-id>.tx.log    # tx start / commit / abort logs
    ├── faults/
-   │     └── timeline.json         # fault sequence (재현 seed)
+   │     └── timeline.json         # the fault sequence (the seed that reproduces it)
    ├── violations/
    │     └── <witness-hash>/
    │           ├── seed
@@ -46,14 +48,14 @@ ADR-EXT-004 후 키/의미 동결.
    └── stats.json                  # iterations / violation count / per-anomaly hit
 ```
 
-## 4. 종료 코드 (TBD)
+## 4. Exit codes (TBD)
 
-| 값 | 의미 |
+| Value | Meaning |
 |---|---|
-| 0 | 시간 내 violation 없음 |
-| 1 | violation 발견 |
-| ≥2 | infra 오류 (deploy 실패 / 노드 미기동 등) |
+| 0 | no violation within the time |
+| 1 | a violation was found |
+| ≥2 | an infrastructure error (deploy failed, a node is not up, and so on) |
 
-## 5. NG2 / NG4 점검
+## 5. The NG2 / NG4 check
 
-신규 진입점 — 충돌 없음.
+A new entry point — no conflict.

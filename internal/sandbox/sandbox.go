@@ -39,6 +39,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -57,7 +58,52 @@ const BinEnv = "TESTKIT_CSB"
 // DefaultTimeout bounds one csb call. Provisioning verbs are slower than this
 // and are not called from here: a run attaches to a cluster somebody already
 // stood up, so every call this package makes is a read or an exec.
+//
+// It is not large enough for every case in the sql corpus. `_09_partition` holds
+// statements that take minutes on their own -- one case creates a table with
+// 2,048 partitions -- and a run over `_01_object` hit this bound eight times.
+// That is a real limit, and a caller should be able to raise it (`CLI.Timeout`);
+// what it must not do is disguise it, which is what `ErrTimedOut` below is for.
+//
+// Provisioning is the exception and has a bound of its own. `cluster create`
+// builds an image if the recipe changed, creates a database and seeds a slave
+// from it; `cluster destroy` waits for servers to flush. Neither belongs under a
+// bound chosen for reads.
 const DefaultTimeout = 2 * time.Minute
+
+// ProvisionTimeout bounds `cluster create` and `cluster destroy`. Measured
+// rather than guessed: creating a pair on this machine takes about a minute
+// when the image is already built, and the first create after a recipe change
+// takes several.
+const ProvisionTimeout = 15 * time.Minute
+
+// CaseTimeout bounds a call that runs a case's own SQL.
+//
+// A third bound rather than a bigger first one, because the three are different
+// kinds of work and one number cannot serve them. A read -- `ha status`,
+// `describe`, `fault ls` -- answers in under a second, and a two-minute bound on
+// it is already generous; raising that to cover the corpus would mean waiting
+// minutes to find out a pair had stopped serving. Provisioning is minutes by
+// nature. A case is whatever the corpus says it is.
+//
+// Ten minutes, and the measurement is why. `_09_partition/_001_create/bug_xdbms294`
+// is the corpus's largest case at 67 KB: two CREATEs of 1,024 list partitions
+// each, with a DROP after each. Timed on a fresh quiet pair, the first CREATE
+// takes 158 s against a cold database and 82 s against a warm one, and the four
+// statements in one csql call take 130 s warm -- so a run under `reset=case`,
+// which hands every case a cold database, pays about 250 s for it. Ten minutes
+// is that with room for a slower machine, and still inside ProvisionTimeout,
+// which is the longest thing this package waits for.
+//
+// What it costs when a call really has hung is that case and no other: the run
+// reports `case_failed` naming the bound and goes on.
+const CaseTimeout = 10 * time.Minute
+
+// ErrTimedOut is a call that ran past this package's own bound and was killed
+// for it. It is a distinct error because the remedy is distinct: the node did
+// not fail and the cluster is not unreachable -- the work was longer than the
+// caller allowed. Test with errors.Is.
+var ErrTimedOut = errors.New("sandbox: the call outlived its timeout")
 
 // CLI is one cluster, reached through the csb command.
 type CLI struct {
@@ -132,14 +178,34 @@ func (c *CLI) call(ctx context.Context, noun, verb string, rest ...string) (*env
 	if strings.TrimSpace(c.Cluster) == "" {
 		return nil, fmt.Errorf("sandbox: no cluster named")
 	}
+	return c.callRaw(ctx, noun, verb, rest...)
+}
+
+// callRaw is call without the cluster requirement, so that the one verb which
+// is about the machine rather than about a cluster can use the same envelope
+// reading, the same timeout and the same error wording as everything else.
+func (c *CLI) callRaw(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
 
-	argv := append([]string{noun, verb, "--cluster", c.Cluster, "--json"}, rest...)
+	argv := []string{noun, verb}
+	if strings.TrimSpace(c.Cluster) != "" {
+		argv = append(argv, "--cluster", c.Cluster)
+	}
+	argv = append(append(argv, "--json"), rest...)
 	cmd := exec.CommandContext(ctx, c.bin(), argv...)
 	var out, errOut strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	runErr := cmd.Run()
+
+	// A deadline this package set killed the child, and `exec` reports that as
+	// `signal: killed` -- which reads exactly like something outside the run
+	// killing it. Said plainly instead, with the bound named: a caller deciding
+	// what to do needs to know the node was fine and the clock was not.
+	if runErr != nil && ctx.Err() == context.DeadlineExceeded {
+		return nil, fmt.Errorf("%w: %s %s %s did not finish within %s",
+			ErrTimedOut, c.bin(), noun, verb, c.timeout())
+	}
 
 	var env envelope
 	if jerr := json.Unmarshal([]byte(out.String()), &env); jerr != nil {
@@ -187,6 +253,46 @@ func (c *CLI) Available(ctx context.Context) error {
 		return fmt.Errorf("sandbox: %s does not answer --version (%v). "+
 			"Build it from extensions/cluster-sandbox and put it on PATH, or set %s",
 			c.bin(), err, BinEnv)
+	}
+	return nil
+}
+
+// callLong is `call` with the provisioning bound rather than the read bound.
+func (c *CLI) callLong(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
+	long := *c
+	if long.Timeout < ProvisionTimeout {
+		long.Timeout = ProvisionTimeout
+	}
+	return long.call(ctx, noun, verb, rest...)
+}
+
+// callNoCluster is for the one question that is about the machine rather than
+// about a cluster: `cluster ls`. It exists because `call` requires a cluster and
+// is right to -- every other verb is meaningless without one.
+func (c *CLI) callNoCluster(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
+	anon := *c
+	anon.Cluster = ""
+	return anon.callRaw(ctx, noun, verb, rest...)
+}
+
+// callLongNoCluster is the provisioning bound without the cluster requirement,
+// for the one destructive verb that selects its own targets.
+func (c *CLI) callLongNoCluster(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
+	long := *c
+	long.Cluster = ""
+	if long.Timeout < ProvisionTimeout {
+		long.Timeout = ProvisionTimeout
+	}
+	return long.callRaw(ctx, noun, verb, rest...)
+}
+
+// decode reads the envelope's data into v.
+func (e *envelope) decode(v any) error {
+	if len(e.Data) == 0 {
+		return fmt.Errorf("sandbox: %s returned no data", e.Command)
+	}
+	if err := json.Unmarshal(e.Data, v); err != nil {
+		return fmt.Errorf("sandbox: %s returned data this runner cannot read: %w", e.Command, err)
 	}
 	return nil
 }

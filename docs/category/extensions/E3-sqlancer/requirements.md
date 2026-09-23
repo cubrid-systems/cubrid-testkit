@@ -1,35 +1,41 @@
 # E3 — Logic Bug Detection (SQLancer NoREC + TLP) (Requirements)
 
+*English · [한국어](requirements.ko.md)*
+
 **Source:** survey/dbms-testing-ecosystem.md §5 + §11
-**Status:** incubating (정식 진입 전 — ADR-EXT-003 자리)
-**축 매핑:** 축 3 (Logic-bug / semantic testing)
-**Companion docs (후속):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
+**Status:** incubating (before formal entry — the ADR-EXT-003 slot)
+**Axis mapping:** axis 3 (Logic-bug / semantic testing)
+**Companion docs (to follow):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
 
 ---
 
-## 1. 이 확장이 해결하는 문제
+## 1. The problem this extension solves
 
-CUBRID 의 **optimizer 정확성 / executor semantic correctness / 3-valued logic 처리** 를 *의미 등가 query 쌍* 으로 검증한다.
+It verifies **CUBRID's optimizer correctness, its executor's semantic correctness and its handling
+of 3-valued logic** with *pairs of semantically equivalent queries*.
 
-기존 testkit 의 sql 모듈은 *expected file diff* 만 — 정답이 미리 알려진 쿼리만 본다. SQLancer 류 logic-bug 도구는:
-- *정답을 모르는* random query 쌍을 *서로 비교*
-- optimizer rewrite 가 의미를 보존하는지 검증
-- NULL / UNKNOWN 처리가 일관된지 검증
-- pivot 기반으로 행 누락 / 추가 검증
+The existing testkit's sql module does only an *expected file diff* — it looks only at queries whose
+answer is known in advance. Logic-bug tools of the SQLancer kind:
+- *compare against each other* random query pairs *whose answer is unknown*
+- verify that an optimizer rewrite preserves meaning
+- verify that NULL / UNKNOWN handling is consistent
+- verify, from a pivot, that no row is missing or added
 
-**잡는 버그 종류:** wrong-result. 같은 SQL surface 에서 *내부 plan 차이* 가 결과를 다르게 만드는 종류. parser crash 는 *축 외* (그건 §6a-E2/E5).
+**The kind of bug it catches:** wrong results. The kind where, on the same SQL surface, *a
+difference in the internal plan* makes the result different. Parser crashes are *outside the axis*
+(those are §6a-E2/E5).
 
 ---
 
-## 2. 외부 호출 형태 (제안 — incubating)
+## 2. How it is called from outside (proposed — incubating)
 
 ```
 ctp.sh sqlancer [-c <sqlancer.conf>] [--oracle norec|tlp|pqs]
-   또는
+   or
 testkit run sqlancer [-c <conf>] [--oracle <name>] [--seed <N>] [--time <sec>]
 ```
 
-내부 진입 (의제):
+The internal entry point (agenda):
 ```
 SqlancerDriver.exec(config)
   ├─ schema introspect (CUBRID dialect)
@@ -41,68 +47,88 @@ SqlancerDriver.exec(config)
   └─ on mismatch: corpus.save({Q1, Q2, schema, seed})
 ```
 
-**SUT 구동 채널:** JDBC 또는 CCI.
-**외부 표면 동결 영향:** 없음 (신규 진입점).
+**The channel that drives the SUT:** JDBC or CCI.
+**Effect on the external surface freeze:** none (a new entry point).
 
 ---
 
-## 3. 사용자 요구사항 (incubating 추정)
+## 3. What users need (an incubating estimate)
 
-1. **NoREC oracle (1차 진입 권장)** — `WHERE p` ↔ `COUNT(*) FROM (SELECT (p) IS TRUE p FROM t) WHERE p` 의 rowcount 비교. *내부 plan 을 알 필요 없음*
-2. **TLP oracle (1차 진입 권장)** — 3-valued logic 분할 합집합 검증
-3. **PQS oracle (2차 후속)** — pivot 보존 검증 — 도입 비용 가장 높음
-4. **CUBRID dialect adapter** — schema introspect / SQL surface generator / 결과 비교 — SQLsmith (E2) 와 *공유 가능* 한 dialect 레이어
-5. **mismatch 보고** — 두 query / schema / seed / 실행 결과 / 정규화 후 reduce
-6. **regression seed 누적** — 과거 발견된 버그를 새 빌드에서 재실행
-7. **time / iteration budget** — CI 안에서 정해진 시간 내 동작
+1. **The NoREC oracle (recommended for the first entry)** — comparing the rowcount of `WHERE p`
+   against `COUNT(*) FROM (SELECT (p) IS TRUE p FROM t) WHERE p`. *No need to know the internal
+   plan*
+2. **The TLP oracle (recommended for the first entry)** — verifying the union of a 3-valued logic
+   partition
+3. **The PQS oracle (a second, later step)** — verifying that the pivot is preserved — the highest
+   cost of adoption
+4. **A CUBRID dialect adapter** — schema introspection / SQL surface generator / result comparison —
+   a dialect layer that *can be shared* with SQLsmith (E2)
+5. **Mismatch reporting** — the two queries, the schema, the seed, the execution results, and a
+   reduce after normalisation
+6. **Accumulating regression seeds** — re-running bugs found in the past against a new build
+7. **A time / iteration budget** — running within a fixed time inside CI
 
 ---
 
-## 4. 비기능 요구
+## 4. Non-functional requirements
 
-| 항목 | 의제 | 새 시스템에서의 의미 |
+| Item | Agenda | What it means in the new system |
 |------|------|---------------------|
-| 도입 비용 | 낮음 (NoREC 1차) ~ 중간 (PQS) | survey §5.4 — NoREC + TLP 만 1차 도입 권장 |
-| 즉시 ROI | ★★★★ | testkit 이 비어 있는 *wrong-result 검증* 영역 직접 채움 |
-| §6a-E2 (SQLsmith) 와의 관계 | 상보적 — random AST 위에 oracle 만 추가 | dialect adapter 공유 (Open Question 3) |
-| 판정 비용 | NoREC < TLP < PQS | 1차는 NoREC. 효율적인 nested AST 생성 깊이 trade-off |
-| 라이선스 | SQLancer MIT — vendoring 자유 | survey §12.8 — SQLsmith 보다 license 측면 유리 |
-| ADR-001 (구현 언어) 종속 | SQLancer Java | JVM 채택 시 직접 import, 비-JVM 시 subprocess 또는 재구현 |
+| Cost of adoption | low (NoREC first) to middling (PQS) | survey §5.4 — only NoREC + TLP recommended for the first adoption |
+| Immediate ROI | ★★★★ | it fills directly the *wrong-result verification* area testkit is empty in |
+| Relation to §6a-E2 (SQLsmith) | complementary — only an oracle is added on top of the random AST | the dialect adapter is shared (Open Question 3) |
+| Cost of judgement | NoREC < TLP < PQS | NoREC first. A trade-off against the depth at which a nested AST can be generated efficiently |
+| Licence | SQLancer is MIT — vendoring is free | survey §12.8 — better placed than SQLsmith on the licence side |
+| Dependence on ADR-001 (implementation language) | SQLancer is Java | import it directly if the JVM is adopted; a subprocess or a reimplementation if not |
 
 ---
 
-## 5. 의존하는 외부 자원
+## 5. External resources it depends on
 
-- **CUBRID 클라이언트** — JDBC / CCI
-- **CUBRID system catalog** — schema introspect (E2 와 공유)
-- **SQLancer 본체** — github.com/sqlancer/sqlancer (Java/MIT) 또는 재구현
-- **dialect adapter** — E2 와 공유. testkit 내부 *공통 dialect 레이어* 가 합리적 (Open Question 3)
-- **mismatch corpus storage** — E2 와 동일 정책 (testcases 레포 동결 NG1 점검)
+- **A CUBRID client** — JDBC / CCI
+- **The CUBRID system catalog** — schema introspection (shared with E2)
+- **SQLancer itself** — github.com/sqlancer/sqlancer (Java/MIT), or a reimplementation
+- **A dialect adapter** — shared with E2. A *common dialect layer* inside testkit is the sensible
+  form (Open Question 3)
+- **Mismatch corpus storage** — the same policy as E2 (check against NG1, the testcases repository
+  freeze)
 
 ---
 
-## 6. incubating 진입 조건
+## 6. The conditions for entering incubating
 
-다음이 결정되어야 ADR-EXT-003 작성 가능 (owner: hgryoo):
+ADR-EXT-003 can be written once these are decided (owner: hgryoo):
 
-1. **1차 oracle 선정** — NoREC 권장 (도입 비용 최저, ROI 최고). TLP 는 동시 또는 후속
-2. **dialect adapter 위치** — survey Open Question 3: testkit 내부 *공통 dialect 레이어* (E2 와 공유) vs 도구별 분산
-3. **재사용 vs 재구현** — SQLancer Java 본체 직접 사용 vs ADR-001 결정 언어로 재구현
-4. **mismatch corpus 위치** — E2 와 동일 정책 (NG1 점검)
-5. **CI 통합 모드** — short oracle pass 매 PR vs nightly long oracle pass
-6. **PQS / SQLaser / SQLancer++ 후속 로드맵** — 1차 도입 후 어느 순서로 확장
-7. **strangler-fig 분기 게이트 §7 충돌 점검** — Phase 3·4 1차 대체와 자원 충돌
+1. **Which oracle first** — NoREC recommended (lowest cost of adoption, highest ROI). TLP alongside
+   it or after it
+2. **Where the dialect adapter sits** — survey Open Question 3: a *common dialect layer* inside
+   testkit (shared with E2) vs one spread per tool
+3. **Reuse vs reimplement** — using the SQLancer Java body directly vs reimplementing it in the
+   language ADR-001 decides
+4. **Where the mismatch corpus lives** — the same policy as E2 (the NG1 check)
+5. **The CI integration mode** — a short oracle pass on every PR vs a nightly long oracle pass
+6. **The follow-on roadmap for PQS / SQLaser / SQLancer++** — in what order they extend the first
+   adoption
+7. **Checking for a conflict with the strangler fig's branch gate, §7** — competing for resources
+   with the first replacement of phases 3 and 4
 
 **ADR placeholder:**
-- ADR-EXT-003 — 1차 oracle 선정 (NoREC + TLP) + dialect adapter 위치 + 재사용/재구현 + corpus 정책
+- ADR-EXT-003 — which oracle first (NoREC + TLP), where the dialect adapter sits, reuse or
+  reimplement, and the corpus policy
 
 ---
 
-## 7. 위험 / 정합성 메모
+## 7. Notes on risk and consistency
 
-- **NG1 충돌 가능** — mismatch corpus 가 testcases 에 들어가면 동결 위반. 외부 storage 권장
-- **NG2 충돌 없음** — 신규 진입점
-- **NG4 충돌 없음** — CUBRID 가 SUT
-- **§6a-E2 (SQLsmith) + E3 (SQLancer) 결합** — PostgreSQL ecosystem *de facto* 모범. 함께 도입이 정합적
-- **roadmap repo cross-cutting 후보 (번호 미배정)** — survey §13: testkit §6a-E3 × {N27 lock-manager, N28 mvcc, N29 page-buffer, N30 log-buffer} — 회귀가 아니라 *정합성 검증* 채널. ~~C-013~~ 은 2026-05-13 에 lock-manager × wait-event-stats 로 등록되어 쓸 수 없다
-- **SQLancer++ (adaptive grammar)** — niche DBMS 인 CUBRID 에 *장기적으로* 의미. 현재는 연구 단계 — 안정성 확인 후 별도 ADR
+- **Possible conflict with NG1** — putting the mismatch corpus into testcases violates the freeze.
+  External storage is recommended
+- **No conflict with NG2** — a new entry point
+- **No conflict with NG4** — CUBRID is the SUT
+- **§6a-E2 (SQLsmith) together with E3 (SQLancer)** — the *de facto* practice of the PostgreSQL
+  ecosystem. Adopting them together is the consistent course
+- **A roadmap repository cross-cutting candidate (no number assigned)** — survey §13: testkit
+  §6a-E3 × {N27 lock-manager, N28 mvcc, N29 page-buffer, N30 log-buffer} — a channel for
+  *consistency verification*, not regression. ~~C-013~~ cannot be used: it was registered on
+  2026-05-13 as lock-manager × wait-event-stats
+- **SQLancer++ (adaptive grammar)** — meaningful *in the long run* for CUBRID, a niche DBMS. It is
+  at the research stage today — a separate ADR once its stability is confirmed

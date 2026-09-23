@@ -1,25 +1,28 @@
 # E2 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-002 incubating 정식 진입 후.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-002.
 **Source:** ROADMAP §6a-E2, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §4
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 모듈 위치 (의제)
+## 1. Where the module sits (agenda)
 
 ```
 internal/runner/sqlsmith/
    ├── introspect/        # CUBRID system catalog → schema model (db_class / db_attribute / db_serial / db_method)
-   ├── ast/               # type-correct random AST generator (CUBRID dialect 가산 옵션)
-   ├── runner/            # SUT 구동 (JDBC | CCI) + crash detection (signal / core / server log)
+   ├── ast/               # type-correct random AST generator (option to add the CUBRID dialect)
+   ├── runner/            # drives the SUT (JDBC | CCI) + crash detection (signal / core / server log)
    ├── triage/            # stack hash dedup
-   └── corpus/            # crash query 보관 (재현 seed + 정규화 query text)
+   └── corpus/            # keeps the crash query (reproducing seed + normalised query text)
 ```
 
-E3 (SQLancer) 와 *공통 dialect 레이어* 가능 — Open Question 3 (dialect adapter 위치) 의 결정에 종속.
+A *shared dialect layer* with E3 (SQLancer) is possible — subordinate to the decision in Open
+Question 3 (where the dialect adapter sits).
 
-## 2. 데이터 흐름 (의제)
+## 2. Data flow (agenda)
 
 ```
 seed → AST.generate(depth)
@@ -30,31 +33,31 @@ seed → AST.generate(depth)
                       └─ corpus.save({seed, query, stack})
 ```
 
-## 3. crash 판정 채널 (의제)
+## 3. Which channel decides a crash (agenda)
 
-| 채널 | 검출 가능 | 비고 |
+| Channel | What it can detect | Note |
 |---|---|---|
-| process signal | SIGSEGV / SIGABRT / SIGFPE | in-process driver 시 적합 |
-| core file | server-side crash | sql / isolation 모듈 core 정책과 공유 (analysis/sql §4) |
-| connection drop | server hang / restart | timeout 결합 필요 |
+| process signal | SIGSEGV / SIGABRT / SIGFPE | suits an in-process driver |
+| core file | server-side crash | shares the core policy of the sql and isolation modules (analysis/sql §4) |
+| connection drop | server hang / restart | needs to be combined with a timeout |
 | server log assert | logical assertion failure | log scraping |
 
-ADR-EXT-002 에서 단일 채널 또는 우선순위 결정.
+ADR-EXT-002 decides on a single channel, or an order of precedence.
 
-## 4. 외부 의존
+## 4. External dependencies
 
-- CUBRID system catalog (db_class / db_attribute / db_serial / db_method)
-- ADR-001 결정 언어 + JDBC/CCI 클라이언트
-- SQLsmith 본체 (재사용 시) 또는 자체 random AST 라이브러리
-- core dump 인프라 (analysis/sql §4 ADR 와 공유)
+- the CUBRID system catalog (db_class / db_attribute / db_serial / db_method)
+- the language ADR-001 decides, plus a JDBC/CCI client
+- SQLsmith itself (if reused), or a random AST library written here
+- core dump infrastructure (shared with the ADR in analysis/sql §4)
 
-## 5. 결정 보류 항목 → ADR-EXT-002
+## 5. Held over for decision → ADR-EXT-002
 
-- 재사용 (SQLsmith C++ subprocess) vs 재구현
-- CUBRID dialect 가산 범위 (path expression / serial / connect-by / method)
-- crash 판정 채널 (signal / core / server log / 통합)
-- corpus 위치 (NG1 점검)
+- reuse (the SQLsmith C++ subprocess) vs reimplementation
+- how far the CUBRID dialect is extended (path expression / serial / connect-by / method)
+- which channel decides a crash (signal / core / server log / all of them)
+- where the corpus lives (the NG1 check)
 
-## 6. design 작성 트리거
+## 6. The trigger for writing the design
 
-ADR-EXT-002 합의 후 본 문서 FULL 로 보강.
+Once ADR-EXT-002 is agreed, this document is filled in to FULL.

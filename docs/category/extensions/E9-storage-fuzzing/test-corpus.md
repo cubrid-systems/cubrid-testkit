@@ -1,63 +1,68 @@
 # E9 — Test Corpus (STUB)
 
-**Status:** STUB — 코퍼스 정책은 ADR-EXT-009 incubating 정식 진입 후.
+*English · [한국어](test-corpus.ko.md)*
+
+**Status:** STUB — the corpus policy comes after formal entry into incubating through ADR-EXT-009.
 **Source:** `requirements.md` §8
 
 ---
 
-## 1. 코퍼스 종류
+## 1. Kinds of corpus
 
-| 코퍼스 | 입력/출력 | 용도 |
+| Corpus | Input/output | Purpose |
 |---|---|---|
-| seed corpus | 입력 | 의미 있는 operation 열 (coverage 부트스트랩) |
-| crash corpus | 출력 | crash 를 낸 op 열 — stack hash dedup |
-| invariant corpus | 출력 | crash 없이 invariant 를 깬 op 열 |
-| coverage corpus | 출력 | libFuzzer 가 자동 관리 |
+| seed corpus | input | meaningful operation sequences (bootstrapping coverage) |
+| crash corpus | output | the op sequences that crashed — stack hash dedup |
+| invariant corpus | output | the op sequences that broke an invariant with no crash |
+| coverage corpus | output | libFuzzer manages it automatically |
 
-byte corpus 인 E5 와 달리 **입력이 구조체** 라는 점이 다르다. libprotobuf-mutator 를
-채택하면 corpus 항목을 protobuf TextFormat 으로 저장할 수 있어 *사람이 읽고 손으로
-편집할 수 있는* seed 가 된다 — 본 항목이 LPM 을 선호하는 실질적 이유 중 하나.
+The difference from E5, whose corpus is bytes, is that **the input here is a structure**. Adopting
+libprotobuf-mutator makes it possible to store corpus entries in protobuf TextFormat, which gives
+seeds *a person can read and edit by hand* — one of the practical reasons this entry prefers LPM.
 
-## 2. seed corpus 출처 (의제)
+## 2. Where the seed corpus comes from (agenda)
 
-| 후보 | 비용 | 비고 |
+| Candidate | Cost | Note |
 |---|---|---|
-| 손으로 쓴 경계 시나리오 | 낮음 | overflow 승격 경계 / slot 재사용 / unique 위반 후 재삽입 |
-| 기존 shell·sql 케이스의 연산 흔적 추출 | 중 | SQL → 내부 op 매핑이 필요. 자동화 난이도 있음 |
-| 과거 CBRD storage 결함 티켓의 재현 열 | 중 | regression seed 로 가치 최대 |
-| 무작위 부트스트랩 (seed 없이 시작) | 0 | coverage 상승이 느림. 대조군으로만 |
+| boundary scenarios written by hand | low | the overflow promotion boundary / slot reuse / re-insertion after a unique violation |
+| extracting the traces of operations from the existing shell and sql cases | medium | a SQL → internal op mapping is needed. Not easy to automate |
+| the reproduction sequences of past CBRD storage defect tickets | medium | the greatest value as regression seeds |
+| a random bootstrap (starting with no seed) | 0 | coverage rises slowly. Only as a control |
 
-ADR-EXT-009 에서 seed 정책 결정.
+ADR-EXT-009 decides the seed policy.
 
-## 3. 보관 정책 (NG1 점검)
+## 3. Storage policy (NG1 check)
 
-- ❌ testcases 레포에 crash / seed corpus 를 두지 않음
-- ✅ testkit 내부 별 트리 또는 외부 storage — **E5 와 같은 위치를 공유**
-- ✅ seed 는 텍스트(TextFormat)라 diff·리뷰 가능 → 버전 관리 부담이 byte corpus 보다 낮음
+- ❌ the crash and seed corpus are not kept in the testcases repository
+- ✅ a separate tree inside testkit or external storage — **sharing the same location as E5**
+- ✅ seeds are text (TextFormat), so they can be diffed and reviewed → a lighter version-control
+  burden than a byte corpus
 
-## 4. crash 항목 구조 (의제)
+## 4. The structure of a crash entry (agenda)
 
 ```
 crash/<stack-hash>/
-   ├── input.bin              # libFuzzer 원본 (재현 정본)
-   ├── sequence.txt           # 사람이 읽는 op 열
+   ├── input.bin              # libFuzzer's original (the canonical form for reproduction)
+   ├── sequence.txt           # the op sequence a person reads
    ├── stack.txt
    ├── sanitizer.txt
-   ├── reset_strategy         # 어느 reset 전략에서 났는지 (재현성 판정에 필수)
+   ├── reset_strategy         # which reset strategy it came out under (essential for judging reproducibility)
    └── reproducer.sh
 ```
 
-`reset_strategy` 를 기록하는 이유: 재현이 reset 전략에 종속되므로, 전략이 바뀌면
-과거 crash 의 재현 가능성도 바뀐다 (`requirements.md` §5).
+Why `reset_strategy` is recorded: reproduction depends on the reset strategy, so when the strategy
+changes, whether a past crash can still be reproduced changes with it (`requirements.md` §5).
 
-## 5. 라이선스
+## 5. Licence
 
 - libFuzzer: Apache 2.0
 - protobuf: BSD-3-Clause
 - libprotobuf-mutator: Apache 2.0
 
-모두 fuzz 빌드에만 링크되므로 배포 산출물의 라이선스 구성은 불변.
+All of them are linked only into the fuzz build, so the licence composition of the shipped
+artefacts does not change.
 
-## 6. 후속 작성 트리거
+## 6. The trigger for the follow-up
 
-E5 인프라 + state reset 스파이크 + ADR-EXT-009 후 본 문서 FULL 로 보강.
+After the E5 infrastructure, the state reset spike and ADR-EXT-009, this document is brought up to
+FULL.

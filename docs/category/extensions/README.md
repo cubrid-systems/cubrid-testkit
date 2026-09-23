@@ -1,122 +1,162 @@
-# Extensions — §6a Beyond Strangler-fig
+# Extensions — §6a, beyond the strangler fig
 
-ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *strangler-fig 외부* 의 *additive 작업* 으로, NG1·NG2·NG4 동결 *밖* 에서 신규 결정 자유도가 크다.
+*English · [한국어](README.ko.md)*
 
-**이 디렉터리는 *결정* 이 아니라 *근거 + 의제*** — 각 항목의 정식 incubating 진입은 ADR-EXT-NNN 으로만 일어난다.
+The functional requirements collected under ROADMAP §6a, "the extension area". Each entry is
+**additive work outside the strangler fig**, and so sits *outside* the NG1 · NG2 · NG4 freeze, with
+a lot of room for new decisions.
+
+**This directory holds the case and the agenda, not the decision** — an item formally enters
+*incubating* only through an ADR-EXT-NNN.
 
 ---
 
-## 카탈로그
+## The catalogue
 
-| ID | 축 | 이름 | 진입성 | 선결 의존 | requirements |
+| ID | Axis | Name | Entry | Prerequisite | requirements |
 |---|---|---|---|---|---|
-| E1 | 1 | sqllogictest 적용 | 즉시 후보 | — | [E1-sqllogictest/](E1-sqllogictest/requirements.md) |
-| E2 | 2 | Random SQL fuzzing (SQLsmith) | 즉시 후보 | — | [E2-sqlsmith/](E2-sqlsmith/requirements.md) |
-| E3 | 3 | Logic bug detection (SQLancer NoREC+TLP) | **진행 중 (동시 트랙)** | — | [E3-sqlancer/](E3-sqlancer/requirements.md) · [ADR-EXT-003](../../project/adr/ADR-EXT-003-sqlancer-cubrid.md) · 저장소 `cubrid-sqlancer` |
-| E4 | 4 | Distributed isolation testing (AWDIT/Jepsen) | 조건부 | N24 / N11 graduation | [E4-distributed-isolation/](E4-distributed-isolation/requirements.md) |
-| E5 | 5 | Parser/protocol fuzzing harness (libFuzzer) | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | [E5-parser-fuzzing/](E5-parser-fuzzing/requirements.md) |
-| E6 | 6 | Differential testing (PostgreSQL pair) | 조건부 | N13 pg-wire-compat selected 이상 | [E6-differential/](E6-differential/requirements.md) |
-| E7 | 7 | Stateful / randomized workload | 조건부 | C-004 책임 경계 정의 | [E7-workload/](E7-workload/requirements.md) |
-| (E8) | 8 | Hybrid CI 통합 (Materialize 패턴) | 메타 | E2~E7·E9 중 둘 이상 채택 | (TBD — 카탈로그 항목 외) |
-| E9 | 5 확장 × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | 조건부 | **E5 선행** + SERVER_MODE in-process 기동 + **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.md) |
-| E10 | 보조 설비 | XASL fixture 생산·보관 (버전 식별 포함) | 즉시 후보 | — (엔진 변경 없음) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.md) |
+| E1 | 1 | Adopt sqllogictest | candidate now | — | [E1-sqllogictest/](E1-sqllogictest/requirements.md) |
+| E2 | 2 | Random SQL fuzzing (SQLsmith) | candidate now | — | [E2-sqlsmith/](E2-sqlsmith/requirements.md) |
+| E3 | 3 | Logic bug detection (SQLancer NoREC+TLP) | **in progress, on its own track** | — | [E3-sqlancer/](E3-sqlancer/requirements.md) · [ADR-EXT-003](../../project/adr/ADR-EXT-003-sqlancer-cubrid.md) · repository `cubrid-sqlancer` |
+| E4 | 4 | Distributed isolation testing (AWDIT/Jepsen) | conditional | N24 / N11 graduation | [E4-distributed-isolation/](E4-distributed-isolation/requirements.md) |
+| E5 | 5 | Parser/protocol fuzzing harness (libFuzzer) | conditional | `-DENABLE_FUZZING` in the cubrid repository | [E5-parser-fuzzing/](E5-parser-fuzzing/requirements.md) |
+| E6 | 6 | Differential testing (against PostgreSQL) | conditional | N13 pg-wire-compat at *selected* or beyond | [E6-differential/](E6-differential/requirements.md) |
+| E7 | 7 | Stateful / randomised workload | conditional | C-004, the responsibility boundary, defined | [E7-workload/](E7-workload/requirements.md) |
+| (E8) | 8 | Hybrid CI integration (the Materialize pattern) | meta | two or more of E2–E7 · E9 adopted | (TBD — not a catalogue entry) |
+| E9 | 5 extended × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | conditional | **E5 first**, plus in-process SERVER_MODE startup and **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.md) |
+| E10 | supporting | Producing and keeping XASL fixtures, version identification included | candidate now | — (no engine change) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.md) |
 
-**번호 공간 주의.** `E8` 은 축 8 *Hybrid CI 통합* 메타 자리로 예약되어 있다. E9 가 E8 을 건너뛴 것은 결번이 아니라 이 예약 때문이다.
+**A note on the numbering.** `E8` is **reserved** for axis 8, *Hybrid CI integration*, as a meta
+entry. E9 skipping over E8 is that reservation, not a gap.
 
 ---
 
-## E-번호가 아닌 것 — `extensions/cluster-sandbox`
+## The one that has no E number — `extensions/cluster-sandbox`
 
-`extensions/` 아래 submodule 이지만 **카탈로그의 항목이 아니다.** E1~E10 은 전부
-*테스트 능력* — 새 오라클, 새 케이스 포맷, 새 생성기 — 이고, `cubrid-cluster-sandbox`
-는 **환경 제공자**다. 무엇을 검증하는지가 아니라 어디서 도는지를 바꾼다.
+It is a submodule under `extensions/`, and it is **not a catalogue entry.** E1–E10 are all *testing
+capabilities* — a new oracle, a new case format, a new generator — and `cubrid-cluster-sandbox` is
+an **environment provider.** It changes where a test runs, not what is verified.
 
-E-번호를 주면 두 가지가 틀어진다. 착수 순서를 정하는 §6a 사다리에 "먼저 해야 하는
-인프라"가 경쟁 항목으로 끼어들고, **여러 항목의 공통 의존**이라는 사실이 표에서
-사라진다. 로드맵이 이미 세 군데에서 그 의존을 적고 있다 — E4(분산 isolation)의 경계,
-E7(workload)의 경계, 사다리 순위 6(recovery/crash).
+Giving it an E number would break two things. The §6a ladder that decides what to start next would
+acquire an "infrastructure you have to do first" competing with real entries, and the fact that it
+is a **shared dependency of several of them** would vanish from the table. The roadmap already
+records that dependency in three places — the boundary of E4 (distributed isolation), the boundary
+of E7 (workload), and ladder rank 6 (recovery/crash).
 
-그리고 그 앞에 strangler-fig 쪽 의존이 둘 더 있다. `ha_repl` task 와 HA shell suite
-는 master/slave 토폴로지가 없어 지금까지 돌지 못했고(ADR-013 이 HA 트리 367 케이스를
-증거에서 제외한다), 그 토폴로지를 **러너가 만들면 안 된다**는 것이 ADR-014 다:
+And before those there are two more dependencies on the strangler-fig side. The `ha_repl` task and
+the HA shell suite have never run here for want of a master/slave topology — ADR-013 excludes the
+HA tree's 367 cases from the evidence for exactly that reason — and ADR-014 says the runner **must
+not build one**:
 
 > **HA is not an exception.** The system under test has a topology; the runner does
 > not have a fleet.
 
-그래서 `cluster-sandbox` 를 쓰는 것은 ADR-014 를 우회하는 게 아니라 **지키는 방법**이다.
-토폴로지를 세우는 일은 저쪽에 있고, 이쪽은 그 위에서 케이스를 돌린다.
+So using `cluster-sandbox` is not a way around ADR-014 but **the way of keeping it.** Standing the
+topology up belongs over there; running cases on top of it belongs here.
 
 | | |
 |---|---|
-| 저장소 | `cubrid-systems/cubrid-cluster-sandbox` (public) |
-| 위치 | `extensions/cluster-sandbox` — submodule, `bot/bump-cluster-sandbox` 가 포인터를 따라 올린다 |
-| 통합 형태 | subprocess + `--json` 아티팩트 (ADR-001 Consequence 4). 링크하지 않는다 |
-| 이쪽 코드 | `internal/sandbox` — Channel 하나와 topology provider 하나 |
-| 기록 | [ADR-022](../../project/adr/ADR-022-topology-provider.md) — 확정 (2026-09-20) |
+| Repository | `cubrid-systems/cubrid-cluster-sandbox` (public) |
+| Location | `extensions/cluster-sandbox` — a submodule; `bot/bump-cluster-sandbox` moves the pointer |
+| Form of integration | subprocess plus the `--json` artifact (ADR-001 Consequence 4). Nothing is linked |
+| The code on this side | `internal/sandbox` — one Channel and one topology provider |
+| Recorded in | [ADR-022](../../project/adr/ADR-022-topology-provider.md) — accepted 2026-09-20 |
 
-**착수 순서는 이 표가 정하지 않는다.** fuzzing 계열(E3·E5·E9)과 미등록 후보 2건의 우선순위는 ROADMAP **§6a 사다리** 가 단일 출처다.
+**This location is a pin, not ownership.** Nothing here compiles against `csb`; the submodule exists
+so that evidence produced in this repository can name which revision of the provisioner stood the
+topology up, which is why ADR-022 rejected finding `csb` on `PATH` — *"a tool found on PATH names
+nothing."* The pin therefore belongs beside the evidence, and the evidence is here. When the axis O
+layer arrives it will pin both this repository and `cluster-sandbox` for the same reason, and **this
+pin stays**: using testkit without that layer does not stop being a way to use it
+([`design/slots-and-the-layer-above.md`](../../project/design/slots-and-the-layer-above.md) §8).
+
+**This table does not decide what to start.** The single source for the priority of the fuzzing
+family (E3 · E5 · E9) and of the two unregistered candidates is the **§6a ladder** in the ROADMAP.
 
 ---
 
-## 각 항목의 산출물 구조
+## What each entry is made of
 
-`project/analysis/{module}/` 의 5 산출물 패턴을 따른다 — *단, incubating 단계라 detail 은 stub*:
+It follows the five-document pattern of `project/analysis/{module}/` — except that at the
+*incubating* stage the detail is a stub:
 
 ```
 extensions/E{N}-{name}/
-├── requirements.md        — 해결 문제, 사용자 요구, 비기능, incubating 진입 조건  (FULL)
-├── design.md              — 아키텍처 / 모듈 위치 / 데이터 흐름                    (STUB — ADR-EXT-NNN 후 보강)
-├── io-contract.md         — CLI / conf / 출력 포맷 / 종료 코드                    (STUB — ADR-EXT-NNN 후 보강)
-└── test-corpus.md         — 입력 코퍼스 출처 / 라이선스 / 보관 정책                (STUB — ADR-EXT-NNN 후 보강)
+├── requirements.md        the problem, what users need, non-functional
+│                          requirements, the conditions for entering incubating   (FULL)
+├── design.md              architecture / where the module sits / data flow       (STUB — filled in after ADR-EXT-NNN)
+├── io-contract.md         CLI / conf / output format / exit codes                (STUB — filled in after ADR-EXT-NNN)
+└── test-corpus.md         where the input corpus comes from, its licence,
+                           how it is kept                                         (STUB — filled in after ADR-EXT-NNN)
 ```
 
-`implementation-notes.md` 는 *구현 진척 후* 추가. incubating 단계에는 비어 있음.
+`implementation-notes.md` is added *once implementation has moved*, and is absent while an entry is
+incubating.
 
 ---
 
-## ADR-EXT 자리표시자 인덱스
+## The ADR-EXT placeholder index
 
-| ADR | 트리거 | 결정 항목 |
+| ADR | Trigger | What it decides |
 |---|---|---|
-| ADR-EXT-001 | E1 incubating 정식 진입 | sqllogictest spec variant + 코퍼스 import 정책 + 결과 비교 모드 + SUT 클라이언트 |
-| ADR-EXT-002 | E2 incubating 정식 진입 | SQLsmith 재사용/재구현 + dialect 가산 범위 + corpus 위치 + crash 판정 채널 |
-| ADR-EXT-003 | ~~트리거~~ **Accepted 2026-09-02** | NoREC 1차 + 별도 저장소(ServiceLoader SPI) + 재사용 + corpus 는 testcases 밖 |
-| ADR-EXT-004 | E4 incubating 정식 진입 | AWDIT/Jepsen 1차 선택 + 토폴로지 자동화 + fault injection 채널 + corpus |
-| ADR-EXT-005 | E5 incubating 정식 진입 | fuzz target build option (cubrid 본 repo) + fuzzer 본체 + corpus + 책임 경계 |
-| ADR-EXT-006 | E6 incubating 정식 진입 | peer DBMS + mode (canonical vs rewrite) + dialect rewrite catalog + corpus |
-| ADR-EXT-007 | E7 incubating 정식 진입 | scenario 1차 선정 + invariant 카탈로그 + engine-suite 책임 경계 + corpus |
-| (ADR-EXT-008) | E8 (Hybrid CI) 정식 진입 | *예약* — 축 8 메타 항목 자리 |
-| ADR-EXT-009 | E9 incubating 정식 진입 | 입력 IR + **스케줄 표현** + 참가자 수 상한 + corpus 위치 + 본 repo 책임 경계(rendezvous 핸들러) |
-| ADR-EXT-010 | E10 incubating 정식 진입 | 생산 경로(csql/CCI/JDBC) + 픽스처 포맷 + 버전 식별 방식 + 보관 위치 |
+| ADR-EXT-001 | E1 formally enters incubating | which sqllogictest spec variant, the corpus import policy, the result comparison mode, the SUT client |
+| ADR-EXT-002 | E2 formally enters incubating | reuse or reimplement SQLsmith, how far the dialect is extended, where the corpus lives, which channel decides a crash |
+| ADR-EXT-003 | ~~trigger~~ **Accepted 2026-09-02** | NoREC first, a separate repository (ServiceLoader SPI), reuse, and the corpus outside testcases |
+| ADR-EXT-004 | E4 formally enters incubating | AWDIT or Jepsen first, topology automation, the fault injection channel, the corpus |
+| ADR-EXT-005 | E5 formally enters incubating | the fuzz target build option (in the cubrid repository), the fuzzer itself, the corpus, the responsibility boundary |
+| ADR-EXT-006 | E6 formally enters incubating | which peer DBMS, the mode (canonical vs rewrite), the dialect rewrite catalogue, the corpus |
+| ADR-EXT-007 | E7 formally enters incubating | the first scenarios, the invariant catalogue, the engine/suite responsibility boundary, the corpus |
+| (ADR-EXT-008) | E8 (Hybrid CI) formally enters | *reserved* — the axis 8 meta slot |
+| ADR-EXT-009 | E9 formally enters incubating | the input IR, **how a schedule is expressed**, the cap on participants, where the corpus lives, the boundary in the cubrid repository (the rendezvous handler) |
+| ADR-EXT-010 | E10 formally enters incubating | the production path (csql/CCI/JDBC), the fixture format, how a version is identified, where fixtures are kept |
 
 ---
 
-## 우선순위 (survey 결론)
+## Priority, as the survey concluded
 
-1. **즉시 후보 (strangler-fig Phase 3·4 와 *병행* 가능):** E2 (SQLsmith), E3 (SQLancer NoREC+TLP)
-   - 도입 비용 낮음, 의존 없음, *지금 testkit 이 비어 있는 영역* 을 직접 채움
-   - PostgreSQL ecosystem 의 *de facto* 모범
-2. **조건부 후보 (선결 의존 충족 후):** E5 (cubrid 본 repo PR), **E9 (E5 + E10 선행)**, E6 (N13 selected), E4 (HA graduation), E7 (C-004 정의)
-   - **E10 은 즉시 후보** — 엔진 변경이 없고 선결 의존도 없다. E9 Tier 2 의 선결이면서 독립 실행 가능
-   - E5 → E9 는 *같은 인프라를 공유하는 한 줄기*. 순서 역전 시 중복 구축 (ROADMAP §8 risk)
-3. **장기 추적:** SQLancer++ (adaptive grammar), FoundationDB simulation 컨셉, §6a 사다리 순위 6·7 (recovery/crash framework, concurrency schedule fuzzing — 미등록)
-
----
-
-## 위험 / 정합성 공통 메모
-
-- **NG1 (testcases 레포 동결)** — fuzz / mismatch / crash / violation corpus 가 testcases 에 들어가면 위반. *외부 storage 권장* (각 항목 §6 참조)
-- **E9 의 protobuf 는 프로토콜이 아니다** — CUBRID 자체 바이너리 프로토콜과 무관하다. protobuf 는 *fuzzer 내부 입력 IR* 이며 fuzz 바이너리에만 링크된다 (E9 requirements §2). 이 오해가 반복되면 항목 자체가 잘못 반려될 수 있다
-- **NG2 (외부 표면 동결)** — §6a 항목은 *모두 신규 진입점* 이라 충돌 없음
-- **NG4 (비-CUBRID DBMS 호환 금지)** — §6a 항목은 *CUBRID 가 SUT* — 충돌 없음
-- **분기 게이트 §7** — *strangler-fig 우선원칙* (ROADMAP §8). §6a 진척을 별 행으로 분리 기재
-- **case-format ingestion 인터페이스** — Phase 2 `project/design/contracts.md` 에 hybrid 합성 가능성 반영 (E1~E7 공유). **E9 는 예외** — case format 을 거치지 않고 내부 API 를 직접 호출한다
+1. **Candidates now, able to run *alongside* strangler-fig phases 3 and 4:** E2 (SQLsmith),
+   E3 (SQLancer NoREC+TLP)
+   - cheap to adopt, no dependencies, and they fill an area *testkit is empty in today*
+   - the *de facto* practice of the PostgreSQL ecosystem
+2. **Conditional, once their prerequisite is met:** E5 (a PR to the cubrid repository),
+   **E9 (E5 and E10 first)**, E6 (N13 at *selected*), E4 (HA graduation), E7 (C-004 defined)
+   - **E10 is a candidate now** — it needs no engine change and has no prerequisite. It is a
+     prerequisite of E9 Tier 2 and can be run independently
+   - E5 → E9 are *one strand sharing one set of infrastructure*. Reversing the order means building
+     it twice (ROADMAP §8, risk)
+3. **Tracked for later:** SQLancer++ (adaptive grammar), the FoundationDB simulation concept, §6a
+   ladder ranks 6 and 7 (a recovery/crash framework, and concurrency schedule fuzzing — not
+   registered)
 
 ---
 
-## 출처
+## Shared notes on risk and consistency
 
-- `../../project/survey/dbms-testing-ecosystem.md` — 8축 분류, 도구·연구 catalog, §6a-E2~E7 + E9 후보 도출 근거
-- `../../project/ROADMAP.md` §6a — 카탈로그 / Phase 정합 / Open Questions / ADR-EXT 자리표시자
-- `../../project/ROADMAP.md` §6a 부록 — **fuzzing 우선순위 사다리** (착수 순서의 단일 출처)
-- `../../project/analysis/{module}/` — strangler-fig 대상 모듈의 Phase 0 산출물 (참고)
+- **NG1 (the testcases repository is frozen)** — putting a fuzz, mismatch, crash or violation corpus
+  into testcases violates it. *External storage is recommended* (see §6 of each entry)
+- **E9's protobuf is not a protocol** — it has nothing to do with CUBRID's own binary protocol.
+  protobuf there is the *fuzzer's internal input IR* and is linked only into the fuzz binary
+  (E9 requirements §2). If this misunderstanding keeps recurring, the entry itself may be rejected
+  for the wrong reason
+- **NG2 (the external surface is frozen)** — every §6a entry is a *new entry point*, so there is no
+  conflict
+- **NG4 (no compatibility with non-CUBRID DBMSs)** — in every §6a entry *CUBRID is the SUT*, so
+  there is no conflict
+- **The branch gate, §7** — *the strangler fig comes first* (ROADMAP §8). §6a progress is recorded
+  on a separate line
+- **The case-format ingestion interface** — phase 2's `project/design/contracts.md` allows for
+  hybrid composition, shared by E1–E7. **E9 is the exception**: it does not go through a case format
+  and calls the internal API directly
+
+---
+
+## Sources
+
+- `../../project/survey/dbms-testing-ecosystem.md` — the eight-axis classification, the catalogue of
+  tools and research, and how §6a-E2–E7 and E9 were arrived at
+- `../../project/ROADMAP.md` §6a — the catalogue, phase alignment, open questions, the ADR-EXT
+  placeholders
+- `../../project/ROADMAP.md` §6a appendix — the **fuzzing priority ladder**, which is the single
+  source for what to start first
+- `../../project/analysis/{module}/` — the phase 0 output for the modules the strangler fig targets
+  (background)

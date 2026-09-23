@@ -1,5 +1,7 @@
 # 6. Keeping what failed
 
+*English · [한국어](06-keeping-what-failed.ko.md)*
+
 [← back to the shell category](README.md)
 
 A run that fails a case and keeps nothing has to be run again to be diagnosed. This document is what

@@ -1,41 +1,43 @@
 # E3 — Design (STUB)
 
-**Status:** STUB — 정식 design 은 ADR-EXT-003 incubating 정식 진입 후.
+*English · [한국어](design.ko.md)*
+
+**Status:** STUB — the real design comes after formal entry into incubating through ADR-EXT-003.
 **Source:** ROADMAP §6a-E3, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §5
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)
 
 ---
 
-## 1. 모듈 위치 (의제)
+## 1. Where the module sits (agenda)
 
 ```
-extensions/cubrid-sqlancer/   # 확정: 별도 저장소 (ADR-EXT-003)
+extensions/cubrid-sqlancer/   # settled: a separate repository (ADR-EXT-003)
    ├── oracle/
-   │     ├── norec/      # WHERE p ↔ COUNT(*) WHERE (p IS TRUE) rowcount 비교
-   │     ├── tlp/        # WHERE p ↔ p IS TRUE / IS FALSE / IS NULL 합집합
-   │     └── pqs/        # pivot 보존 (2차 후속, 비용 ↑)
-   ├── ast/              # E2 와 공유 가능 — 의제 (Open Question 3)
-   ├── runner/           # SUT 구동 (JDBC | CCI)
-   └── corpus/           # mismatch 보관
+   │     ├── norec/      # WHERE p ↔ COUNT(*) WHERE (p IS TRUE), comparing rowcount
+   │     ├── tlp/        # WHERE p ↔ the union of p IS TRUE / IS FALSE / IS NULL
+   │     └── pqs/        # pivot preservation (a second, later step, cost ↑)
+   ├── ast/              # can be shared with E2 — on the agenda (Open Question 3)
+   ├── runner/           # drives the SUT (JDBC | CCI)
+   └── corpus/           # keeps mismatches
 ```
 
-## 2. dialect adapter 위치 (의제)
+## 2. Where the dialect adapter sits (agenda)
 
 ```
-internal/catalog/                # 후보 1 — testkit 내부 공통 레이어 (E2/E3 공유)
-   ├── catalog.{rs,go,java} # CUBRID system catalog 추상화
-   ├── grammar.*            # CUBRID dialect 가산 (path / serial / connect_by / method)
+internal/catalog/                # candidate 1 — a common layer inside testkit (shared by E2/E3)
+   ├── catalog.{rs,go,java} # an abstraction over the CUBRID system catalog
+   ├── grammar.*            # the CUBRID dialect added on (path / serial / connect_by / method)
    └── adapter.*            # SQL emitter
 
 # vs
 
-internal/runner/sqlsmith/dialect/       # 후보 2 — 도구별 분산
-extensions/cubrid-sqlancer/   # 확정: 별도 저장소 (ADR-EXT-003)dialect/
+internal/runner/sqlsmith/dialect/       # candidate 2 — spread per tool
+extensions/cubrid-sqlancer/   # settled: a separate repository (ADR-EXT-003)dialect/
 ```
 
-ADR-EXT-003 (Open Question 3) 에서 결정.
+Decided in ADR-EXT-003 (Open Question 3).
 
-## 3. 데이터 흐름 (의제 — NoREC)
+## 3. Data flow (agenda — NoREC)
 
 ```
 seed → ast.generate(predicate p, table t)
@@ -45,7 +47,7 @@ seed → ast.generate(predicate p, table t)
                  └─ if mismatch: corpus.save({Q1, Q2, schema, seed})
 ```
 
-## 4. 데이터 흐름 (의제 — TLP)
+## 4. Data flow (agenda — TLP)
 
 ```
 seed → ast.generate(predicate p, base Q)
@@ -56,19 +58,19 @@ seed → ast.generate(predicate p, base Q)
             └─ row_set(Q_total) == row_set(Q_true) ⊎ row_set(Q_false) ⊎ row_set(Q_null)
 ```
 
-## 5. 외부 의존
+## 5. External dependencies
 
-- E2 와 동일한 schema introspect (가능하면 dialect adapter 공유)
-- ADR-001 결정 언어 + JDBC/CCI
-- SQLancer 본체 (재사용 시, MIT)
+- the same schema introspection as E2 (sharing the dialect adapter where possible)
+- the language ADR-001 decides, plus JDBC/CCI
+- SQLancer itself (if reused, MIT)
 
-## 6. 결정 보류 항목 → ADR-EXT-003
+## 6. Held over for decision → ADR-EXT-003
 
-- 1차 oracle 선정 (NoREC + TLP 권장)
-- dialect adapter 위치 (E2 와 공유 vs 도구별)
-- 재사용 (SQLancer Java) vs 재구현
-- mismatch corpus 위치 (NG1 점검)
+- which oracle first (NoREC + TLP recommended)
+- where the dialect adapter sits (shared with E2 vs per tool)
+- reuse (SQLancer Java) vs reimplementation
+- where the mismatch corpus lives (the NG1 check)
 
-## 7. design 작성 트리거
+## 7. The trigger for writing the design
 
-ADR-EXT-003 합의 후 본 문서 FULL 로 보강.
+Once ADR-EXT-003 is agreed, this document is filled in to FULL.

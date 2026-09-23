@@ -1,34 +1,42 @@
-# E1 — sqllogictest 적용 (Requirements)
+# E1 — Adopt sqllogictest (Requirements)
+
+*English · [한국어](requirements.ko.md)*
 
 **Source:** ROADMAP §6a-E1 + survey/dbms-testing-ecosystem.md §3
-**Status:** incubating (정식 진입 전 — ADR-EXT-001 대기)
-**축 매핑:** 축 1 (sqllogictest 계열, 정답 회귀)
-**Companion docs (후속):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
+**Status:** incubating (before formal entry — waiting on ADR-EXT-001)
+**Axis mapping:** axis 1 (the sqllogictest family, answer regression)
+**Companion docs (to follow):** `design.md`, `io-contract.md`, `test-corpus.md`, `implementation-notes.md`
 
 ---
 
-## 1. 이 확장이 해결하는 문제
+## 1. The problem this extension solves
 
-CUBRID 의 SQL 의미를 **외부 표준 포맷 (sqllogictest)** 의 결정적 input → 사전 기록된 expected output diff 로 회귀 검증한다.
+It verifies CUBRID's SQL semantics by regression — a deterministic input in an **external standard
+format (sqllogictest)**, diffed against a pre-recorded expected output.
 
-기존 `sql` 모듈의 `.sql` ↔ `.answer` 패턴과 *판정 모델은 동일* 하지만 다음이 추가됨:
-- **외부 코퍼스 자산 활용** — SQLite·DuckDB·CockroachDB·RisingWave 가 채택한 포맷이라 *코퍼스 자체가 자산*
-- **hash 기반 결과 표현** — 큰 결과셋도 단일 hash 라인으로 표현 (정답 파일 크기 ↓)
-- **cross-DBMS 회귀 가능 표준** — N13 pg-wire-compat 등 dialect 호환 작업의 *판정 채널*
+The *judgement model is the same* as the existing `sql` module's `.sql` ↔ `.answer` pattern, but
+these are added:
+- **use of external corpus assets** — it is the format SQLite, DuckDB, CockroachDB and RisingWave
+  have adopted, so *the corpus is itself an asset*
+- **hash-based result representation** — even a large result set is expressed as a single hash line
+  (answer files get smaller)
+- **a standard that makes cross-DBMS regression possible** — the *judgement channel* for dialect
+  compatibility work such as N13 pg-wire-compat
 
-**잡는 버그 종류:** 정답 회귀 (deterministic input → wrong output). parser crash·logic-bug 는 *축 외*.
+**The kind of bug it catches:** answer regression (deterministic input → wrong output). Parser
+crashes and logic bugs are *outside the axis*.
 
 ---
 
-## 2. 외부 호출 형태 (제안 — incubating)
+## 2. How it is called from outside (proposed — incubating)
 
 ```
 ctp.sh sqllogictest [-c <sqllogictest.conf>]
-   또는
+   or
 testkit run sqllogictest [-c <conf>]
 ```
 
-내부 진입 (의제):
+The internal entry point (agenda):
 ```
 SqllogictestRunner.exec(config)
   └─ for each <case>.slt:
@@ -37,64 +45,78 @@ SqllogictestRunner.exec(config)
        compare hash or values vs expected
 ```
 
-**외부 표면 동결 영향:** 없음. sqllogictest 는 *신규 진입점* 이므로 ROADMAP NG2 (외부 표면 동결) 와 직교.
+**Effect on the external surface freeze:** none. sqllogictest is a *new entry point*, so it is
+orthogonal to ROADMAP NG2 (the external surface is frozen).
 
 ---
 
-## 3. 사용자 요구사항 (incubating 추정)
+## 3. What users need (an incubating estimate)
 
-1. **sqllogictest spec 호환 record 파싱** — `statement (ok|error)` / `query <type> [sort] [label]` 두 record 타입
-2. **hash 비교 모드** — 표준 sqllogictest hash (rows MD5)
-3. **values 비교 모드** — 작은 결과셋의 raw value diff
-4. **결정성 옵션** — `sort rowsort|valuesort|nosort` 처리
-5. **비결정성 case 격리** — float 정밀도, ORDER BY 없는 SELECT 등 *통과 case 표시*
-6. **외부 코퍼스 ingestion** — SQLite 발 sqllogictest 트리 또는 DuckDB suite 의 *부분집합* 을 testkit 코퍼스에 흡수
-7. **회귀 동등성 보고** — pass / fail / hash mismatch / dialect-skip 분류
+1. **Record parsing compatible with the sqllogictest spec** — the two record types
+   `statement (ok|error)` and `query <type> [sort] [label]`
+2. **A hash comparison mode** — the standard sqllogictest hash (MD5 of the rows)
+3. **A values comparison mode** — a raw value diff for small result sets
+4. **Determinism options** — handling `sort rowsort|valuesort|nosort`
+5. **Isolating non-deterministic cases** — float precision, a SELECT without ORDER BY and so on:
+   *marking the cases that pass*
+6. **External corpus ingestion** — absorbing a *subset* of the SQLite-origin sqllogictest tree, or
+   of the DuckDB suite, into the testkit corpus
+7. **Regression equivalence reporting** — classified as pass / fail / hash mismatch / dialect-skip
 
 ---
 
-## 4. 비기능 요구
+## 4. Non-functional requirements
 
-| 항목 | 의제 | 새 시스템에서의 의미 |
+| Item | Agenda | What it means in the new system |
 |------|------|---------------------|
-| 도입 비용 | 낮음 (record parser + hash + diff) | ROADMAP §6a-E1 *최저 의존 후보* |
-| 즉시 ROI | ★★★★ | 외부 코퍼스가 즉시 사용 가능 |
-| ADR-001 (구현 언어) 종속 | sqllogictest-rs 채택 시 Rust 강제 | ADR-001 결정 후 *implementation choice* |
-| 비결정 결과 표준화 | float·ORDER BY 없는 SELECT | 케이스 작성자 가이드 + skip 정책 |
-| 라이선스 | sqllogictest 코퍼스 라이선스 점검 필요 | full mirror 대신 *부분집합 vendor in* (ROADMAP §8 risk 6) |
+| Cost of adoption | low (record parser + hash + diff) | ROADMAP §6a-E1, *the candidate with the fewest dependencies* |
+| Immediate ROI | ★★★★ | the external corpus can be used at once |
+| Dependence on ADR-001 (implementation language) | adopting sqllogictest-rs forces Rust | an *implementation choice*, after ADR-001 is decided |
+| Standardising non-deterministic results | floats, a SELECT without ORDER BY | a guide for case authors plus a skip policy |
+| Licence | the sqllogictest corpus licence needs checking | *vendor in a subset* rather than a full mirror (ROADMAP §8 risk 6) |
 
 ---
 
-## 5. 의존하는 외부 자원
+## 5. External resources it depends on
 
-- **외부 코퍼스** — SQLite sqllogictest 트리 / DuckDB test suite / CockroachDB logictest 중 primary target (미정)
-- **CUBRID 클라이언트** — JDBC / CCI / cubrid-cli 중 SUT 구동 채널 (미정)
-- **ADR-001 (구현 언어)** — sqllogictest-rs 채택 가능성과 결합
-- **case-format ingestion 인터페이스** (design/contracts.md, Phase 2) — 본 항목이 *처음으로 요구하는* 공통 인터페이스
+- **An external corpus** — the primary target among the SQLite sqllogictest tree, the DuckDB test
+  suite and CockroachDB logictest (undecided)
+- **A CUBRID client** — the channel that drives the SUT, among JDBC, CCI and cubrid-cli (undecided)
+- **ADR-001 (implementation language)** — bound up with whether sqllogictest-rs is adopted
+- **The case-format ingestion interface** (design/contracts.md, phase 2) — the shared interface this
+  entry is *the first to require*
 
 ---
 
-## 6. incubating 진입 조건 (ROADMAP §6a-E1 Open Questions)
+## 6. The conditions for entering incubating (ROADMAP §6a-E1 Open Questions)
 
-다음이 결정되어야 ADR-EXT-001 작성 가능 (owner: hgryoo):
+ADR-EXT-001 can be written once these are decided (owner: hgryoo):
 
-1. **Pain point** — 왜 지금 sqllogictest? (외부 표준 진입 / 다른 DBMS 와의 회귀 비교 / 테스트 코퍼스 확장 / 특정 RND·CBRD 티켓?)
-2. **Spec target** — SQLite 원형 / DuckDB 확장 / CockroachDB 변형 중 baseline
-3. **코퍼스 정책** — 외부 트리 import 또는 mirror, 라이선스 검증
-4. **Acceptance** — 통과 case 수 / hash 일치율 / coverage 등 측정 기준
-5. **결과 비교 모드** — sqllogictest 표준 hash vs CUBRID expected 파일 추가
-6. **SUT 구동 클라이언트** — JDBC / CCI / cubrid-cli
-7. **Phase 정합 재확인** — Phase 4·5 병행이 1인 가용성 초과 여부 (분기 게이트 §7)
+1. **Pain point** — why sqllogictest, and why now? (entering an external standard / regression
+   comparison against another DBMS / enlarging the test corpus / a particular RND or CBRD ticket?)
+2. **Spec target** — which is the baseline: the SQLite original, the DuckDB extension, or the
+   CockroachDB variant
+3. **Corpus policy** — importing or mirroring the external tree, and licence verification
+4. **Acceptance** — the measure: number of cases passing, hash match rate, coverage and the like
+5. **Result comparison mode** — the standard sqllogictest hash, or adding a CUBRID expected file
+6. **The client that drives the SUT** — JDBC, CCI or cubrid-cli
+7. **Re-checking phase alignment** — whether running alongside phases 4 and 5 exceeds what one
+   person has available (the branch gate, §7)
 
 **ADR placeholder:**
-- ADR-EXT-001 — sqllogictest spec variant 선정 + 입력 코퍼스 import 정책 + 결과 비교 모드 + SUT 구동 클라이언트
+- ADR-EXT-001 — which sqllogictest spec variant, the input corpus import policy, the result
+  comparison mode, the client that drives the SUT
 
 ---
 
-## 7. 위험 / 정합성 메모
+## 7. Notes on risk and consistency
 
-- **NG1 (testcases 레포 동결) 충돌 없음** — 외부 코퍼스는 testcases 외부 자산
-- **NG2 (외부 표면 동결) 충돌 없음** — 신규 진입점
-- **NG4 (비-CUBRID DBMS 호환 금지) 충돌 없음** — CUBRID 가 SUT 측이지, testkit 이 다른 DBMS 호환을 추가하는 것이 아님
-- **분기 게이트 §7 충돌 가능** — strangler-fig Phase 3·4 와 자원 충돌 시 strangler-fig 우선 (ROADMAP §8 risk 7)
-- **§6a-E5 (parser fuzzing) 와 보완** — sqllogictest 는 *문법 통과 SQL* 의 wrong-result 검증; parser crash 는 별 축
+- **No conflict with NG1 (the testcases repository is frozen)** — an external corpus is an asset
+  outside testcases
+- **No conflict with NG2 (the external surface is frozen)** — a new entry point
+- **No conflict with NG4 (no compatibility with non-CUBRID DBMSs)** — CUBRID is on the SUT side;
+  testkit is not adding compatibility with another DBMS
+- **Possible conflict with the branch gate, §7** — where it competes for resources with
+  strangler-fig phases 3 and 4, the strangler fig comes first (ROADMAP §8 risk 7)
+- **Complementary to §6a-E5 (parser fuzzing)** — sqllogictest verifies wrong results for *SQL that
+  passes the grammar*; parser crashes are a separate axis

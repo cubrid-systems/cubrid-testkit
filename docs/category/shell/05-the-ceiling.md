@@ -1,5 +1,7 @@
 # 5. The memory ceiling
 
+*English · [한국어](05-the-ceiling.ko.md)*
+
 [← back to the shell category](README.md)
 
 `scenario_ram_mb` is the one setting that fails a run rather than slowing it. This document is about

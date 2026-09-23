@@ -1,34 +1,37 @@
 # E1 — I/O Contract (STUB)
 
-**Status:** STUB — contract 동결은 ADR-EXT-001 incubating 정식 진입 후.
+*English · [한국어](io-contract.ko.md)*
+
+**Status:** STUB — the contract is frozen after formal entry into incubating through ADR-EXT-001.
 **Source:** `requirements.md` §2
 
 ---
 
-## 1. CLI (제안)
+## 1. CLI (proposed)
 
 ```
 ctp.sh sqllogictest [-c <sqllogictest.conf>]
-   또는
+   or
 testkit run sqllogictest [-c <conf>] [--variant sqlite|duckdb|cockroach] [--client jdbc|cci|cli]
 ```
 
-옵션 / 디폴트 / 종료 코드: ADR-EXT-001 후 동결.
+Options, defaults and exit codes: frozen after ADR-EXT-001.
 
-## 2. conf 스키마 (TBD)
+## 2. conf schema (TBD)
 
-| 키 (의제) | 값 | 출처 |
+| Key (agenda) | Value | Source |
 |---|---|---|
-| `corpus_root` | `<dir>` | 외부 코퍼스 위치 (test-corpus.md) |
-| `client` | `jdbc \| cci \| cli` | SUT 구동 채널 |
-| `variant` | `sqlite \| duckdb \| cockroach` | spec baseline |
-| `compare_mode` | `hash \| values` | 결과 비교 모드 |
+| `corpus_root` | `<dir>` | where the external corpus lives (test-corpus.md) |
+| `client` | `jdbc \| cci \| cli` | the channel that drives the SUT |
+| `variant` | `sqlite \| duckdb \| cockroach` | the spec baseline |
+| `compare_mode` | `hash \| values` | the result comparison mode |
 
-ADR-EXT-001 합의 전에는 *제안 수준*. 키 이름/의미/디폴트 모두 동결되지 않음.
+Until ADR-EXT-001 is agreed this is *at the level of a proposal*. Key names, meanings and defaults
+are none of them frozen.
 
-## 3. 입력 포맷
+## 3. Input format
 
-`.slt` — sqllogictest spec record 포맷:
+`.slt` — the sqllogictest spec record format:
 ```
 statement (ok|error)
 <SQL>
@@ -41,10 +44,10 @@ query <type> [<sort>] [label]
 <hash | rows>
 ```
 
-## 4. 출력 포맷 / 종료 코드 (TBD)
+## 4. Output format and exit codes (TBD)
 
-ADR-EXT-001 후 — `<resultDir>/main.info` 호환 여부 결정.
+After ADR-EXT-001 — whether it is compatible with `<resultDir>/main.info` is decided then.
 
-## 5. NG2 (외부 표면 동결) 점검
+## 5. The NG2 check (the external surface is frozen)
 
-없음 — 신규 진입점. 본 항목은 *외부 표면 동결 외부* 의 신규 추가.
+None — a new entry point. This entry is a new addition *outside the external surface freeze*.

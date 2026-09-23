@@ -1226,3 +1226,33 @@ func TestTheDetailPaneReadsOnlyThisRunsPartOfTheLog(t *testing.T) {
 		t.Errorf("a replaced file was read from a stale offset:\n%s", got)
 	}
 }
+
+// A run sharded across several pairs is watched on one screen or not at all.
+// The panel therefore keys by cluster and upserts: one sampler gets one block,
+// eight get eight, in a stable order, and a second reading of the same cluster
+// replaces the first rather than adding to it.
+func TestThePairPanelHoldsOnePerCluster(t *testing.T) {
+	b := New(1)
+	if got := b.snapshot().Pairs; len(got) != 0 {
+		t.Fatalf("a run with no pair reported %d", len(got))
+	}
+	b.Pair(&Pair{Cluster: "sh2", DB: "sh2", Nodes: []PairNode{{Name: "sh2-n1", Built: "master"}}})
+	b.Pair(&Pair{Cluster: "sh1", DB: "sh1", Nodes: []PairNode{{Name: "sh1-n1", Built: "master"}}})
+	got := b.snapshot().Pairs
+	if len(got) != 2 {
+		t.Fatalf("two clusters gave %d panel(s)", len(got))
+	}
+	// Sorted, so the eighth shard does not move about between refreshes.
+	if got[0].Cluster != "sh1" || got[1].Cluster != "sh2" {
+		t.Errorf("out of order: %s, %s", got[0].Cluster, got[1].Cluster)
+	}
+
+	b.Pair(&Pair{Cluster: "sh1", DB: "sh1", Note: "the group would not answer"})
+	got = b.snapshot().Pairs
+	if len(got) != 2 {
+		t.Fatalf("a second reading of sh1 made %d panels", len(got))
+	}
+	if got[0].Note == "" {
+		t.Error("the newer reading of sh1 did not replace the older one")
+	}
+}

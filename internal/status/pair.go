@@ -1,6 +1,9 @@
 package status
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // The topology panel: what the run is measuring against, while it measures.
 //
@@ -76,25 +79,50 @@ type PairNode struct {
 
 // Pair records the topology the run is measuring against. Safe on a nil Board,
 // like everything else here, and safe to call as often as the caller samples.
+//
+// # Why there can be more than one
+//
+// A run was one pair when this was written. A run sharded across several pairs
+// is the same question asked N times at once, and the operator watching it has
+// one screen: eight pages for eight shards is eight places to look for the one
+// that died, which is the situation this panel exists to end.
+//
+// So a pair is keyed by its cluster and this upserts. One caller sampling one
+// cluster gets one panel, exactly as before; eight samplers get eight, in a
+// stable order, each with its own age -- a shard whose sampler has stopped
+// should look stale on its own rather than freeze the others.
 func (b *Board) Pair(p *Pair) {
-	if b == nil {
+	if b == nil || p == nil {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.pair = p
-	b.pairAt = time.Now()
+	if b.pairs == nil {
+		b.pairs = map[string]*Pair{}
+		b.pairAt = map[string]time.Time{}
+	}
+	b.pairs[p.Cluster] = p
+	b.pairAt[p.Cluster] = time.Now()
 }
 
-// pairView is the panel as the page reads it, with the age filled in at
-// snapshot time rather than at sample time.
-func (b *Board) pairView() *Pair {
-	if b.pair == nil {
+// pairViews is the panel as the page reads it, one entry per cluster, with each
+// age filled in at snapshot time rather than at sample time.
+func (b *Board) pairViews() []Pair {
+	if len(b.pairs) == 0 {
 		return nil
 	}
-	p := *b.pair
-	if !b.pairAt.IsZero() {
-		p.Age = int(time.Since(b.pairAt).Seconds())
+	keys := make([]string, 0, len(b.pairs))
+	for k := range b.pairs {
+		keys = append(keys, k)
 	}
-	return &p
+	sort.Strings(keys)
+	out := make([]Pair, 0, len(keys))
+	for _, k := range keys {
+		p := *b.pairs[k]
+		if at := b.pairAt[k]; !at.IsZero() {
+			p.Age = int(time.Since(at).Seconds())
+		}
+		out = append(out, p)
+	}
+	return out
 }

@@ -137,8 +137,8 @@ type Board struct {
 	// pair is the HA topology panel, set by the runner rather than sampled
 	// here: what a pair is belongs to internal/sandbox, and this package draws
 	// what it is handed.
-	pair   *Pair
-	pairAt time.Time
+	pairs  map[string]*Pair
+	pairAt map[string]time.Time
 	note   string
 	// replaying says this board is playing a finished run back rather than
 	// watching one happen, and the page says so -- an old run and a live one look
@@ -589,7 +589,7 @@ type view struct {
 	Templates *templateView `json:"templates,omitempty"`
 	// Pair is the topology an HA run measures against, and is nil for a run
 	// that has only one node to ask.
-	Pair *Pair `json:"pair,omitempty"`
+	Pairs []Pair `json:"pairs,omitempty"`
 	// Note is one sentence the page has to say about itself rather than about
 	// the run: that its source has gone quiet, and for how long. A run's own
 	// board never sets it -- it cannot go quiet without the process it lives in
@@ -774,7 +774,7 @@ func (b *Board) snapshot() view {
 	v.NPatched = len(b.patched)
 	v.NRefused = len(b.refused)
 	v.Templates = b.templates.snapshot()
-	v.Pair = b.pairView()
+	v.Pairs = b.pairViews()
 	v.Note = b.note
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()

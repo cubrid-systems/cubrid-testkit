@@ -136,6 +136,15 @@ const page = `<!doctype html>
  /* The machine panel is an instrument rather than a summary, so it gets a row
     of its own and the numbers are grouped by the question they answer. */
  .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.9rem 1.6rem}
+ /* One block per pair. A shard is read as a unit, so its nodes and its
+    artifact stay together and the next pair starts on a rule of its own. */
+ .pairblock{padding:.5rem 0}
+ .pairblock + .pairblock{border-top:1px solid var(--rule);margin-top:.5rem}
+ .pairblock h3{margin:0 0 .3rem 0;font-weight:600}
+ /* Built role first and in its own column, so a slave with a lag and a fail
+    count cannot push the rest of its line off the edge. */
+ .pairblock td.built{color:var(--ink-faint);padding-right:.7rem;white-space:nowrap}
+ .pairblock td{white-space:nowrap}
  .mg h3{margin:0 0 .3rem;font-size:.66rem;font-weight:600;letter-spacing:.12em;
    text-transform:uppercase;color:var(--ink-faint)}
  .mg table{min-width:0}
@@ -258,12 +267,8 @@ const page = `<!doctype html>
 </section>
 
 <section class=panel id=pairwrap hidden style="margin-bottom:1.6rem">
-  <h2>the pair <span class=count id=pairwhen></span></h2>
-  <div class=mgrid>
-    <div class=mg><h3>nodes</h3><table><tbody id=pairnodes></tbody></table></div>
-    <div class=mg><h3>artifact</h3><table><tbody id=pairwhat></tbody></table></div>
-  </div>
-  <div id=pairnote class=warn style="margin-top:.4rem"></div>
+  <h2>the pairs <span class=count id=pairwhen></span></h2>
+  <div id=pairs></div>
 </section>
 
 <section class=panel id=setupwrap hidden style="margin-bottom:1.6rem">
@@ -556,7 +561,7 @@ async function tick() {
   lanes(v.lanes || [])
   setup(v.setup || [])
   templates(v.templates)
-  pair(v.pair)
+  pairs(v.pairs || [])
   // What the page has to say about itself, which is not the same as what the
   // run has to say: a watcher's source can stop growing while the page is fine.
   $('note').textContent = v.note || ''
@@ -691,36 +696,61 @@ document.addEventListener('keydown', e => {
 // when it disagrees with what the run assumes, so it carries the colour: two
 // actives is a split brain, none is a group that has not settled, and a node
 // that is not live is why every case after it will time out.
-function pair(p) {
-  $('pairwrap').hidden = !p
-  if (!p) return
+// The pairs an HA run measures against. Absent for every other suite, which is
+// why the section hides itself rather than drawing an empty one and implying
+// "the pair is broken" where the truth is "this run has no pair".
+//
+// One block per pair, because a run sharded across several of them is watched
+// on one screen or not at all. Each block carries its own age and its own note:
+// a shard whose sampler stopped is stale by itself and must not make the others
+// look stale too.
+function pairs(list) {
+  $('pairwrap').hidden = !list || !list.length
+  if (!list || !list.length) return
+  $('pairwhen').textContent = list.length === 1 ? '' : list.length + ' pairs'
+  $('pairs').innerHTML = list.map(pairBlock).join('')
+}
+
+// A node is four columns and not a sentence. What it was built as comes first,
+// because that is the question a reader asks before any other -- and it is the
+// one the old row put last, after a detail string that ran off the edge as soon
+// as a slave had a lag and a fail count to report.
+function pairBlock(p) {
   const actives = (p.nodes || []).filter(n => (n.role || '').toLowerCase() === 'active').length
-  $('pairwhen').textContent = p.cluster + (p.age > 5 ? '  \u00b7 read ' + p.age + 's ago' : '')
-  $('pairnodes').innerHTML = (p.nodes || []).map(n => {
-    const bad = !n.live || (actives !== 1)
+  const nodes = (p.nodes || []).map(n => {
+    const bad = !n.live || actives !== 1
     const lag = (n.applyLag || 0) + (n.copyLag || 0)
-    const detail = [
-      n.state || (n.role || '?'),
+    const numbers = [
       n.fail ? n.fail + ' failed' : '',
       lag ? lag + ' page' + (lag === 1 ? '' : 's') + ' behind' : '',
-      (n.built && n.role && n.built !== n.role) ? 'built ' + n.built : '',
+      n.live ? '' : 'not live',
     ].filter(Boolean).join(' \u00b7 ')
-    return '<tr><td>' + esc(n.name) + '<td class="' + ((bad || n.fail) ? 'warn' : '') + '">' + esc(detail) + '</tr>'
-  }).join('') || '<tr><td colspan=2 class=empty>no node answered</tr>'
+    return '<tr>' +
+      '<td class=built>' + esc(n.built || '?') + '</td>' +
+      '<td>' + esc(n.name) + '</td>' +
+      '<td class="' + (bad ? 'warn' : '') + '">' + esc(n.state || n.role || '?') + '</td>' +
+      '<td class="' + (n.fail ? 'warn' : '') + '">' + numbers + '</td>' +
+      '</tr>'
+  }).join('') || '<tr><td colspan=4 class=empty>no node answered</tr>'
+
   const rows = [
     ['engine', p.engine], ['database', p.db], ['backend', p.backend],
     ['network', p.network], ['ping', p.ping], ['image', p.image],
   ].filter(r => r[1])
-  $('pairwhat').innerHTML = rows.map(r => '<tr><td>' + r[0] + '<td>' + esc(r[1]) + '</tr>').join('')
-  // A fault is deliberate while group B runs and a mystery afterwards, so it
-  // is listed either way rather than folded into the node lines.
-  const faults = p.faults || []
-  if (faults.length) {
-    $('pairwhat').innerHTML += faults.map(f =>
-      '<tr><td>fault<td class=warn>' + esc(f) + '</tr>').join('')
-  }
-  $('pairnote').textContent = p.note || ''
-  $('pairnote').hidden = !p.note
+  // A fault is deliberate while group B runs and a mystery afterwards, so it is
+  // listed either way rather than folded into the node lines.
+  const what = rows.map(r => '<tr><td>' + r[0] + '<td>' + esc(r[1]) + '</tr>').join('') +
+    (p.faults || []).map(f => '<tr><td>fault<td class=warn>' + esc(f) + '</tr>').join('')
+
+  const when = p.cluster + (p.age > 5 ? '  \u00b7 read ' + p.age + 's ago' : '')
+  return '<div class=pairblock>' +
+    '<h3>' + esc(when) + '</h3>' +
+    '<div class=mgrid>' +
+      '<div class=mg><table><tbody>' + nodes + '</tbody></table></div>' +
+      '<div class=mg><table><tbody>' + what + '</tbody></table></div>' +
+    '</div>' +
+    (p.note ? '<div class=warn style="margin-top:.3rem">' + esc(p.note) + '</div>' : '') +
+    '</div>'
 }
 
 // A lane is one word, and an unset one is nothing rather than a placeholder.

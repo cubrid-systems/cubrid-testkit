@@ -77,6 +77,28 @@ const DefaultTimeout = 2 * time.Minute
 // takes several.
 const ProvisionTimeout = 15 * time.Minute
 
+// CaseTimeout bounds a call that runs a case's own SQL.
+//
+// A third bound rather than a bigger first one, because the three are different
+// kinds of work and one number cannot serve them. A read -- `ha status`,
+// `describe`, `fault ls` -- answers in under a second, and a two-minute bound on
+// it is already generous; raising that to cover the corpus would mean waiting
+// minutes to find out a pair had stopped serving. Provisioning is minutes by
+// nature. A case is whatever the corpus says it is.
+//
+// Ten minutes, and the measurement is why. `_09_partition/_001_create/bug_xdbms294`
+// is the corpus's largest case at 67 KB: two CREATEs of 1,024 list partitions
+// each, with a DROP after each. Timed on a fresh quiet pair, the first CREATE
+// takes 158 s against a cold database and 82 s against a warm one, and the four
+// statements in one csql call take 130 s warm -- so a run under `reset=case`,
+// which hands every case a cold database, pays about 250 s for it. Ten minutes
+// is that with room for a slower machine, and still inside ProvisionTimeout,
+// which is the longest thing this package waits for.
+//
+// What it costs when a call really has hung is that case and no other: the run
+// reports `case_failed` naming the bound and goes on.
+const CaseTimeout = 10 * time.Minute
+
 // ErrTimedOut is a call that ran past this package's own bound and was killed
 // for it. It is a distinct error because the remedy is distinct: the node did
 // not fail and the cluster is not unreachable -- the work was longer than the

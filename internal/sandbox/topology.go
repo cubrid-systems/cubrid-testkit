@@ -141,7 +141,20 @@ func slaveRoles(cfg *conf.Config) []string {
 }
 
 // MasterChannel and SlaveChannel are the channels for those nodes.
-func (p *Pair) MasterChannel() exec.Channel { return NewNode(p.cli, p.Master) }
+func (p *Pair) MasterChannel() exec.Channel { return NewNode(p.caseCLI(), p.Master) }
+
+// caseCLI is the cluster with the bound a case's SQL needs rather than the one
+// a read needs. Every channel this type hands out runs case SQL -- that is what
+// the type is for -- so the distinction lives here and no caller has to
+// remember it. A CLI the caller gave an explicit Timeout keeps it.
+func (p *Pair) caseCLI() *CLI {
+	if p.cli == nil || p.cli.Timeout > 0 {
+		return p.cli
+	}
+	long := *p.cli
+	long.Timeout = CaseTimeout
+	return &long
+}
 
 // SlaveChannel returns the channel for slave n, counting from zero.
 func (p *Pair) SlaveChannel(n int) (exec.Channel, error) {
@@ -149,7 +162,7 @@ func (p *Pair) SlaveChannel(n int) (exec.Channel, error) {
 		return nil, fmt.Errorf("sandbox: cluster %q has %d slave(s) and slave %d was asked for",
 			p.Cluster, len(p.Slaves), n)
 	}
-	return NewNode(p.cli, p.Slaves[n]), nil
+	return NewNode(p.caseCLI(), p.Slaves[n]), nil
 }
 
 // Nodes names every node, master first. What a run records as "where this ran".

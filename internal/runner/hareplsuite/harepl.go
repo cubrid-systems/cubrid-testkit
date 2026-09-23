@@ -142,7 +142,7 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	if len(cases) == 0 {
 		return setupFailed("no case under %s", scenario)
 	}
-	deal(shards, scenario, cases)
+	deal(shards, resetEvery, cases)
 
 	fmt.Printf("ha_repl: %d case(s) from %s\n", len(cases), scenario)
 	for _, sh := range shards {
@@ -354,21 +354,44 @@ func clustersOf(cfgValue string) []string {
 	return out
 }
 
-// deal spreads the corpus over the shards, a directory at a time.
+// deal spreads the corpus over the shards, and the unit depends on the reset.
 //
-// By directory and not by case, because the sql corpus's own contract is that a
-// directory is the unit whose cases may rely on each other -- `reset=dir` says
-// so outright, and even under `reset=case` the cases of one directory share
-// names and shapes. Splitting a directory across two pairs would have one
-// shard's `create table t1` meet another's leftovers on a different machine,
-// which is a difference the run would report as the engine's.
+// # Under `reset=dir`, a directory at a time
 //
-// Round robin over directories sorted by size, largest first, so that one
-// directory of 1,500 cases does not become one shard's whole afternoon while
-// the other seven finish.
-func deal(shards []*runShard, scenario string, cases []string) {
+// The sql corpus's contract is that a directory is the unit whose cases may
+// rely on each other, and `reset=dir` is the runner honouring it: the database
+// is cleared at a directory boundary and not between the cases inside one.
+// Splitting such a directory across two pairs would have one shard's
+// `create table t1` meet another's leftovers on a different machine, which is a
+// difference the run would report as the engine's.
+//
+// # Under `reset=case`, a case at a time
+//
+// There is nothing left to protect. The runner clears the database between
+// every case, so a cross-case dependence inside a directory is already broken
+// -- by the single-pair run, before any sharding. Keeping directories whole
+// would be guarding a contract this mode has itself given up.
+//
+// And it is not a cosmetic difference. `_01_object`'s largest directory holds
+// 867 of its 3,327 cases, so dealing whole directories finishes no sooner than
+// that one shard: the run caps at 3.84x however many pairs it is given, and the
+// fifth and every later shard buy exactly nothing. Measured on that corpus,
+// 4 shards and 16 shards produce the same 867-case straggler.
+//
+// # Why the two modes balance differently
+//
+// Cases are near enough the same size that round robin is even. Directories are
+// not -- they differ by a factor of a hundred here -- so those go largest-first
+// to whichever shard holds the fewest cases so far.
+func deal(shards []*runShard, resetEvery string, cases []string) {
 	if len(shards) == 1 {
 		shards[0].cases = cases
+		return
+	}
+	if resetEvery == "case" {
+		for i, path := range cases {
+			shards[i%len(shards)].cases = append(shards[i%len(shards)].cases, path)
+		}
 		return
 	}
 	byDir := map[string][]string{}

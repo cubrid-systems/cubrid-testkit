@@ -1,5 +1,7 @@
 ![cubrid-testkit — finds the cases, runs them, judges them, records what happened. Every task it takes over keeps the same commands and the same output. Shown: a run marking cases OK and NOK, and the summary it writes out.](docs/assets/banner.svg)
 
+*English · [한국어](README.ko.md)*
+
 **cubrid-testkit** runs CUBRID's functional tests. Find the cases, run them against an engine,
 decide whether each one passed, write down what happened — and nothing else.
 
@@ -382,6 +384,7 @@ docs/
 | how to run the shell suite | [`category/shell/`](docs/category/shell/README.md) |
 | how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
 | how to run isolation | [`category/isolation/`](docs/category/isolation/README.md) |
+| how to test HA replication across a pair | [`category/ha-repl/`](docs/category/ha-repl/README.md) |
 | what this system is for | [`project/concept/north-star.md`](docs/project/concept/north-star.md) |
 | what may never change | [`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) |
 | what was left out, and why | [`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md) |
@@ -393,8 +396,14 @@ docs/
 | what happens next | [`project/ROADMAP.md`](docs/project/ROADMAP.md) · [`project/design/module-shell.md`](docs/project/design/module-shell.md) · [`project/design/module-isolation.md`](docs/project/design/module-isolation.md) |
 | every decision so far | [`project/adr/README.md`](docs/project/adr/README.md) |
 
-The guides for shell, sql and isolation, the evidence, and the later ADRs are in English. The
-analysis, the concept and design documents, the roadmap, the extension notes under
-`docs/category/extensions/` and the first ADRs are in Korean and stay that way — a freeze
-specification is worth exactly what its sentences are worth, and re-writing six thousand lines of
-analysis buys nothing but a chance to introduce errors.
+### The documentation's languages
+
+**The root README and everything under `docs/category/` exist in both English and Korean.** One
+rule: `X.md` is the English page and `X.ko.md` is the Korean one. The two carry the same content,
+and changing only one of them is treated as a bug.
+
+Everything under `docs/project/` — the roadmap, the ADRs, concept, design, analysis and survey —
+**stays in Korean.** Those are the project's direction and its design record rather than pages
+aimed at a user, and a freeze specification is worth exactly what its sentences are worth: rewriting
+six thousand lines of analysis buys nothing but a chance to introduce errors. The later ADRs and
+`evidence/` were written in English and stay that way.

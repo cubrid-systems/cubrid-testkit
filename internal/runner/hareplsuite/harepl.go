@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
+	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 	"github.com/cubrid-systems/cubrid-testkit/internal/status"
@@ -40,10 +41,35 @@ func setupFailed(format string, args ...any) error {
 const (
 	ClusterKey = "sandbox_cluster"
 	ClusterEnv = "TESTKIT_CSB_CLUSTER"
-	// WaitKey is CTP's own name for the bound on the replication wait, reused
-	// rather than reinvented: it is the frozen surface (ADR-003) and it already
-	// means exactly this.
-	WaitKey = "ha_sync_detect_timeout_in_ms"
+	// WaitKey is CTP's name for the bound on the replication wait, **in
+	// seconds**, and WaitKeyMs is the spelling this runner used before it was
+	// checked.
+	//
+	// The first version claimed to have reused CTP's key and had not. CTP's
+	// conf key is `ha_sync_detect_timeout_in_secs`
+	// (`ConfigParameterConstants.java:74`); `..._in_ms` is the name of the Java
+	// *field* it is parsed into (`Context.java:90`, seconds times a thousand).
+	// So a CTP `ha_repl.conf` setting the real key was read by this runner as
+	// nothing at all -- and conf keys are F3 on the frozen surface, which means
+	// they have to be accepted as input.
+	//
+	// Both are read, CTP's winning, because confs written against the wrong
+	// spelling exist and silently changing what they mean would be the same
+	// defect pointed the other way.
+	WaitKey   = "ha_sync_detect_timeout_in_secs"
+	WaitKeyMs = "ha_sync_detect_timeout_in_ms"
+	// WaitDefault is CTP's default, not a number chosen here:
+	// `Constants.java:46`, `600 * 1000`. This runner used 60 s, a tenth of it,
+	// and that is what turned `_09_partition` cases into `wait_timeout`.
+	// Measured afterwards on a fresh quiet pair, the slowest of them needs about
+	// 146 s -- comfortably inside CTP's bound and well outside the one that
+	// replaced it.
+	//
+	// It stays below CaseTimeout on purpose. A marker that never arrives has to
+	// be reported as `wait_timeout` -- replication did not come -- and not as
+	// `case_failed`, which says the SQL did not run. If the wait outlived the
+	// call bound the diagnosis would invert.
+	WaitDefault = 600 * time.Second
 	// ResetKey is when the database is emptied: before every case, which is
 	// what makes a run reproducible, or once per directory, which is the sql
 	// corpus's own contract that a directory is the unit whose cases may rely
@@ -157,7 +183,7 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		return setupFailed("please confirm your conf file path!")
 	}
 	scenario := cfg.GetOr("scenario", "")
-	wait := time.Duration(cfg.Int(WaitKey, 60000)) * time.Millisecond
+	wait := resolveWait(cfg)
 	// Off by default: the unconverted run is the baseline the conversion has
 	// to be measured against, and a switch that is on by default hides it.
 	addKey := cfg.Bool(AddKeyKey, false)
@@ -944,4 +970,23 @@ func reportStanding(ctx context.Context, self string) {
 	fmt.Fprintf(os.Stderr,
 		"       They are reused by a conf that names their set. `csb cluster ls` "+
 			"shows them; `csb cluster destroy --cluster NAME` removes one.\n")
+}
+
+// resolveWait reads the bound on the marker's crossing from either spelling.
+//
+// CTP's key wins where both are set, because it is the one a conf written for
+// CTP carries and this runner is the one that has to bend. The older spelling is
+// still read rather than dropped: confs in this repository use it, and a key
+// that silently stops meaning anything is the defect this function exists to fix.
+func resolveWait(cfg *conf.Config) time.Duration {
+	if secs := cfg.Int(WaitKey, 0); secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	if ms := cfg.Int(WaitKeyMs, 0); ms > 0 {
+		fmt.Fprintf(os.Stderr,
+			"[INFO] %s is CTP's key and is in seconds; this run read %s=%d instead\n",
+			WaitKey, WaitKeyMs, ms)
+		return time.Duration(ms) * time.Millisecond
+	}
+	return WaitDefault
 }

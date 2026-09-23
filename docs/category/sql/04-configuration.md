@@ -1,5 +1,7 @@
 # 4. Configuration
 
+*English · [한국어](04-configuration.ko.md)*
+
 [← back to the sql category](README.md)
 
 - [The file has sections](#the-file-has-sections)

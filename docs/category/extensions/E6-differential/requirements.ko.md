@@ -1,5 +1,7 @@
 # E6 — Differential Testing (PostgreSQL Pair) (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** survey/dbms-testing-ecosystem.md §8 + §11
 **Status:** incubating (조건부 — N13 pg-wire-compat selected 이상 권장)
 **축 매핑:** 축 6 (Differential testing)

@@ -1,5 +1,7 @@
 # E4 — Design (STUB)
 
+*[English](design.md) · 한국어*
+
 **Status:** STUB — 정식 design 은 ADR-EXT-004 incubating 정식 진입 후. 또한 N24 / N11 graduation 선결.
 **Source:** ROADMAP §6a-E4, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §6
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)

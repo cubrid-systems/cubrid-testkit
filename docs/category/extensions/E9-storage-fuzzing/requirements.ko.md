@@ -1,5 +1,7 @@
 # E9 — Storage-engine Concurrency Fuzzing (schedule × operation interleaving) (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** ROADMAP §6a-E9 + §6a 부록 (fuzzing 우선순위 사다리) · survey §7.4
 **Status:** incubating (조건부 — E5 선행 + SERVER_MODE in-process 기동)
 **축 매핑:** 축 5 확장 (engine-internal) × 축 8 (schedule/model-based) — 축 4·7 과 층이 다름

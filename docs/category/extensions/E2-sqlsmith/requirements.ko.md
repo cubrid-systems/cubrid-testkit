@@ -1,5 +1,7 @@
 # E2 — Random SQL Fuzzing (SQLsmith 포팅) (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** survey/dbms-testing-ecosystem.md §4 + §11 (ROADMAP §6a 카탈로그 신규 후보)
 **Status:** incubating (정식 진입 전 — ADR-EXT-002 자리)
 **축 매핑:** 축 2 (Random SQL generation)

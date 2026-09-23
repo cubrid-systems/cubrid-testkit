@@ -1,5 +1,7 @@
 # E3 — Logic Bug Detection (SQLancer NoREC + TLP) (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** survey/dbms-testing-ecosystem.md §5 + §11
 **Status:** incubating (정식 진입 전 — ADR-EXT-003 자리)
 **축 매핑:** 축 3 (Logic-bug / semantic testing)

@@ -1,5 +1,7 @@
 # E4 — Distributed Isolation Testing (AWDIT / Jepsen) (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** survey/dbms-testing-ecosystem.md §6 + §11
 **Status:** incubating (조건부 — N24 streaming-replication / N11 graduation 대기)
 **축 매핑:** 축 4 (Isolation / transaction testing — 분산 부분)

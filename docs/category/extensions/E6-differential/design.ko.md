@@ -1,5 +1,7 @@
 # E6 — Design (STUB)
 
+*[English](design.md) · 한국어*
+
 **Status:** STUB — 정식 design 은 ADR-EXT-006 incubating 정식 진입 후. N13 pg-wire-compat selected 이상 권장.
 **Source:** ROADMAP §6a-E6, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §8
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)

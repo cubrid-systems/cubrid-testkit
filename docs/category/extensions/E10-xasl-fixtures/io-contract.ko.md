@@ -1,5 +1,7 @@
 # E10 — I/O Contract (STUB)
 
+*[English](io-contract.md) · 한국어*
+
 **Status:** STUB — ADR-EXT-010 정식 진입 후 보강.
 **Source:** `requirements.md`
 

@@ -1,5 +1,7 @@
 # E7 — Design (STUB)
 
+*[English](design.md) · 한국어*
+
 **Status:** STUB — 정식 design 은 ADR-EXT-007 incubating 정식 진입 후. C-004 책임 경계 정의 선결.
 **Source:** ROADMAP §6a-E7, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §9
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)

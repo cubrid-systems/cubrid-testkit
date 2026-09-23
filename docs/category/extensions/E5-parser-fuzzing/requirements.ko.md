@@ -1,5 +1,7 @@
 # E5 — Parser / Protocol Fuzzing Harness (libFuzzer) (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** survey/dbms-testing-ecosystem.md §7 + §11
 **Status:** incubating (조건부 — cubrid 본 repo fuzz target build option 선결)
 **축 매핑:** 축 5 (Parser / compiler fuzzing)

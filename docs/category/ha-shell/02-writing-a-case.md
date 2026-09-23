@@ -1,5 +1,7 @@
 # 2. Writing an `ha-shell` case
 
+*English · [한국어](02-writing-a-case.ko.md)*
+
 [← back to the ha-shell category](README.md)
 
 An `ha-shell` case is a [`shell` case](../shell/02-writing-a-case.md) that has a second node. Read

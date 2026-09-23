@@ -1,5 +1,7 @@
 # E6 — I/O Contract (STUB)
 
+*[English](io-contract.md) · 한국어*
+
 **Status:** STUB — contract 동결은 ADR-EXT-006 incubating 정식 진입 후.
 **Source:** `requirements.md` §2
 

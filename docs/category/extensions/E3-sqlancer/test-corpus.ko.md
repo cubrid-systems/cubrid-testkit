@@ -1,5 +1,7 @@
 # E3 — Test Corpus (STUB)
 
+*[English](test-corpus.md) · 한국어*
+
 **Status:** STUB — 코퍼스 정책은 ADR-EXT-003 incubating 정식 진입 후.
 **Source:** `requirements.md` §5, ROADMAP §8 risk (E2/E3 corpus NG1)
 

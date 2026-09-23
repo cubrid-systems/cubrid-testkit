@@ -1,5 +1,7 @@
 # E7 — Stateful / Randomized Workload Testing (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** survey/dbms-testing-ecosystem.md §9 + §11
 **Status:** incubating (조건부 — engine-suite 책임 경계 (C-004) 선결)
 **축 매핑:** 축 7 (Stateful / workload testing)

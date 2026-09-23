@@ -1,5 +1,7 @@
 # E9 — Design (STUB)
 
+*[English](design.md) · 한국어*
+
 **Status:** STUB — 정식 design 은 ADR-EXT-009 incubating 정식 진입 후.
 E5 의 `-DENABLE_FUZZING` 인프라 + state reset 스파이크가 선결.
 **Source:** ROADMAP §6a-E9, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §7.4

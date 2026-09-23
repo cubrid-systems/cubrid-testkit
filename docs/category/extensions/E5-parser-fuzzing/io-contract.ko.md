@@ -1,5 +1,7 @@
 # E5 — I/O Contract (STUB)
 
+*[English](io-contract.md) · 한국어*
+
 **Status:** STUB — contract 동결은 ADR-EXT-005 incubating 정식 진입 후.
 **Source:** `requirements.md` §2
 

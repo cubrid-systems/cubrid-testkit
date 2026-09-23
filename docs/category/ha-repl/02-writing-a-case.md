@@ -1,5 +1,7 @@
 # 2. Writing an `ha_repl` case
 
+*English · [한국어](02-writing-a-case.ko.md)*
+
 [← back to the ha_repl category](README.md)
 
 An `ha_repl` case is a [`sql` case](../sql/02-writing-a-case.md) whose oracle is a second node.

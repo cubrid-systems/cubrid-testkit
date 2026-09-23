@@ -1,5 +1,7 @@
 # E6 — Test Corpus (STUB)
 
+*[English](test-corpus.md) · 한국어*
+
 **Status:** STUB — 코퍼스 정책은 ADR-EXT-006 incubating 정식 진입 후.
 **Source:** `requirements.md` §5
 

@@ -1,5 +1,7 @@
 # E5 — Design (STUB)
 
+*[English](design.md) · 한국어*
+
 **Status:** STUB — 정식 design 은 ADR-EXT-005 incubating 정식 진입 후. cubrid 본 repo `-DENABLE_FUZZING` 선결.
 **Source:** ROADMAP §6a-E5, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §7
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)

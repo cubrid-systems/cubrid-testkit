@@ -1,5 +1,7 @@
 # E10 — XASL Fixture Production and Storage (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** E9 재정의 과정에서 도출 (2026-09-04) · `E9-storage-fuzzing/requirements.md` §4a·§4b
 **Status:** incubating (신규 — E9 Tier 2 의 선결 조건)
 **축 매핑:** 축 1·3 보조 설비 — 자체 오라클이 없다. *다른 항목이 쓰는 자산* 을 만든다

@@ -1,5 +1,7 @@
 # E1 — sqllogictest 적용 (Requirements)
 
+*[English](requirements.md) · 한국어*
+
 **Source:** ROADMAP §6a-E1 + survey/dbms-testing-ecosystem.md §3
 **Status:** incubating (정식 진입 전 — ADR-EXT-001 대기)
 **축 매핑:** 축 1 (sqllogictest 계열, 정답 회귀)

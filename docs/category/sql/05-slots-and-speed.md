@@ -1,5 +1,7 @@
 # 5. Slots and speed
 
+*English · [한국어](05-slots-and-speed.ko.md)*
+
 [← back to the sql category](README.md)
 
 - [What it costs today](#what-it-costs-today)

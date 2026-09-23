@@ -1,5 +1,7 @@
 # E2 — Design (STUB)
 
+*[English](design.md) · 한국어*
+
 **Status:** STUB — 정식 design 은 ADR-EXT-002 incubating 정식 진입 후.
 **Source:** ROADMAP §6a-E2, `requirements.md`, `project/survey/dbms-testing-ecosystem.md` §4
 **Companion:** `requirements.md` (FULL), `io-contract.md` (STUB), `test-corpus.md` (STUB)

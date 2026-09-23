@@ -216,10 +216,12 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		}
 		rel, _ := filepath.Rel(scenario, path)
 		board.Begin(boardSlot, rel)
+		began := time.Now()
 		r := RunCase(ctx, pair, rel, string(sql), wait, keepDir, addKey)
-		board.End(boardSlot, rel, r.Outcome != Differ && r.Outcome != WaitTimeout && r.Outcome != CaseFailed)
+		r.Took = time.Since(began)
+		board.End(boardSlot, rel, ok(r.Outcome))
 		results = append(results, r)
-		ledger.Write(r)
+		ledger.Write(r, r.Took)
 		lastCase = rel
 		fmt.Printf("  %-15s %s%s\n", r.Outcome, rel, detailSuffix(r))
 	}
@@ -335,6 +337,13 @@ func pairBanner(ctx context.Context, c *sandbox.CLI, cluster string, pair *sandb
 		out = append(out, line("slave", slave))
 	}
 	return out
+}
+
+// ok is what the page counts as a pass. A difference is the finding this suite
+// exists for and still counts against, because the page's question is "is
+// anything wrong", not "did the suite work".
+func ok(o Outcome) bool {
+	return o != Differ && o != WaitTimeout && o != CaseFailed
 }
 
 func detailSuffix(r Result) string {

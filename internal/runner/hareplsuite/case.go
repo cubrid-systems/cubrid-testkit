@@ -103,6 +103,10 @@ type Result struct {
 	Node      string
 	// Waited is how long replication took, which is the number P1 is about.
 	Waited time.Duration
+	// Took is the whole case, wall clock. Filled by the runner rather than by
+	// RunCase, and carried so a page built from the ledger can draw the same
+	// histogram the live one draws.
+	Took time.Duration
 	// Detail is the sentence a reader needs and nothing more.
 	Detail string
 }

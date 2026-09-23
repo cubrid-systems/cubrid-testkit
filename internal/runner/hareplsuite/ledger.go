@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // The ledger is the run's verdicts, written as they happen.
@@ -55,13 +57,17 @@ func openLedger(dir string) (*ledger, error) {
 
 // Write appends one verdict and flushes it. A verdict held in a buffer when the
 // process is killed is a verdict that was not kept.
-func (l *ledger) Write(r Result) {
+//
+// The duration goes last, not third, so that a file written before this column
+// existed still reads: three fields is case, outcome, detail, and four is the
+// same with the milliseconds on the end.
+func (l *ledger) Write(r Result, took time.Duration) {
 	if l == nil || l.f == nil {
 		return
 	}
 	detail := strings.ReplaceAll(r.Detail, "\t", " ")
 	detail = strings.ReplaceAll(detail, "\n", " ")
-	fmt.Fprintf(l.f, "%s\t%s\t%s\n", r.Case, r.Outcome, detail)
+	fmt.Fprintf(l.f, "%s\t%s\t%s\t%d\n", r.Case, r.Outcome, detail, took.Milliseconds())
 	l.f.Sync()
 }
 
@@ -90,20 +96,33 @@ func (l *ledger) Judged() map[string]Result {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
-		fields := strings.SplitN(sc.Text(), "\t", 3)
-		if len(fields) < 2 || fields[0] == "" {
+		r, ok := parseLedgerLine(sc.Text())
+		if !ok {
 			continue
 		}
-		outcome := Outcome(fields[1])
-		if outcome == WaitTimeout || outcome == CaseFailed || outcome == "" {
-			delete(out, fields[0])
+		if r.Outcome == WaitTimeout || r.Outcome == CaseFailed {
+			delete(out, r.Case)
 			continue
 		}
-		r := Result{Case: fields[0], Outcome: outcome}
-		if len(fields) == 3 {
-			r.Detail = fields[2]
-		}
-		out[fields[0]] = r
+		out[r.Case] = r
 	}
 	return out
+}
+
+// parseLedgerLine reads one line back, in either shape.
+func parseLedgerLine(line string) (Result, bool) {
+	fields := strings.Split(line, "\t")
+	if len(fields) < 2 || fields[0] == "" || fields[1] == "" {
+		return Result{}, false
+	}
+	r := Result{Case: fields[0], Outcome: Outcome(fields[1])}
+	if len(fields) >= 3 {
+		r.Detail = fields[2]
+	}
+	if len(fields) >= 4 {
+		if ms, err := strconv.ParseInt(fields[3], 10, 64); err == nil {
+			r.Took = time.Duration(ms) * time.Millisecond
+		}
+	}
+	return r, true
 }

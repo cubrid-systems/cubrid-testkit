@@ -120,6 +120,15 @@ func run(args []string) int {
 		return replay(args[1:])
 	}
 
+	// watch is replay's other half: the same page, over a run that has not
+	// finished, read from the ledger it is writing as it goes. The run needs no
+	// flag and no restart and does not know it is watched, which is the whole
+	// point -- the moment you want to look at a run is never the moment you
+	// started it.
+	if len(args) > 0 && args[0] == "watch" {
+		return watchCmd(args[1:])
+	}
+
 	// failures turns a finished run into the list of cases to try again. It is
 	// the other half of testcase_from_file, and it is new rather than inherited.
 	if len(args) > 0 && args[0] == "failures" {
@@ -502,6 +511,59 @@ options:
   --speed N     times real time; default 60, so an hour plays in a minute
   --http ADDR   where to serve; "on" or a bare port are accepted, as in shell.conf
 `
+
+const watchUsage = `usage: watch [OPTION] -c <conf>
+
+Serve the status page for an ha_repl run that is already going, from outside it.
+
+The page is normally served by the run's own process, so a run started without
+status_http cannot be looked at afterwards. This reads what the run writes for
+its own resumability instead -- one line per case in
+<difference_dir>/verdicts.tsv, flushed as it goes -- and asks csb directly for
+what the pair is doing. Nothing is asked of the run: no flag, no port, no
+signal, no restart. It works on a run that has already finished, and two people
+can watch the same run from two machines.
+
+options:
+  -c, --config PATH   the conf the run was given; required
+  --http ADDR         where to serve; "on" or a bare port are accepted
+`
+
+func watchCmd(args []string) int {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	addr := fs.String("http", "on", "")
+	confPath := fs.String("c", "", "")
+	fs.StringVar(confPath, "config", "", "")
+	help := fs.Bool("h", false, "")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
+		fmt.Fprint(os.Stderr, watchUsage)
+		return exitPreflight
+	}
+	if *help {
+		fmt.Fprint(os.Stdout, watchUsage)
+		return exitOK
+	}
+	if *confPath == "" {
+		fmt.Fprint(os.Stderr, watchUsage)
+		return exitPreflight
+	}
+	where := status.Addr(*addr)
+	if where == "" {
+		where = status.DefaultAddr
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	// CTP_HOME is only what ${CTP_HOME} in the conf expands to, and a watcher
+	// reads the same conf the run was given, so it resolves the same way or
+	// not at all.
+	if err := hareplsuite.Watch(ctx, &conf.Home{Path: os.Getenv("CTP_HOME")}, *confPath, where, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
+		return exitPreflight
+	}
+	return exitOK
+}
 
 func replay(args []string) int {
 	fs := flag.NewFlagSet("replay", flag.ContinueOnError)

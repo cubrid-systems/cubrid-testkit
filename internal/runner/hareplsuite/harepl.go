@@ -133,8 +133,10 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 		return setupFailed("no case under %s", scenario)
 	}
 
-	fmt.Printf("ha_repl: %s -> %s, %d case(s) from %s\n",
-		pair.Master, strings.Join(pair.Slaves, ","), len(cases), scenario)
+	fmt.Printf("ha_repl: %d case(s) from %s\n", len(cases), scenario)
+	for _, line := range pairBanner(ctx, c, name, pair) {
+		fmt.Println(line)
+	}
 
 	// Where a difference is kept so it can be read rather than believed.
 	keepDir := cfg.GetOr("difference_dir", filepath.Join(filepath.Dir(req.ConfigPath), "ha_repl_differences"))
@@ -290,6 +292,49 @@ func keepStranded(dir string, stranded []strandedAt) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(dir, strandedFile), []byte(b.String()), 0o644)
+}
+
+// pairBanner says what the run is pointed at, one node to a line.
+//
+// The old one-liner was `master -> slave1,slave2, N case(s) from <path>`, and it
+// had three problems that are one problem: everything on one line. A second
+// slave pushed the scenario off the edge, the arrow said which way replication
+// goes and nothing about whether either node was up, and the names carried the
+// roles only by convention -- `-n1` is a master because it usually is.
+//
+// So: the count and the corpus on their own line, then one line per node, with
+// **what it was built as first and what HA currently calls it second**. Those
+// are different questions and they disagree exactly when something interesting
+// has happened -- after a failover the node built as the master is `standby`.
+//
+// The HA state is asked for once, here. A cluster that will not answer is not a
+// reason to refuse the run: the state is left out and the rest is printed,
+// because the run's own oracle does not depend on it.
+func pairBanner(ctx context.Context, c *sandbox.CLI, cluster string, pair *sandbox.Pair) []string {
+	state := map[string]sandbox.NodeHealth{}
+	if nodes, err := c.HAStatus(ctx); err == nil {
+		for _, n := range nodes {
+			state[n.Name] = n
+		}
+	}
+	line := func(built, name string) string {
+		s := fmt.Sprintf("  %-7s %-16s", built, name)
+		n, known := state[name]
+		switch {
+		case !known:
+			return s + "(state unread)"
+		case !n.Live:
+			return s + "(not live)"
+		default:
+			return s + "(" + n.Role + ", " + n.ServerState + ")"
+		}
+	}
+	out := []string{fmt.Sprintf("  pair %s, database %s", cluster, pair.DB)}
+	out = append(out, line("master", pair.Master))
+	for _, slave := range pair.Slaves {
+		out = append(out, line("slave", slave))
+	}
+	return out
 }
 
 func detailSuffix(r Result) string {

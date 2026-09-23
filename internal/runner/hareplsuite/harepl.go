@@ -947,6 +947,13 @@ func reportStanding(ctx context.Context, self string) {
 		if !ok || run == self {
 			continue
 		}
+		// Standing means running. A destroyed pair leaves its describe artifact
+		// behind on purpose -- a kilobyte that says what the evidence was
+		// produced on -- and reporting those as though they were pairs turns a
+		// bill into noise, which is how a report stops being read.
+		if c.Containers == 0 {
+			continue
+		}
 		if _, seen := byRun[run]; !seen {
 			order = append(order, run)
 		}

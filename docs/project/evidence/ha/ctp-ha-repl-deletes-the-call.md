@@ -67,6 +67,49 @@ drop table athlete;                                       -- kept
 Converted, the case creates a table and a procedure, drops both, and never writes a row. The slave
 is asked nothing, and the case passes.
 
+## The same door on the SELECT side, and the rule already knows about it
+
+`CALL` is not the only way a deleted statement writes. A `SELECT` can call a user-defined function,
+and a PL/CSQL function body holds DML like any other. Measured on the pair rather than argued:
+
+```sql
+create table fl(c1 int primary key, tag varchar(20));
+CREATE OR REPLACE FUNCTION f_write(n INT) RETURN INT AS
+BEGIN
+    INSERT INTO fl VALUES (n, 'from the function');
+    RETURN n;
+END;
+select f_write(1) from db_root;
+select f_write(2) from db_root;
+```
+
+Both rows are on the master **and on the slave**. The engine does exactly the right thing: the
+INSERT inside the function is ordinary data replication. What the conversion removes is the only
+statement that makes it happen, so the pair is never asked about rows it would have carried
+correctly.
+
+**The rule already concedes the principle.** Its `SELECT` clause is not unconditional:
+
+```java
+if (n1.startsWith("SELECT")) {
+    if (n1.indexOf("INCR") == -1 && n1.indexOf("DECR") == -1) return true;
+}
+```
+
+`INCR` and `DECR` are kept because a `SELECT` containing them writes. So "a SELECT can change data"
+was understood, and the exception was drawn around the two functions that did it in 2012. A call to
+a user-defined function belongs in that exception and is not in it.
+
+How much it costs, counted separately because the evidence differs:
+
+| | |
+|---:|---|
+| **2 cases, 3 SELECTs** | a PL/CSQL function whose body writes, called from a `SELECT` — the body is in the `.sql`, so the DML is visible and this count is solid |
+| **30 cases, 235 SELECTs** | a Java stored function called from a `SELECT` — the body is Java and not in the corpus file, so **whether these write is not established here** |
+
+Small beside the `CALL` side, and the principle is the same one: the conversion decides what may be
+deleted by the first word of a statement, and two of the words it deletes can run arbitrary DML.
+
 ## The rule is from 2012 and PL/CSQL arrived after it
 
 `shouldBeDeleted` carries a 2012 comment (`added by cn15209 2012.08.07`), when `CALL` in this

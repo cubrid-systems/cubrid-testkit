@@ -62,6 +62,14 @@ topology up belongs over there; running cases on top of it belongs here.
 | The code on this side | `internal/sandbox` — one Channel and one topology provider |
 | Recorded in | [ADR-022](../../project/adr/ADR-022-topology-provider.md) — accepted 2026-09-20 |
 
+**This location is a pin, not ownership.** Nothing here compiles against `csb`; the submodule exists
+so that evidence produced in this repository can name which revision of the provisioner stood the
+topology up, which is why ADR-022 rejected finding `csb` on `PATH` — *"a tool found on PATH names
+nothing."* The pin therefore belongs beside the evidence, and the evidence is here. When the axis O
+layer arrives it will pin both this repository and `cluster-sandbox` for the same reason, and **this
+pin stays**: using testkit without that layer does not stop being a way to use it
+([`design/slots-and-the-layer-above.md`](../../project/design/slots-and-the-layer-above.md) §8).
+
 **This table does not decide what to start.** The single source for the priority of the fuzzing
 family (E3 · E5 · E9) and of the two unregistered candidates is the **§6a ladder** in the ROADMAP.
 

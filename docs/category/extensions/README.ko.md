@@ -56,6 +56,14 @@ E7(workload)의 경계, 사다리 순위 6(recovery/crash).
 | 이쪽 코드 | `internal/sandbox` — Channel 하나와 topology provider 하나 |
 | 기록 | [ADR-022](../../project/adr/ADR-022-topology-provider.md) — 확정 (2026-09-20) |
 
+**이 위치는 소유가 아니라 핀이다.** 여기의 무엇도 `csb` 에 컴파일되지 않는다. 서브모듈이 있는
+이유는 이 저장소에서 나온 증거가 **어느 리비전의 provisioner 가 그 토폴로지를 세웠는지** 댈 수
+있게 하기 위해서이고, ADR-022 가 `PATH` 에서 `csb` 를 찾는 안을 기각한 이유가 그것이다 —
+*"a tool found on PATH names nothing."* 그러므로 핀은 증거 옆에 있어야 하고, 증거는 여기 있다.
+축 O 층이 생기면 그 층도 같은 이유로 이 저장소와 `cluster-sandbox` 를 함께 물겠지만, **이 핀은
+남는다**: 그 층 없이 testkit 만 쓰는 사용법이 사라지지 않기 때문이다
+([`design/slots-and-the-layer-above.md`](../../project/design/slots-and-the-layer-above.md) §8).
+
 **착수 순서는 이 표가 정하지 않는다.** fuzzing 계열(E3·E5·E9)과 미등록 후보 2건의 우선순위는 ROADMAP **§6a 사다리** 가 단일 출처다.
 
 ---

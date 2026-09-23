@@ -2,8 +2,10 @@ package status
 
 import (
 	"bufio"
+	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -22,6 +24,21 @@ import (
 type detail struct {
 	mu   sync.Mutex
 	path string
+	// from is where this run's own output begins: the size of the file when
+	// the run said where it was.
+	//
+	// feedback.log is appended to, and a result directory is reused. So a case
+	// that ran yesterday and has not run yet today still has a block in there,
+	// and a scan from the start hands it to the page as though it were this
+	// run's. That is not hypothetical -- the same accumulation in
+	// test_<env>.log sent a reader an hour after a trace from the day before,
+	// and the page would have done it silently.
+	//
+	// Everything before this offset belongs to a run that is over. The file
+	// ends every line with a newline, so the offset is a line boundary; and if
+	// the file is ever shorter than this, it was replaced rather than appended
+	// to and the offset means nothing, so the scan starts again from zero.
+	from int64
 	// fn answers instead of the file, for a runner whose cases leave no
 	// feedback.log -- the sql suite's are a rendering and an answer.
 	fn func(name string) string
@@ -36,7 +53,17 @@ func (b *Board) Detail(feedbackPath string) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.detail = &detail{path: feedbackPath}
+	b.detail = &detail{path: feedbackPath, from: sizeOf(feedbackPath)}
+}
+
+// sizeOf is the file's length now, and zero for a file that is not there yet --
+// which is the common case, and the right answer for it.
+func sizeOf(path string) int64 {
+	st, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return st.Size()
 }
 
 // DetailFunc is Detail for a runner whose cases leave no feedback.log: fn
@@ -50,13 +77,13 @@ func (b *Board) DetailFunc(fn func(name string) string) {
 	b.detail = &detail{fn: fn}
 }
 
-func (d *detail) where() string {
+func (d *detail) where() (string, int64) {
 	if d == nil {
-		return ""
+		return "", 0
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.path
+	return d.path, d.from
 }
 
 // block returns the part of feedback.log that belongs to one case.
@@ -68,7 +95,7 @@ func (d *detail) block(name string) string {
 	if d.fn != nil {
 		return d.fn(name)
 	}
-	path := d.where()
+	path, from := d.where()
 	if path == "" || name == "" {
 		return ""
 	}
@@ -77,6 +104,14 @@ func (d *detail) block(name string) string {
 		return ""
 	}
 	defer f.Close()
+	if st, serr := f.Stat(); serr == nil && st.Size() < from {
+		from = 0
+	}
+	if from > 0 {
+		if _, serr := f.Seek(from, io.SeekStart); serr != nil {
+			return ""
+		}
+	}
 
 	var out strings.Builder
 	in := false
@@ -129,10 +164,13 @@ func (b *Board) serveDetail(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("nothing recorded for this case yet: it has not finished.\n"))
 			return
 		}
+		where, from := d.where()
 		w.Write([]byte("nothing recorded for this case yet.\n\n" +
 			"A case gets a block in feedback.log when it finishes. If it has finished,\n" +
 			"the run may be writing to a different result tree than the page was told about:\n  " +
-			d.where() + "\n"))
+			where + "\n\n" +
+			"Only this run's own part of that file is read -- everything before byte " +
+			strconv.FormatInt(from, 10) + " belongs to a run that is over.\n"))
 		return
 	}
 	w.Write([]byte(text))

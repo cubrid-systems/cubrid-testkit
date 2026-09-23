@@ -390,6 +390,21 @@ func (b *Board) End(slot, name string, ok bool) {
 // endWith is End with a duration supplied rather than measured, which is what a
 // replay needs: the wall clock is compressed but the durations reported are the
 // ones the run really had.
+// Record is one finished case with the time it took, for a page built from a
+// record rather than from the run that made it.
+//
+// Begin/End is for a runner watching its own work: it holds the start and the
+// board takes the duration off the clock. A watcher reading a run's ledger has
+// the duration written down and no start to hold, and a page that timed those
+// cases from when it happened to read the line would draw the reader's own
+// latency as the corpus's.
+func (b *Board) Record(slot, name string, ok bool, took time.Duration) {
+	if b == nil {
+		return
+	}
+	b.endWith(slot, name, ok, took)
+}
+
 func (b *Board) endWith(slot, name string, ok bool, took time.Duration) {
 	if b == nil {
 		return

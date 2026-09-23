@@ -168,6 +168,20 @@ that has run tens of thousands of statements costs several times more per case t
 in a sharded run the worn pair sets the wall clock
 ([`evidence/ha/a-sandbox-pair-wears-out.md`](../../project/evidence/ha/a-sandbox-pair-wears-out.md)).
 
+**It also costs disk that nothing gives back, so ask what it is costing:**
+
+```
+$ csb cluster ls
+NAME                 STATE    CONTAINERS  DISK      HOST               LABELS
+sh7                  yes      2           7.5G      hgryoo-desktop     -
+sh11                 yes      2           9.5G      hgryoo-desktop     -
+```
+
+Eleven pairs here reached 53 GB and took the filesystem to 98%. The filesystem's own total could not
+say which pair to remove, which is why `cluster ls` reports it per cluster. **This runner does not
+destroy a pair**: it asks for a topology and never builds one (ADR-022), so a pair it did not create
+is not its to remove. `csb cluster destroy` is that verb, and rebuilding takes about a minute.
+
 ## What a run leaves behind
 
 Everything lands under `difference_dir`.

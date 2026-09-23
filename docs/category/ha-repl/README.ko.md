@@ -164,6 +164,20 @@ TESTKIT_NATIVE=ha_repl testkit ha_repl -c /tmp/ha.conf
 케이스당 몇 배를 치르고, 샤딩된 런에서는 **닳은 페어가 벽시계를 정한다**
 ([`evidence/ha/a-sandbox-pair-wears-out.md`](../../project/evidence/ha/a-sandbox-pair-wears-out.md)).
 
+**디스크도 마찬가지로 돌려받지 못하므로, 얼마를 치르고 있는지 물어라:**
+
+```
+$ csb cluster ls
+NAME                 STATE    CONTAINERS  DISK      HOST               LABELS
+sh7                  yes      2           7.5G      hgryoo-desktop     -
+sh11                 yes      2           9.5G      hgryoo-desktop     -
+```
+
+여기서 페어 열하나가 53 GB가 되어 파일시스템을 98%까지 채웠다. 파일시스템의 총량은 **어느 페어를
+지울지**를 말해주지 못하고, 그래서 `cluster ls` 가 클러스터별로 보고한다. **이 러너는 페어를
+부수지 않는다** — 토폴로지를 요청할 뿐 만들지 않으므로(ADR-022) 자기가 만들지 않은 페어는 자기가
+치울 것이 아니다. 그 동사는 `csb cluster destroy` 이고, 다시 세우는 데 1 분쯤 걸린다.
+
 ## 런이 남기는 것
 
 전부 `difference_dir` 아래에 떨어진다.

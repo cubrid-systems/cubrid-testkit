@@ -31,7 +31,17 @@ import (
 // service, and not 8080, which everything else on a developer's machine is
 // already using. The digits are CUBRID's own 1523 with a 5 in front, which is
 // the only reason this number rather than another.
-const DefaultAddr = "127.0.0.1:51523"
+//
+// Every interface, not loopback. This was loopback until 2026-09-23 on the
+// argument that a run should not become a page the rest of the network can
+// read; the owner's answer is that the exposure is controlled where exposure
+// belongs -- these machines are on a private network -- and that a page nobody
+// but the host can open is a page nobody opens. The run that made the case was
+// one whose pair died unwatched for an hour.
+//
+// The host is still whatever an operator writes. `status_http=127.0.0.1:51523`
+// is loopback again, in one line, for a machine that is not on such a network.
+const DefaultAddr = ":51523"
 
 // NearDefault is the nth port after the default, for a machine already running a
 // run. Two runs on one machine is a normal thing to want -- a long one and a
@@ -49,10 +59,9 @@ func NearDefault(n int) string {
 }
 
 // Addr reads what the configuration said. A bare "on" takes DefaultAddr, a bare
-// port takes every interface, and anything else is passed through as written.
-//
-// Loopback by default rather than every interface: a QA machine's run should not
-// become a page the rest of the network can read because someone turned it on.
+// port takes every interface, and anything else is passed through as written --
+// including a host, which is how a machine outside a private network asks for
+// loopback back.
 func Addr(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "":

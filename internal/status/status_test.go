@@ -132,8 +132,17 @@ func TestAddr(t *testing.T) {
 	}
 	// Loopback by default: turning the page on should not publish a run to the
 	// network.
-	if !strings.HasPrefix(DefaultAddr, "127.0.0.1:") {
-		t.Errorf("the default address is not loopback: %q", DefaultAddr)
+	// Every interface by default, decided 2026-09-23: exposure is controlled by
+	// the network these machines are on, and a page only the host can open is a
+	// page nobody opens. An operator who needs loopback writes the host.
+	if strings.Contains(DefaultAddr, "127.0.0.1") {
+		t.Errorf("the default address is loopback again: %q", DefaultAddr)
+	}
+	if !strings.HasPrefix(DefaultAddr, ":") {
+		t.Errorf("the default address should name a port and every interface: %q", DefaultAddr)
+	}
+	if got := Addr("127.0.0.1:51523"); got != "127.0.0.1:51523" {
+		t.Errorf("an operator's own host was not passed through: %q", got)
 	}
 }
 

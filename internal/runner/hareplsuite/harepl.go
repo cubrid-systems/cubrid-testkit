@@ -136,9 +136,6 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	fmt.Printf("ha_repl: %s -> %s, %d case(s) from %s\n",
 		pair.Master, strings.Join(pair.Slaves, ","), len(cases), scenario)
 
-	board, closeBoard := openBoard(ctx, cfg, c, pair, name, scenario, wait, addKey, resetEvery, len(cases))
-	defer closeBoard()
-
 	// Where a difference is kept so it can be read rather than believed.
 	keepDir := cfg.GetOr("difference_dir", filepath.Join(filepath.Dir(req.ConfigPath), "ha_repl_differences"))
 
@@ -156,6 +153,20 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 			fmt.Printf("  resuming: %d case(s) already judged\n", len(done))
 		}
 	}
+
+	// The page is opened here rather than above, because what it counts is the
+	// cases this run will judge. A resumed case is skipped without being begun
+	// or ended, so counting it in the total leaves the page permanently short
+	// -- 14 done of 3,327 on a run that had already judged 582.
+	toJudge := 0
+	for _, path := range cases {
+		rel, _ := filepath.Rel(scenario, path)
+		if _, already := done[rel]; !already {
+			toJudge++
+		}
+	}
+	board, closeBoard := openBoard(ctx, cfg, c, pair, name, scenario, wait, addKey, resetEvery, toJudge)
+	defer closeBoard()
 
 	var results []Result
 	var stranded []strandedAt

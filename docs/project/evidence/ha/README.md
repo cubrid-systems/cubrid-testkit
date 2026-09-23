@@ -57,6 +57,24 @@ is next, and the traps that cost a day each.
   key conversion was breaking any table that already auto-increments, and a `SELECT` of a serial's
   next value was being compared across the pair.
 
+- [a-sandbox-pair-wears-out](a-sandbox-pair-wears-out.md) — **2026-09-23.** A pair's cost per case
+  rises with how much it has been used and never falls: the per-case reset drops the schema, but the
+  database keeps the volumes it grew and the copy log keeps its 2.2 GB. Found by an eight-shard
+  timing that read **0.86x** — eight pairs slower than one — which was one pair at 127,114 log pages
+  running 9.83x slow, not anything about concurrency. Rebuilt fresh, the same slice gives **4.58x**.
+  Consequences: a sharded run needs pairs of equal wear, and the ledger's duration column is not
+  comparable across a long run.
+
+- [pairs-across-machines](pairs-across-machines.md) — **2026-09-23.** A design note for putting the
+  masters here and the slaves elsewhere, under one frame: **local or remote, you use `csb`** — no
+  second tool, no mode the caller picks. The runner already needs nothing (ADR-022 made a node's
+  name its address) and the tailnet already carries the network and the faults. What is missing is
+  placement, an agreement step inside `create`, and a direct transfer between the machines for the
+  seed. Records the invariant that breaks if treated as advice — a fault verb must not be able to
+  cut the tool's own control channel — and the probe of the notebook: same engine build, sshd, on
+  the tailnet, **no container engine**, which is a missing backend rather than a reason for a
+  different tool.
+
 - [split-brain-divergence-converges](split-brain-divergence-converges.md) — **2026-09-22.** Group
   B's first measurement, and the first time this suite has asked its question of a topology that
   moved. A split brain is reached on purpose, a row is written on each side, the network is healed,

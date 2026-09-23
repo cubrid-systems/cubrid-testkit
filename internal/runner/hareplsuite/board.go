@@ -35,8 +35,8 @@ const boardSlot = "pair"
 // way to tell that from the engine doing it. And every finding in
 // evidence/ha carries a *Trees* line written from memory after the fact, which
 // is what the artifact rows are for.
-func openBoard(ctx context.Context, cfg *conf.Config, cli *sandbox.CLI, pair *sandbox.Pair,
-	cluster, scenario string, wait time.Duration, addKey bool, resetEvery string, cases int,
+func openBoard(ctx context.Context, cfg *conf.Config, shards []*runShard,
+	scenario string, wait time.Duration, addKey bool, resetEvery string, cases int,
 ) (*status.Board, func()) {
 	addr := status.Addr(cfg.GetOr(StatusKey, ""))
 	if addr == "" {
@@ -49,11 +49,16 @@ func openBoard(ctx context.Context, cfg *conf.Config, cli *sandbox.CLI, pair *sa
 		return nil, func() {}
 	}
 	fmt.Fprintf(os.Stderr, "[INFO] status page at http://%s/\n", where)
-	board.Lane(boardSlot, "pair")
+	names := make([]string, 0, len(shards))
+	for _, sh := range shards {
+		board.Lane(sh.cluster, "pair "+sh.cluster)
+		names = append(names, sh.cluster)
+	}
 	board.Setup([]status.Setting{
 		{Group: "suite", Key: "task", Value: "ha_repl"},
 		{Group: "suite", Key: "scenario", Value: scenario},
-		{Group: "suite", Key: ClusterKey, Value: cluster},
+		{Group: "suite", Key: ClusterKey, Value: strings.Join(names, ", "),
+			Note: "one pair per shard; the corpus is dealt a directory at a time"},
 		{Group: "suite", Key: WaitKey, Value: fmt.Sprint(wait.Milliseconds()), Default: "60000",
 			Note: "the bound on the marker's crossing; the wait itself is a poll, never a sleep"},
 		{Group: "suite", Key: AddKeyKey, Value: yesNo(addKey), Default: "no",
@@ -63,22 +68,26 @@ func openBoard(ctx context.Context, cfg *conf.Config, cli *sandbox.CLI, pair *sa
 		{Group: "suite", Key: ResumeKey, Value: yesNo(cfg.Bool(ResumeKey, false)), Default: "no",
 			Note: "skip the cases a previous run judged; never resumes a wait_timeout"},
 	})
-	// The artifact is read once -- it is what the cluster was built from and
-	// does not change under a run -- and the health is read on a ticker.
-	static := clusterRows(ctx, cli, cluster, pair)
+	// The artifact is read once per pair -- it is what the cluster was built
+	// from and does not change under a run -- and the health is read on a
+	// ticker. One sampler each, so a pair that stops answering makes its own
+	// panel stale rather than every panel.
 	done := make(chan struct{})
-	go func() {
-		t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for {
-			board.Pair(samplePair(ctx, cli, static))
-			select {
-			case <-done:
-				return
-			case <-t.C:
+	for _, sh := range shards {
+		static := clusterRows(ctx, sh.cli, sh.cluster, sh.pair)
+		go func(cli *sandbox.CLI, static status.Pair) {
+			t := time.NewTicker(2 * time.Second)
+			defer t.Stop()
+			for {
+				board.Pair(samplePair(ctx, cli, static))
+				select {
+				case <-done:
+					return
+				case <-t.C:
+				}
 			}
-		}
-	}()
+		}(sh.cli, static)
+	}
 	return board, func() {
 		close(done)
 		stop()

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/conf"
@@ -52,127 +53,231 @@ import (
 // of the run, so the watcher asks csb for it directly. That is the same
 // reading the run's own page makes, from the same place, which is why the two
 // cannot disagree.
-func Watch(ctx context.Context, home *conf.Home, confPath, addr string, out io.Writer) error {
-	cfg, err := home.Load(confPath)
-	if err != nil {
-		return fmt.Errorf("please confirm your conf file path: %w", err)
+// Watch serves one page for one or more runs.
+//
+// # Why more than one
+//
+// A corpus sharded across several pairs is several processes, each with a page
+// of its own on a port of its own -- which is several places to look for the
+// one shard that died, and the reason the pair panel exists is that nobody was
+// looking when one did. So a watcher takes as many runs as it is given, or
+// finds them itself, and draws them side by side: a lane and a pair panel each.
+//
+// Each run keeps its own place in its own ledger. One shard being rebuilt
+// because it re-judged a case does not disturb the others' counts, and a shard
+// whose ledger has gone quiet says so about itself rather than about the page.
+func Watch(ctx context.Context, home *conf.Home, confPaths []string, addr string, out io.Writer) error {
+	if len(confPaths) == 0 {
+		return fmt.Errorf("nothing to watch: name a conf with -c, or start a run for this to find")
 	}
-	cluster := clusterOf(cfg.GetOr(ClusterKey, ""))
-	if cluster == "" {
-		return fmt.Errorf("no cluster: set %s in %s, or %s in the environment",
-			ClusterKey, confPath, ClusterEnv)
+	var sources []*source
+	total := 0
+	for _, confPath := range confPaths {
+		src, err := openSource(ctx, home, confPath)
+		if err != nil {
+			return err
+		}
+		sources = append(sources, src)
+		total += src.total
 	}
-	scenario := cfg.GetOr("scenario", "")
-	cases, cerr := Cases(scenario)
-	if cerr != nil {
-		return cerr
-	}
-	keepDir := cfg.GetOr("difference_dir", filepath.Join(filepath.Dir(confPath), "ha_repl_differences"))
-	ledgerPath := filepath.Join(keepDir, LedgerFile)
 
-	board := status.New(len(cases))
+	board := status.New(total)
 	where, stop, serr := board.Serve(addr)
 	if serr != nil {
 		return serr
 	}
 	defer stop()
-	fmt.Fprintf(out, "watching %s\n  ledger  %s\n  cluster %s\n  page    http://%s/\n",
-		scenario, ledgerPath, cluster, where)
-	board.Lane(boardSlot, "pair")
-	board.Setup([]status.Setting{
+
+	fmt.Fprintf(out, "watching %d run(s)\n  page    http://%s/\n", len(sources), where)
+	settings := []status.Setting{
 		{Group: "suite", Key: "task", Value: "ha_repl", Note: "watched from outside the run"},
-		{Group: "suite", Key: "scenario", Value: scenario},
-		{Group: "suite", Key: ClusterKey, Value: cluster},
-		{Group: "suite", Key: "ledger", Value: ledgerPath,
-			Note: "the run writes one line per case here, and this page reads it"},
-	})
-
-	cli := sandbox.Bind(cluster)
-	static := status.Pair{Cluster: cluster}
-	if info, aerr := cli.Artifact(ctx); aerr == nil {
-		static.Backend, static.Image, static.Network, static.DB = info.Backend, info.Image, info.Network, info.DB
-		static.Engine = info.Engine.Build
+		{Group: "page", Key: "runs", Value: fmt.Sprint(len(sources)),
+			Note: "each writes one line per case to its own ledger, and this page reads them"},
 	}
-	go func() {
-		t := time.NewTicker(2 * time.Second)
-		defer t.Stop()
-		for {
-			board.Pair(samplePair(ctx, cli, static))
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-			}
-		}
-	}()
+	for _, src := range sources {
+		fmt.Fprintf(out, "  %-8s %s\n           %s\n", src.label, src.scenario, src.ledger)
+		board.Lane(src.label, "pair "+src.cluster)
+		settings = append(settings,
+			status.Setting{Group: src.label, Key: ClusterKey, Value: src.cluster},
+			status.Setting{Group: src.label, Key: "scenario", Value: src.scenario},
+			status.Setting{Group: src.label, Key: "ledger", Value: src.ledger})
+	}
+	board.Setup(settings)
 
-	return follow(ctx, board, ledgerPath, len(cases))
+	for _, src := range sources {
+		go src.samplePairs(ctx, board)
+	}
+	return followAll(ctx, board, sources)
 }
 
-// follow reads the ledger from the beginning and then keeps reading.
-//
-// From the beginning because a watcher that attached at case 3,000 would draw
-// a run that had done 327 of them. By polling rather than by inotify: the file
-// is appended a few times a minute at most, the run flushes every line, and a
-// poll cannot miss a write the way a watcher that has to re-register can.
-func follow(ctx context.Context, board *status.Board, path string, total int) error {
-	var offset int64
-	var order []Result
-	seen := map[string]int{}
-	grew := time.Now()
+// source is one run: its lane, its ledger, and the pair it measures against.
+type source struct {
+	label    string
+	cluster  string
+	scenario string
+	ledger   string
+	total    int
+
+	cli    *sandbox.CLI
+	static status.Pair
+
+	// Where this run's ledger has been read to, and what it said, so that a
+	// case judged twice can be replaced rather than counted twice.
+	offset int64
+	order  []Result
+	seen   map[string]int
+	grew   time.Time
+}
+
+// openSource reads one run's conf and works out everything the page needs from
+// it. It does not touch the run.
+func openSource(ctx context.Context, home *conf.Home, confPath string) (*source, error) {
+	cfg, err := home.Load(confPath)
+	if err != nil {
+		return nil, fmt.Errorf("please confirm your conf file path (%s): %w", confPath, err)
+	}
+	cluster := clusterOf(cfg.GetOr(ClusterKey, ""))
+	if cluster == "" {
+		return nil, fmt.Errorf("no cluster: set %s in %s, or %s in the environment",
+			ClusterKey, confPath, ClusterEnv)
+	}
+	scenario := cfg.GetOr("scenario", "")
+	cases, cerr := Cases(scenario)
+	if cerr != nil {
+		return nil, cerr
+	}
+	keepDir := cfg.GetOr("difference_dir", filepath.Join(filepath.Dir(confPath), "ha_repl_differences"))
+
+	src := &source{
+		// The cluster names the lane, because that is what the operator is
+		// looking for when a shard misbehaves. Two runs against one cluster
+		// would collide here, and that is a configuration worth colliding on:
+		// they would also be resetting the same database under each other.
+		label:    cluster,
+		cluster:  cluster,
+		scenario: scenario,
+		ledger:   filepath.Join(keepDir, LedgerFile),
+		total:    len(cases),
+		cli:      sandbox.Bind(cluster),
+		static:   status.Pair{Cluster: cluster},
+		seen:     map[string]int{},
+		grew:     time.Now(),
+	}
+	if info, aerr := src.cli.Artifact(ctx); aerr == nil {
+		src.static.Backend, src.static.Image = info.Backend, info.Image
+		src.static.Network, src.static.DB = info.Network, info.DB
+		src.static.Engine = info.Engine.Build
+	}
+	return src, nil
+}
+
+// samplePairs keeps this run's pair panel current.
+func (s *source) samplePairs(ctx context.Context, board *status.Board) {
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
 	for {
-		size, err := sizeOf(path)
-		switch {
-		case err != nil:
-			// The run may not have written its first verdict yet. That is a
-			// state to wait in, not to fail on -- a watcher started in the
-			// same breath as the run is the normal case.
-		case size < offset:
-			// The file shrank, so it is a different run: start over rather
-			// than read the middle of a line.
-			offset, order, seen = 0, nil, map[string]int{}
-			board.Reset()
-			fallthrough
-		case size > offset:
-			replay := false
-			n, rerr := readFrom(path, offset, func(r Result) {
-				at, already := seen[r.Case]
-				if !already {
-					seen[r.Case] = len(order)
-					order = append(order, r)
-					board.Begin(boardSlot, r.Case)
-					board.Record(boardSlot, r.Case, ok(r.Outcome), r.Took)
-					return
-				}
-				// The run judged this case again -- a resumed run re-runs what
-				// came back wait_timeout, and the second answer is the one that
-				// counts. A board cannot be told to forget one case, so the
-				// whole thing is rebuilt from the lines in order, which is what
-				// replay does when it seeks backwards.
-				order[at] = r
-				replay = true
-			})
-			if rerr == nil {
-				if n != offset {
-					grew = time.Now()
-				}
-				offset = n
+		board.Pair(samplePair(ctx, s.cli, s.static))
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// followAll reads every run's ledger from the beginning and then keeps reading.
+//
+// From the beginning because a watcher that attached at case 3,000 would draw a
+// run that had done 327 of them, which is a lie about the run rather than a gap
+// in the page.
+//
+// # Why a re-judged case rebuilds everything
+//
+// A board can be told about a case, not told to forget one. A resumed run
+// re-runs what came back `wait_timeout`, and the second answer is the one that
+// counts -- so when a line replaces an earlier one, the board is reset and
+// every run's lines are laid down again in order. That costs nothing but a
+// redraw, and it keeps the counts honest without the board learning what a
+// retry is.
+func followAll(ctx context.Context, board *status.Board, sources []*source) error {
+	for {
+		redraw := false
+		for _, s := range sources {
+			if s.poll(board) {
+				redraw = true
 			}
-			if replay {
-				board.Reset()
-				for _, r := range order {
-					board.Begin(boardSlot, r.Case)
-					board.Record(boardSlot, r.Case, ok(r.Outcome), r.Took)
+		}
+		if redraw {
+			board.Reset()
+			for _, s := range sources {
+				for _, r := range s.order {
+					board.Begin(s.label, r.Case)
+					board.Record(s.label, r.Case, ok(r.Outcome), r.Took)
 				}
 			}
 		}
-		board.Note(quiet(len(order), total, grew))
+		board.Note(notes(sources))
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+}
+
+// poll reads what this run has written since the last look, and reports whether
+// the whole board has to be laid down again.
+func (s *source) poll(board *status.Board) bool {
+	size, err := sizeOf(s.ledger)
+	switch {
+	case err != nil:
+		// The run may not have written its first verdict yet. That is a state
+		// to wait in, not to fail on -- a watcher started in the same breath as
+		// the run is the normal case.
+		return false
+	case size < s.offset:
+		// The file shrank, so it is a different run: start over rather than
+		// read the middle of a line.
+		s.offset, s.order, s.seen = 0, nil, map[string]int{}
+		return true
+	case size == s.offset:
+		return false
+	}
+	replaced := false
+	n, rerr := readFrom(s.ledger, s.offset, func(r Result) {
+		at, already := s.seen[r.Case]
+		if !already {
+			s.seen[r.Case] = len(s.order)
+			s.order = append(s.order, r)
+			board.Begin(s.label, r.Case)
+			board.Record(s.label, r.Case, ok(r.Outcome), r.Took)
+			return
+		}
+		s.order[at] = r
+		replaced = true
+	})
+	if rerr == nil {
+		if n != s.offset {
+			s.grew = time.Now()
+		}
+		s.offset = n
+	}
+	return replaced
+}
+
+// notes is what the page says about its sources, naming the run when there is
+// more than one: "quiet" about eight shards is only useful if it says which.
+func notes(sources []*source) string {
+	var said []string
+	for _, s := range sources {
+		if line := quiet(len(s.order), s.total, s.grew); line != "" {
+			if len(sources) > 1 {
+				line = s.label + ": " + line
+			}
+			said = append(said, line)
+		}
+	}
+	return strings.Join(said, " · ")
 }
 
 // quietFor is how long a ledger may go without a new verdict before the page

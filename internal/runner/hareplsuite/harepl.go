@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/cli"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
 	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
+	"github.com/cubrid-systems/cubrid-testkit/internal/status"
 )
 
 // HARepl runs the ha_repl task against a sandbox cluster.
@@ -105,7 +107,6 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	if err != nil {
 		return setupFailed("please confirm your conf file path!")
 	}
-	name := clusterOf(cfg.GetOr(ClusterKey, ""))
 	scenario := cfg.GetOr("scenario", "")
 	wait := time.Duration(cfg.Int(WaitKey, 60000)) * time.Millisecond
 	// Off by default: the unconverted run is the baseline the conversion has
@@ -113,16 +114,25 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	addKey := cfg.Bool(AddKeyKey, false)
 	resetEvery := strings.ToLower(strings.TrimSpace(cfg.GetOr(ResetKey, "case")))
 
-	c := sandbox.Bind(name)
-	if aerr := c.Available(ctx); aerr != nil {
-		return setupFailed("cluster %q cannot be reached: %v", name, aerr)
+	names := clustersOf(cfg.GetOr(ClusterKey, ""))
+	if len(names) == 0 {
+		return setupFailed("no cluster: set %s in %s, or %s in the environment",
+			ClusterKey, req.ConfigPath, ClusterEnv)
 	}
-	pair, perr := sandbox.Describe(ctx, c, req.Home.Path)
-	if perr != nil {
-		return setupFailed("cluster %q did not describe itself as a pair: %v", name, perr)
-	}
-	if pair.DB == "" {
-		return setupFailed("cluster %q names no database, so there is nothing to replicate", name)
+	shards := make([]*runShard, 0, len(names))
+	for _, name := range names {
+		c := sandbox.Bind(name)
+		if aerr := c.Available(ctx); aerr != nil {
+			return setupFailed("cluster %q cannot be reached: %v", name, aerr)
+		}
+		pair, perr := sandbox.Describe(ctx, c, req.Home.Path)
+		if perr != nil {
+			return setupFailed("cluster %q did not describe itself as a pair: %v", name, perr)
+		}
+		if pair.DB == "" {
+			return setupFailed("cluster %q names no database, so there is nothing to replicate", name)
+		}
+		shards = append(shards, &runShard{cluster: name, cli: c, pair: pair})
 	}
 
 	cases, cerr := Cases(scenario)
@@ -132,10 +142,16 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	if len(cases) == 0 {
 		return setupFailed("no case under %s", scenario)
 	}
+	deal(shards, scenario, cases)
 
 	fmt.Printf("ha_repl: %d case(s) from %s\n", len(cases), scenario)
-	for _, line := range pairBanner(ctx, c, name, pair) {
-		fmt.Println(line)
+	for _, sh := range shards {
+		for _, line := range pairBanner(ctx, sh.cli, sh.cluster, sh.pair) {
+			fmt.Println(line)
+		}
+		if len(shards) > 1 {
+			fmt.Printf("           %d case(s)\n", len(sh.cases))
+		}
 	}
 
 	// Where a difference is kept so it can be read rather than believed.
@@ -167,82 +183,243 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 			toJudge++
 		}
 	}
-	board, closeBoard := openBoard(ctx, cfg, c, pair, name, scenario, wait, addKey, resetEvery, toJudge)
+	board, closeBoard := openBoard(ctx, cfg, shards, scenario, wait, addKey, resetEvery, toJudge)
 	defer closeBoard()
 
-	var results []Result
-	var stranded []strandedAt
-	resumed := 0
+	run := &shardedRun{
+		scenario: scenario, keepDir: keepDir, wait: wait, addKey: addKey,
+		resetEvery: resetEvery, done: done, ledger: ledger, board: board,
+		prefix: len(shards) > 1,
+	}
+	var wg sync.WaitGroup
+	for _, sh := range shards {
+		wg.Add(1)
+		go func(sh *runShard) {
+			defer wg.Done()
+			run.shard(ctx, sh)
+		}(sh)
+	}
+	wg.Wait()
+
+	if keepDir != "" {
+		if err := keepEmptyAgreements(keepDir, run.results); err != nil {
+			fmt.Printf("  ! could not record the empty agreements: %v\n", err)
+		}
+		if err := keepStranded(keepDir, run.stranded); err != nil {
+			fmt.Printf("  ! could not record what a slave was left holding: %v\n", err)
+		}
+	}
+	report(run.results)
+	if len(shards) > 1 {
+		reportShards(shards, run.results)
+	}
+	if run.resumed > 0 {
+		fmt.Printf("  %d of those were resumed from an earlier run, and their statements are not in the counts above\n", run.resumed)
+	}
+	if run.leftovers > 0 {
+		fmt.Printf("  %d case(s) started from a state a reset could not clear\n", run.leftovers)
+	}
+	reportStranded(run.stranded, keepDir)
+	return nil
+}
+
+// runShard is one pair and the cases dealt to it.
+type runShard struct {
+	cluster string
+	cli     *sandbox.CLI
+	pair    *sandbox.Pair
+	cases   []string
+}
+
+// shardedRun is what every shard shares: where the output goes, and the tally.
+//
+// Everything a case touches is its own shard's -- its pair, its database, its
+// reset -- so the only sharing is the record. It is behind one lock because
+// interleaved lines in a ledger are the failure this suite has already had
+// once, in test_<env>.log, and the cost is a mutex held for one write.
+type shardedRun struct {
+	scenario, keepDir, resetEvery string
+	wait                          time.Duration
+	addKey                        bool
+	done                          map[string]Result
+	ledger                        *ledger
+	board                         *status.Board
+	prefix                        bool
+
+	mu        sync.Mutex
+	results   []Result
+	stranded  []strandedAt
+	resumed   int
+	leftovers int
+}
+
+// say prints one line, naming the shard when there is more than one. Two shards
+// printing a case at once would otherwise produce a line belonging to neither.
+func (r *shardedRun) say(sh *runShard, format string, a ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.prefix {
+		fmt.Printf("[%s] ", sh.cluster)
+	}
+	fmt.Printf(format, a...)
+}
+
+// shard runs the cases dealt to one pair. It is the whole of what a run used to
+// be, and a run with one cluster still is exactly this, once.
+func (r *shardedRun) shard(ctx context.Context, sh *runShard) {
 	lastDir, lastCase := "", "the state the run started from"
-	leftovers := 0
-	for _, path := range cases {
+	for _, path := range sh.cases {
 		if ctx.Err() != nil {
-			break
+			return
 		}
 		dir := filepath.Dir(path)
-		rel0, _ := filepath.Rel(scenario, path)
-		if _, already := done[rel0]; already {
+		rel, _ := filepath.Rel(r.scenario, path)
+		if prior, already := r.done[rel]; already {
 			// Nothing ran, so there is nothing to reset and nothing a slave
 			// could have been left holding by it.
-			results = append(results, done[rel0])
-			resumed++
-			lastDir, lastCase = dir, rel0
+			r.mu.Lock()
+			r.results = append(r.results, prior)
+			r.resumed++
+			r.mu.Unlock()
+			lastDir, lastCase = dir, rel
 			continue
 		}
-		if resetEvery == "case" || dir != lastDir {
-			out, rerr := Reset(ctx, pair)
+		if r.resetEvery == "case" || dir != lastDir {
+			out, rerr := Reset(ctx, sh.pair)
 			if rerr != nil {
-				fmt.Printf("  ! could not reset the database: %v\n", rerr)
+				r.say(sh, "  ! could not reset the database: %v\n", rerr)
 			}
 			if len(out.Left) > 0 {
-				fmt.Printf("  ! %s\n", ResetNote(out.Left))
-				leftovers++
+				r.say(sh, "  ! %s\n", ResetNote(out.Left))
+				r.mu.Lock()
+				r.leftovers++
+				r.mu.Unlock()
 			}
 			// A slave holding what the master does not is a finding and not
 			// housekeeping: something the master did did not arrive, or
 			// arrived and could not be undone by name. It is named, attributed
 			// to the case that left it, and written down -- the repair keeps
 			// the next case honest, the record keeps this one.
-			for _, s := range out.Stranded {
-				fmt.Printf("  ! %s, left by %s\n", s.String(), lastCase)
-				stranded = append(stranded, strandedAt{Case: lastCase, S: s})
+			for _, st := range out.Stranded {
+				r.say(sh, "  ! %s, left by %s\n", st.String(), lastCase)
+				r.mu.Lock()
+				r.stranded = append(r.stranded, strandedAt{Case: lastCase, S: st})
+				r.mu.Unlock()
 			}
 		}
 		lastDir = dir
 		sql, rerr := os.ReadFile(path)
 		if rerr != nil {
-			results = append(results, Result{Case: path, Outcome: CaseFailed, Detail: rerr.Error()})
+			r.mu.Lock()
+			r.results = append(r.results, Result{Case: path, Outcome: CaseFailed, Detail: rerr.Error()})
+			r.mu.Unlock()
 			continue
 		}
-		rel, _ := filepath.Rel(scenario, path)
-		board.Begin(boardSlot, rel)
+		r.board.Begin(sh.cluster, rel)
 		began := time.Now()
-		r := RunCase(ctx, pair, rel, string(sql), wait, keepDir, addKey)
-		r.Took = time.Since(began)
-		board.End(boardSlot, rel, ok(r.Outcome))
-		results = append(results, r)
-		ledger.Write(r, r.Took)
+		res := RunCase(ctx, sh.pair, rel, string(sql), r.wait, r.keepDir, r.addKey)
+		res.Took = time.Since(began)
+		r.board.End(sh.cluster, rel, ok(res.Outcome))
+		r.mu.Lock()
+		r.results = append(r.results, res)
+		r.mu.Unlock()
+		r.ledger.Write(res, res.Took)
 		lastCase = rel
-		fmt.Printf("  %-15s %s%s\n", r.Outcome, rel, detailSuffix(r))
+		r.say(sh, "  %-15s %s%s\n", res.Outcome, rel, detailSuffix(res))
 	}
+}
 
-	if keepDir != "" {
-		if err := keepEmptyAgreements(keepDir, results); err != nil {
-			fmt.Printf("  ! could not record the empty agreements: %v\n", err)
+// clustersOf reads the clusters a run drives.
+//
+// One name is a run as it has always been. Several, comma-separated, is the
+// same corpus over several pairs at once -- which is a thing this runner does
+// itself rather than a thing an operator does by starting it eight times. The
+// front end is one test at a time by design: a result tree takes one run's lock
+// (internal/result/lock.go), and eight processes would be eight runs arguing
+// over one record. Inside one process there is one record, one page and one
+// ledger, and the pairs are the only thing that is eight.
+func clustersOf(cfgValue string) []string {
+	raw := cfgValue
+	if env := strings.TrimSpace(os.Getenv(ClusterEnv)); env != "" {
+		raw = env
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, name := range strings.Split(raw, ",") {
+		if name = strings.TrimSpace(name); name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
 		}
-		if err := keepStranded(keepDir, stranded); err != nil {
-			fmt.Printf("  ! could not record what a slave was left holding: %v\n", err)
+	}
+	return out
+}
+
+// deal spreads the corpus over the shards, a directory at a time.
+//
+// By directory and not by case, because the sql corpus's own contract is that a
+// directory is the unit whose cases may rely on each other -- `reset=dir` says
+// so outright, and even under `reset=case` the cases of one directory share
+// names and shapes. Splitting a directory across two pairs would have one
+// shard's `create table t1` meet another's leftovers on a different machine,
+// which is a difference the run would report as the engine's.
+//
+// Round robin over directories sorted by size, largest first, so that one
+// directory of 1,500 cases does not become one shard's whole afternoon while
+// the other seven finish.
+func deal(shards []*runShard, scenario string, cases []string) {
+	if len(shards) == 1 {
+		shards[0].cases = cases
+		return
+	}
+	byDir := map[string][]string{}
+	var order []string
+	for _, path := range cases {
+		dir := filepath.Dir(path)
+		if _, seen := byDir[dir]; !seen {
+			order = append(order, dir)
 		}
+		byDir[dir] = append(byDir[dir], path)
 	}
-	report(results)
-	if resumed > 0 {
-		fmt.Printf("  %d of those were resumed from an earlier run, and their statements are not in the counts above\n", resumed)
+	sort.SliceStable(order, func(i, j int) bool {
+		return len(byDir[order[i]]) > len(byDir[order[j]])
+	})
+	for _, dir := range order {
+		// The shard with the fewest cases takes the next directory, which is a
+		// better balance than strict rotation when the directories differ by a
+		// factor of a hundred, as this corpus's do.
+		at := 0
+		for i, sh := range shards {
+			if len(sh.cases) < len(shards[at].cases) {
+				at = i
+			}
+		}
+		shards[at].cases = append(shards[at].cases, byDir[dir]...)
 	}
-	if leftovers > 0 {
-		fmt.Printf("  %d case(s) started from a state a reset could not clear\n", leftovers)
+}
+
+// reportShards says what each pair did, because a run that is eight runs in a
+// coat has to be readable as eight: a shard that judged nothing, or judged
+// everything as wait_timeout, is a pair that died rather than a corpus that is
+// clean.
+func reportShards(shards []*runShard, results []Result) {
+	byCase := map[string]Outcome{}
+	for _, r := range results {
+		byCase[r.Case] = r.Outcome
 	}
-	reportStranded(stranded, keepDir)
-	return nil
+	fmt.Println("\n  per pair:")
+	for _, sh := range shards {
+		counts := map[Outcome]int{}
+		for _, path := range sh.cases {
+			counts[byCase[filepath.Base(path)]]++
+		}
+		var parts []string
+		for _, o := range []Outcome{Same, Differ, Replicating, Unreplicatable, NoData, Skipped, WaitTimeout, CaseFailed} {
+			if counts[o] > 0 {
+				parts = append(parts, fmt.Sprintf("%s %d", o, counts[o]))
+			}
+		}
+		fmt.Printf("    %-10s %3d case(s)  %s\n", sh.cluster, len(sh.cases), strings.Join(parts, ", "))
+	}
 }
 
 // strandedAt is one stranded object and the case that left it.

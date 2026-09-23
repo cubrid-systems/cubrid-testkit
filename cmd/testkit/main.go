@@ -512,9 +512,9 @@ options:
   --http ADDR   where to serve; "on" or a bare port are accepted, as in shell.conf
 `
 
-const watchUsage = `usage: watch [OPTION] -c <conf>
+const watchUsage = `usage: watch [OPTION] [-c <conf>]...
 
-Serve the status page for an ha_repl run that is already going, from outside it.
+Serve one status page for the ha_repl runs that are going, from outside them.
 
 The page is normally served by the run's own process, so a run started without
 status_http cannot be looked at afterwards. This reads what the run writes for
@@ -524,17 +524,38 @@ what the pair is doing. Nothing is asked of the run: no flag, no port, no
 signal, no restart. It works on a run that has already finished, and two people
 can watch the same run from two machines.
 
+With no -c it finds the runs itself, by reading the conf each one was started
+with out of its own command line. A corpus sharded over eight pairs is eight
+processes, and the machine already knows which -- so one page draws all of
+them, a lane and a pair panel each, rather than eight pages on eight ports.
+
 options:
-  -c, --config PATH   the conf the run was given; required
+  -c, --config PATH   the conf a run was given; repeatable, and comma-separated
+                      lists are accepted. Omit it to watch whatever is running
   --http ADDR         where to serve; "on" or a bare port are accepted
 `
+
+// confList collects a repeated -c, so one watcher can follow several runs.
+type confList []string
+
+func (c *confList) String() string { return strings.Join(*c, ",") }
+
+func (c *confList) Set(v string) error {
+	for _, one := range strings.Split(v, ",") {
+		if one = strings.TrimSpace(one); one != "" {
+			*c = append(*c, one)
+		}
+	}
+	return nil
+}
 
 func watchCmd(args []string) int {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	addr := fs.String("http", "on", "")
-	confPath := fs.String("c", "", "")
-	fs.StringVar(confPath, "config", "", "")
+	var confPaths confList
+	fs.Var(&confPaths, "c", "")
+	fs.Var(&confPaths, "config", "")
 	help := fs.Bool("h", false, "")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
@@ -545,9 +566,18 @@ func watchCmd(args []string) int {
 		fmt.Fprint(os.Stdout, watchUsage)
 		return exitOK
 	}
-	if *confPath == "" {
-		fmt.Fprint(os.Stderr, watchUsage)
-		return exitPreflight
+	// Told nothing, it finds the runs itself. A sharded run is one process per
+	// pair and each of them was started with its own conf, which is still in
+	// its command line -- so the machine already holds the list the operator
+	// would otherwise have to keep and retype.
+	if len(confPaths) == 0 {
+		confPaths = hareplsuite.Running()
+		if len(confPaths) == 0 {
+			fmt.Fprintln(os.Stderr, "watch: no ha_repl run is going on this machine, and no -c was given")
+			fmt.Fprint(os.Stderr, watchUsage)
+			return exitPreflight
+		}
+		fmt.Fprintf(os.Stdout, "found %d run(s) going on this machine\n", len(confPaths))
 	}
 	where := status.Addr(*addr)
 	if where == "" {
@@ -558,7 +588,7 @@ func watchCmd(args []string) int {
 	// CTP_HOME is only what ${CTP_HOME} in the conf expands to, and a watcher
 	// reads the same conf the run was given, so it resolves the same way or
 	// not at all.
-	if err := hareplsuite.Watch(ctx, &conf.Home{Path: os.Getenv("CTP_HOME")}, *confPath, where, os.Stdout); err != nil {
+	if err := hareplsuite.Watch(ctx, &conf.Home{Path: os.Getenv("CTP_HOME")}, confPaths, where, os.Stdout); err != nil {
 		fmt.Fprintf(os.Stderr, "watch: %v\n", err)
 		return exitPreflight
 	}

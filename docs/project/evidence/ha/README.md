@@ -57,6 +57,17 @@ is next, and the traps that cost a day each.
   key conversion was breaking any table that already auto-increments, and a `SELECT` of a serial's
   next value was being compared across the pair.
 
+- [the-forty-two-and-what-they-were](the-forty-two-and-what-they-were.md) — **2026-09-23.** The
+  whole-corpus run over `_01_object` reported 42 failures. **Thirty-one were the runner.** Twenty-six
+  were eight-way contention pushing `_09_partition` past a sixty-second bound — the clearest of them
+  takes 88.7 s and fails in a sharded run and 1.4 s and passes alone. Two were a conf key this runner
+  never read: CTP's is `ha_sync_detect_timeout_in_secs`, in seconds, defaulting to 600; this read the
+  name of the Java *field* and defaulted to 60. Three were a bound that did not exist, for a call
+  that runs a case rather than a read — the corpus's largest case needs 250 s on a cold database and
+  was killed at 120 s, then reported as "the master could not be reached". **The other eleven are the
+  engine, and all three of their causes are already in this directory.** No new engine finding in
+  3,327 cases.
+
 - [a-sandbox-pair-wears-out](a-sandbox-pair-wears-out.md) — **2026-09-23.** A pair's cost per case
   rises with how much it has been used and never falls: the per-case reset drops the schema, but the
   database keeps the volumes it grew and the copy log keeps its 2.2 GB. Found by an eight-shard

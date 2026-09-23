@@ -73,9 +73,15 @@ Two different users asked the same question, and the answers differ for that rea
 
 So the oracle has a precondition nobody had written down: **it compares two nodes only while the
 same session can be established on both.** A prelude statement that fails on one node makes the
-comparison meaningless, and this suite currently reports the result rather than the precondition.
-That is a defect of this runner and it is not fixed yet — it is named here so the two cases are not
-read as an engine difference.
+comparison meaningless, and this suite was reporting the result rather than the precondition.
+
+**Fixed, 2026-09-23.** `SELECT CURRENT_USER` is the last statement of both batches, and a segment
+whose two answers disagree about it is skipped, counted, and named — a new outcome
+`session_differs` for a case where nothing else was comparable, and a line in the tally otherwise.
+Re-measured on the two cases: `_012_db_auth/1011` no longer differs over `select * from
+dba.test_class`, which is the read that ran as two different users. It still differs, on a later
+read of `db_auth` — the grants really are on one node only, because the grantee is — and that one
+is the engine.
 
 ## What this cost before it was understood
 

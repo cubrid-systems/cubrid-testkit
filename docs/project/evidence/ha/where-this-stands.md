@@ -33,6 +33,7 @@ Outcomes, and what each means:
 | `unreplicatable` | every read touches something CUBRID HA does not replicate |
 | `no_data` | the case neither writes nor reads |
 | `skipped` | the splitter could not finish a block body |
+| `session_differs` | the two nodes could not be put in the same session, so the reads are not the same question |
 | `wait_timeout` / `case_failed` | the run, not the case |
 
 **Four things are known not to replicate**, and a read touching one is skipped rather than
@@ -47,12 +48,12 @@ none ([`method-calls-on-the-catalog-do-not-replicate.md`](method-calls-on-the-ca
 It stays reported: the DDL form of each of those changes replicates perfectly well, so skipping
 the catalog they touch would hide coverage that works.
 
-**One precondition of the oracle is not enforced and should be.** The comparison means what it
-says only while the same session can be established on both nodes. A case that does
+**The oracle has one precondition and it is now enforced** (2026-09-23). The comparison means what
+it says only while the same session can be established on both nodes: a case that does
 `call login ('u')` after creating `u` by the method route logs in on the master and fails to on the
-slave, and the two reads then run as different users -- which this suite currently reports as a
-difference. Two of the eleven differences in `_10_system_table` are that, and they are named in the
-finding. **This is the next thing to fix in the runner.**
+slave, and the two reads then run as different users. `SELECT CURRENT_USER` is the last statement
+of both batches now, and a segment whose two answers disagree about it is skipped and counted --
+`session_differs` when nothing else in the case was comparable.
 
 ## 2. How to run it
 

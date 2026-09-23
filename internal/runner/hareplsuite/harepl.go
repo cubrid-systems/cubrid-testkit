@@ -278,7 +278,7 @@ func detailSuffix(r Result) string {
 		return "  <- " + r.Differing + " on " + r.Node
 	case Unreplicatable:
 		return "  <- " + strings.Join(r.Tables, ", ")
-	case WaitTimeout, CaseFailed:
+	case WaitTimeout, CaseFailed, SessionDiffers:
 		return "  <- " + r.Detail
 	}
 	return ""
@@ -313,7 +313,7 @@ func report(results []Result) {
 	}
 	fmt.Println()
 	fmt.Printf("ha_repl: %d case(s)\n", len(results))
-	for _, o := range []Outcome{Same, Differ, Replicating, Unreplicatable, NoData, Skipped, WaitTimeout, CaseFailed} {
+	for _, o := range []Outcome{Same, Differ, Replicating, Unreplicatable, SessionDiffers, NoData, Skipped, WaitTimeout, CaseFailed} {
 		if by[o] > 0 {
 			fmt.Printf("  %-15s %d\n", o, by[o])
 		}
@@ -323,8 +323,9 @@ func report(results []Result) {
 		stmts += r.Statements
 		cmp += r.Compared
 	}
-	var skipped, unordered, converted, failed, empty, objs, kdup, knull, expected int
+	var skipped, unordered, converted, failed, empty, objs, kdup, knull, expected, sessions int
 	for _, r := range results {
+		sessions += r.SessionDiffered
 		skipped += r.Unreplicated
 		unordered += r.Unordered
 		converted += r.Converted
@@ -342,6 +343,9 @@ func report(results []Result) {
 	}
 	if objs > 0 {
 		fmt.Printf("  %d read(s) skipped for an object-domain column, whose reference is not replicated\n", objs)
+	}
+	if sessions > 0 {
+		fmt.Printf("  %d read(s) skipped because the two nodes could not be put in the same session\n", sessions)
 	}
 	fmt.Printf("  %d write(s) the engine refused", failed)
 	if kdup+knull > 0 {

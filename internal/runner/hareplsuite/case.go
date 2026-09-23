@@ -81,6 +81,11 @@ type Result struct {
 	// primary key. A case with comparisons AND skips is partly established,
 	// and saying so is the point of keeping the two apart.
 	Unreplicated int
+	// SessionDiffered counts reads skipped because the two nodes could not be
+	// put in the same session. See whoAmI.
+	SessionDiffered int
+	// SessionNote is who each node turned out to be, when they differed.
+	SessionNote string
 	// Tables names the keyless tables this case met.
 	Tables []string
 	// Kept is where both answers were written, when they differed.
@@ -159,6 +164,56 @@ const synonymsQuery = "SELECT synonym_name, target_name FROM db_synonym"
 const objectDomainQuery = "SELECT DISTINCT a.class_name FROM db_attribute a, db_class c " +
 	"WHERE a.class_name = c.class_name AND c.is_system_class='NO' " +
 	"AND a.domain_class_name IS NOT NULL ORDER BY 1"
+
+// whoAmI asks a node who it thinks is running the statements.
+//
+// # Why the oracle needs it
+//
+// This suite compares a read on two nodes, and that comparison means what it
+// says only while the same session can be established on both. A case's
+// session statements are replayed in front of every batch, because a csql
+// process does not outlive one -- and `call login ('u')` is one of them.
+//
+// If `u` exists on the master and not on the slave, the login succeeds on one
+// node and fails on the other, and the two reads then run as two different
+// users. Measured: `_10_system_table/_012_db_auth/1011` reported a difference
+// in which the *master* returned nothing and the slave returned two rows,
+// because the master read as `test_user` and the slave, whose login had
+// failed, read as dba. The user was absent from the slave because the case
+// made it with `call add_user (...)`, which does not replicate
+// (evidence/ha/method-calls-on-the-catalog-do-not-replicate.md).
+//
+// So the precondition is checked instead of assumed: it is the last statement
+// of both batches, and a segment whose two answers disagree about it is not
+// compared. The difference is in the session and reporting it as data would
+// blame the pair for this runner's arrangement.
+const whoAmI = "SELECT CURRENT_USER"
+
+// sessionNote says who each node turned out to be.
+func sessionNote(master, slave, node string) string {
+	return fmt.Sprintf("the two nodes could not be put in the same session, so their answers are "+
+		"not comparable: the master ran as %s and %s as %s",
+		firstLine(onlyValue(master)), node, firstLine(onlyValue(slave)))
+}
+
+// onlyValue pulls the answer out of a one-column, one-row result block.
+func onlyValue(block string) string {
+	lines := strings.Split(strings.TrimSpace(block), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		l := strings.TrimSpace(lines[i])
+		if l == "" || strings.HasPrefix(l, "=") || strings.Contains(l, " sec)") ||
+			strings.EqualFold(l, "current_user") {
+			continue
+		}
+		return strings.Trim(l, "'")
+	}
+	return "(no answer)"
+}
+
+// SessionDiffers is a case whose reads could not be compared because the two
+// nodes ran them as different users. It is not a verdict about replication --
+// though the reason for it usually is one.
+const SessionDiffers Outcome = "session_differs"
 
 // Skipped is a case this runner will not judge: its semicolons are not all
 // statement terminators, so splitting it would run fragments. Named rather
@@ -293,7 +348,11 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 
 		// The reads carry the prelude too, and so does the slave's copy: a
 		// read has to run as the user the case logged in as, on both nodes.
-		b := newBatchWith(prelude, seg.stmts)
+		//
+		// And whether it did is asked rather than assumed -- whoAmI is the
+		// last statement of both batches.
+		probed := append(append([]string{}, seg.stmts...), whoAmI)
+		b := newBatchWith(prelude, probed)
 		want, _, err := b.run(ctx, master, p.DB)
 		if err != nil {
 			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the master could not be reached: %v", err)
@@ -308,6 +367,14 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 		if gerr != nil {
 			res.Outcome, res.Detail = CaseFailed, fmt.Sprintf("the slave could not be reached: %v", gerr)
 			return res
+		}
+		// Two nodes in two different sessions are two different questions, and
+		// the answers cannot be compared. Skipped and counted rather than
+		// reported, because the difference is the session and not the data.
+		if at := len(probed) - 1; Normalise(want[at]) != Normalise(got[at]) {
+			res.SessionDiffered += len(seg.stmts)
+			res.SessionNote = sessionNote(want[at], got[at], p.Slaves[0])
+			continue
 		}
 
 		for i, stmt := range seg.stmts {
@@ -374,6 +441,11 @@ func RunCase(ctx context.Context, p *sandbox.Pair, name, sql string, wait time.D
 			res.Outcome = Unreplicatable
 			res.Detail = "every read touches a table with no primary key (" +
 				strings.Join(res.Tables, ", ") + "), whose rows are never replicated"
+			return res
+		}
+		if res.SessionDiffered > 0 {
+			res.Outcome = SessionDiffers
+			res.Detail = res.SessionNote
 			return res
 		}
 		// The case asked the pair nothing about its own data. If it wrote

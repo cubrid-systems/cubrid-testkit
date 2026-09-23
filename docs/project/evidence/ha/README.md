@@ -14,6 +14,17 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ctp-ha-repl-deletes-the-call](ctp-ha-repl-deletes-the-call.md) — **2026-09-23.** Why the
+  findings above are new, and it is not that nobody looked. CTP's ha_repl conversion **deletes
+  every statement beginning with `CALL`** — a 2012 rule, from when `CALL` meant a method on a class
+  — and almost every `SELECT` besides. So 1,707 catalog-method calls never reach a CTP run, which
+  is three of this directory's findings; and 10,257 procedure calls in 1,037 cases go with them,
+  because PL/CSQL made `CALL` a way to run arbitrary DML and the rule was never revisited. In **26
+  cases the deleted `CALL` is the only thing that would have written a row**: the converted case
+  creates a table and a procedure, drops both, and asks the slave nothing. The change that taught
+  the conversion about PL/CSQL (CUBRIDQA-1204, 2023) added 461 lines to preserve the procedure
+  *body* and left the line that deletes the call to it.
+
 - [ddl-with-a-session-variable-does-not-replay](ddl-with-a-session-variable-does-not-replay.md)
   — **2026-09-23.** The scale run's other cause, and not the one above: a `CREATE CLASS` whose text
   names a csql variable — `create class t(c2 x SHARED :arg1)` — is replayed verbatim on the slave,

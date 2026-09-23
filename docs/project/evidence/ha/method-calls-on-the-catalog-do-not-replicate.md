@@ -98,6 +98,15 @@ after rollback …`, no target class — cannot be dropped by DBA (*Not authoriz
 "test_user.test_trigger"*), so the reset left it and its owner behind and 65 cases ran from a state
 the run did not choose. The reset now drops such a trigger as its owner.
 
+## Why this was not found before
+
+Not for want of looking. CTP's ha_repl converts the sql corpus before it runs it, and the
+conversion **deletes every statement that starts with `CALL`** — 1,707 of them in this corpus, all
+of them the route this finding is about
+([`ctp-ha-repl-deletes-the-call.md`](ctp-ha-repl-deletes-the-call.md)). The rule dates from 2012,
+when `CALL` meant a method on a class; it also takes 10,257 procedure calls with it, which is a
+second hole and a larger one.
+
 ## What is not claimed
 
 One build, two pairs, one host. `call drop_user` was exercised only as part of the corpus, not

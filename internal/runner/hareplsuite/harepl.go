@@ -104,6 +104,24 @@ const (
 	// also right for what this is -- a thing you mean this once, not a thing
 	// you write down.
 	RebuildEnv = "TESTKIT_HA_REBUILD"
+	// ReuseKey leaves a set standing after the run that made it, so the next
+	// run finds it instead of building it again. ReuseEnv overrides it, the way
+	// ClusterEnv overrides ClusterKey.
+	//
+	// **Off by default, and that is the important half.** A run that makes
+	// eight pairs and leaves them makes them the next person's problem, and the
+	// default that produced 53 GB on this machine was exactly this one set the
+	// other way: everything was standing for a good reason and nothing was ever
+	// the moment to remove it. Turning it on is for iterating -- the same
+	// corpus, all afternoon, where two minutes of stand-up per run is the whole
+	// cost of the change you are testing.
+	//
+	// What it costs when a run dies before it can clean up is one line in
+	// `csb cluster ls`: the pairs are there, labelled with the run that made
+	// them, and one command removes them. That is a better trade than leaving
+	// every successful run's pairs behind to be sure.
+	ReuseKey = "sandbox_reuse"
+	ReuseEnv = "TESTKIT_HA_REUSE"
 	// RunKey names the run. Generated when it is not given, always printed, and
 	// written into every pair this run creates as a label, so that a run killed
 	// before it could clean up leaves clusters that still say whose they were.
@@ -163,12 +181,33 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 				"with %s, %s is the set's name and not a list",
 				ClusterKey, len(names), PairsKey, wanted, PairsKey, ClusterKey)
 		}
-		set, serr := resolveSet(ctx, names[0], wanted, runName,
+		reuse := cfg.Bool(ReuseKey, false)
+		if v := strings.TrimSpace(os.Getenv(ReuseEnv)); v != "" {
+			reuse = v == "1" || strings.EqualFold(v, "yes") || strings.EqualFold(v, "true")
+		}
+		set, made, serr := resolveSet(ctx, names[0], wanted, runName,
 			cfg.GetOr(BuildKey, os.Getenv("CUBRID")), os.Getenv(RebuildEnv) == "1")
 		if serr != nil {
 			return setupFailed("%v", serr)
 		}
 		names = set
+		switch {
+		case !made:
+			// Reused what was already there. Not this run's to remove, whatever
+			// the flag says: it did not create it.
+		case reuse:
+			fmt.Printf("  %s is on, so these stay up for the next run: %s\n",
+				ReuseKey, strings.Join(set, " "))
+		default:
+			// Detached from the run's context: the usual reason a run is ending
+			// is that its context was cancelled, and a teardown that inherited
+			// that would do nothing at exactly the moment it is needed.
+			defer func() {
+				fmt.Printf("ha_repl: taking down the %d pair(s) this run made "+
+					"(%s=yes keeps them)\n", len(set), ReuseKey)
+				tearDownPairs(context.WithoutCancel(ctx), runName, set)
+			}()
+		}
 	}
 	shards := make([]*runShard, 0, len(names))
 	for _, name := range names {
@@ -744,23 +783,23 @@ func Cases(scenario string) ([]string, error) {
 // pointing at the wrong conf", and the two want opposite things. Refusing names
 // RebuildEnv, so saying which is one word and destroying eight pairs is never
 // the default reading of an edit.
-func resolveSet(ctx context.Context, set string, want int, run, build string, rebuild bool) ([]string, error) {
-	all, err := sandbox.Bind("").Clusters(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list the clusters on this machine, so %s cannot be resolved: %w", set, err)
+func resolveSet(ctx context.Context, set string, want int, run, build string, rebuild bool) (names []string, made bool, err error) {
+	all, lerr := sandbox.Bind("").Clusters(ctx)
+	if lerr != nil {
+		return nil, false, fmt.Errorf("cannot list the clusters on this machine, so %s cannot be resolved: %w", set, lerr)
 	}
 	have := sandbox.MembersOf(all, set)
 
 	switch {
 	case len(have) == want:
 		fmt.Printf("  reusing the %d pair(s) of %s: %s\n", want, set, strings.Join(have, " "))
-		return have, nil
+		return have, false, nil
 
 	case len(have) == 0:
 		fmt.Printf("  %s does not exist yet; standing up %d pair(s)\n", set, want)
 
 	case !rebuild:
-		return nil, fmt.Errorf(
+		return nil, false, fmt.Errorf(
 			"%s has %d pair(s) (%s) and %s=%d asks for %d.\n"+
 				"       If the size is what you meant, run once with %s=1 and the existing "+
 				"pair(s) are destroyed and built again.\n"+
@@ -777,14 +816,14 @@ func resolveSet(ctx context.Context, set string, want int, run, build string, re
 						"%s asked for it\n", name, who, RebuildEnv)
 			}
 		}
-		tearDownPairs(ctx, have)
+		tearDownPairs(ctx, run, have)
 	}
 
-	made, merr := standUpPairs(ctx, run, set, want, build)
+	names, merr := standUpPairs(ctx, run, set, want, build)
 	if merr != nil {
-		return nil, merr
+		return nil, false, merr
 	}
-	return made, nil
+	return names, true, nil
 }
 
 // madeByTestkit reports whether a cluster carries a run's claim, and whose.
@@ -825,7 +864,7 @@ func standUpPairs(ctx context.Context, run, set string, n int, build string) ([]
 			// Take back what was made before giving up. A failure halfway
 			// through otherwise leaves pairs nobody asked for and nobody
 			// remembers, which is how this machine got to 53 GB.
-			tearDownPairs(context.WithoutCancel(ctx), made)
+			tearDownPairs(context.WithoutCancel(ctx), run, made)
 			return nil, fmt.Errorf("could not stand up %s: %w", name, err)
 		}
 		made = append(made, name)
@@ -835,19 +874,27 @@ func standUpPairs(ctx context.Context, run, set string, n int, build string) ([]
 
 // tearDownPairs removes pairs.
 //
+// One csb call for the whole set, selected by the label this run wrote, rather
+// than one call per pair. It is not only fewer calls: the set is what was made,
+// so the set is what is removed, and a teardown that walked a list it had
+// assembled itself could disagree with the labels about what this run owns.
+//
 // A failure is reported and not returned: a pair that would not go down is an
-// operator's problem rather than a reason to call the measurement failed. The
-// name is printed so it can be finished by hand.
-func tearDownPairs(ctx context.Context, names []string) {
-	for _, name := range names {
-		if err := sandbox.Bind(name).Destroy(ctx); err != nil {
-			fmt.Fprintf(os.Stderr,
-				"[WARN] %s would not go down: %v\n"+
-					"       remove it with: csb cluster destroy --cluster %s\n", name, err, name)
-			continue
-		}
-		fmt.Printf("  took down %s\n", name)
+// operator's problem rather than a reason to call the measurement failed. What
+// removes it by hand is printed, because the next person is reading this line
+// and not the source.
+func tearDownPairs(ctx context.Context, run string, names []string) {
+	if len(names) == 0 {
+		return
 	}
+	if err := sandbox.DestroyRun(ctx, run); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"[WARN] the %d pair(s) this run made would not go down: %v\n"+
+				"       remove them with: csb cluster destroy --label %s=%s\n",
+			len(names), err, sandbox.RunLabel, run)
+		return
+	}
+	fmt.Printf("  took down %s\n", strings.Join(names, " "))
 }
 
 // reportStanding says what testkit-made pairs are up and what they cost.

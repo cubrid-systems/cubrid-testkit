@@ -57,6 +57,7 @@ func openBoard(ctx context.Context, cfg *conf.Config, shards []*runShard,
 	// pair's volumes and copy logs live -- the directory that grew to 53 GB
 	// across eleven pairs and took the filesystem to 98%.
 	board.Watch(csbStateRoot(), "", 0)
+	watchClusters(ctx, board, shards)
 	names := make([]string, 0, len(shards))
 	for _, sh := range shards {
 		board.Lane(sh.cluster, "pair "+sh.cluster)
@@ -181,4 +182,76 @@ func csbStateRoot() string {
 		return filepath.Join(h, ".local", "share", "csb")
 	}
 	return ""
+}
+
+// watchClusters keeps the page's machine rows filled with what is standing on
+// each machine.
+//
+// # Why the page asks csb rather than the filesystem
+//
+// A cluster's size is knowable by walking `~/.local/share/csb`, and that was
+// the first version. It is wrong for one reason that decides it: the page has
+// to be able to name a machine that is not this one, and this process cannot
+// walk another machine's disk. `cluster ls` is the answer to the same question
+// wherever it is asked, and the artifact already records which machine a node
+// is on.
+//
+// # And why it is a slow ticker
+//
+// `cluster ls` walks every cluster's tree to size it. That is cheap beside a
+// case and pointless at a case's cadence: a pair grows over a run, not between
+// two statements. Thirty seconds is often enough to watch a disk fill and rare
+// enough to cost nothing.
+func watchClusters(ctx context.Context, board *status.Board, shards []*runShard) {
+	mine := map[string]bool{}
+	for _, sh := range shards {
+		mine[sh.cluster] = true
+	}
+	sample := func() {
+		sctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		all, err := sandbox.Bind("").Clusters(sctx)
+		if err != nil {
+			board.MachineRow(status.Machine{
+				Name: status.ThisMachine(),
+				Note: "csb would not list the clusters on this machine: " + err.Error(),
+			})
+			return
+		}
+		byMachine := map[string][]status.MachineCluster{}
+		for _, c := range all {
+			run, _ := c.Run()
+			row := status.MachineCluster{
+				Name: c.Name, Containers: c.Containers, Bytes: c.Bytes,
+				Run: run, Mine: mine[c.Name],
+			}
+			// A cluster whose artifact predates the host field, or that this
+			// tool did not create, belongs to the machine asking -- it is the
+			// one whose state directory it was found in. Guessing wider would
+			// be inventing a machine.
+			hosts := c.Hosts
+			if len(hosts) == 0 {
+				hosts = []string{status.ThisMachine()}
+			}
+			for _, h := range hosts {
+				byMachine[h] = append(byMachine[h], row)
+			}
+		}
+		for host, rows := range byMachine {
+			board.MachineRow(status.Machine{Name: host, Clusters: rows})
+		}
+	}
+	go func() {
+		sample()
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				sample()
+			}
+		}
+	}()
 }

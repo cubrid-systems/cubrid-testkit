@@ -133,6 +133,19 @@ const page = `<!doctype html>
  .panels table{min-width:0}
  .panels .num{width:auto;min-width:2.6rem;padding-right:.6rem}
  .panels th,.panels td{padding-right:.6rem}
+ .mblock{border-top:1px solid var(--line);padding-top:.7rem;margin-top:.7rem}
+ .mblock:first-child{border-top:0;padding-top:0;margin-top:0}
+ .mhead{display:flex;gap:.7rem;align-items:baseline;margin-bottom:.5rem;flex-wrap:wrap}
+ .mhead b{font-size:.78rem;letter-spacing:.06em}
+ .mwhere,.mnote{font-size:.68rem;color:var(--ink-faint);letter-spacing:.06em}
+ .mnote{color:var(--warn)}
+ .mclusters{margin-top:.6rem}
+ .mclusters h3{font-size:.66rem;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+    color:var(--ink-faint);margin:0 0 .25rem}
+ .mclusters table{min-width:0}
+ .mclusters td:not(:first-child){text-align:right;width:6rem}
+ .mclusters tr.mine td:first-child{color:var(--accent)}
+ .dim{color:var(--ink-faint)}
  /* The machine panel is an instrument rather than a summary, so it gets a row
     of its own and the numbers are grouped by the question they answer. */
  .mgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.9rem 1.6rem}
@@ -262,8 +275,8 @@ const page = `<!doctype html>
 </section>
 
 <section class=panel id=machinewrap style="margin-bottom:1.6rem">
-  <h2>machine <span class=count id=mwhen>every second</span></h2>
-  <div class=mgrid id=machine></div>
+  <h2>machines <span class=count id=mwhen>every second</span></h2>
+  <div id=machines></div>
 </section>
 
 <section class=panel id=pairwrap hidden style="margin-bottom:1.6rem">
@@ -552,7 +565,7 @@ async function tick() {
   // the wrong thing is worse than no panel.
   $('machinewrap').hidden = !!v.replaying
   replayBar(v.replay)
-  machine(v.machine || {})
+  machines(v.machines || [])
   hist(v.hist || [], v.histSecs || [], v.histEdge || [])
   $('nfamily').textContent = (v.family || []).length + ' groups, slowest first'
   groups('family', v.family || [], false)
@@ -637,7 +650,47 @@ function machine(m) {
     ['headroom', gb(Math.max(0, m.ramCap - m.ram)), m.ram > m.ramCap * 0.9],
   ], bar(m.ram, m.ramCap, m.ram > m.ramCap * 0.9)) : ''
 
-  $('machine').innerHTML = cpu + load + mem + disk + corpus
+  return cpu + load + mem + disk + corpus
+}
+
+// One block per machine: what it is, how it is doing, and what is standing on
+// it. The list has one entry until a cluster can be placed somewhere else, and
+// that entry is where every cluster actually is -- not a placeholder.
+function machines(list) {
+  if (!list.length) { $('machines').innerHTML = ''; return }
+  $('machines').innerHTML = list.map(mm => {
+    const where = mm.local ? 'this machine' : 'reported ' + age(mm.ageMs) + ' ago'
+    const head = '<div class=mhead><b>' + esc(mm.name) + '</b>' +
+      '<span class=mwhere>' + where + '</span>' +
+      (mm.note ? '<span class=mnote>' + esc(mm.note) + '</span>' : '') + '</div>'
+    return '<div class=mblock>' + head +
+      '<div class=mgrid>' + machine(mm.stats || {}) + '</div>' +
+      clusters(mm.clusters || []) + '</div>'
+  }).join('')
+}
+
+// The clusters on one machine, biggest first. Biggest because the question this
+// answers is which one to remove: a filesystem at 98% does not say, and eleven
+// pairs reached 53 GB here while the page reported only the filesystem.
+function clusters(list) {
+  if (!list.length) return ''
+  const gbytes = n => n >= 1073741824 ? (n/1073741824).toFixed(1) + 'G'
+    : n >= 1048576 ? Math.round(n/1048576) + 'M' : Math.round(n/1024) + 'K'
+  const total = list.reduce((a, c) => a + (c.bytes || 0), 0)
+  const rows = list.slice().sort((a, b) => (b.bytes || 0) - (a.bytes || 0)).map(c =>
+    '<tr' + (c.mine ? ' class=mine' : '') + '><td>' + esc(c.name) +
+    '<td>' + (c.containers || 0) +
+    '<td>' + gbytes(c.bytes || 0) +
+    '<td>' + (c.run ? esc(c.run) : '<span class=dim>&mdash;</span>') + '</tr>').join('')
+  return '<div class=mclusters><h3>clusters <span class=dim>' + list.length +
+    ', ' + gbytes(total) + '</span></h3><table><thead><tr>' +
+    '<th>name<th>up<th>disk<th>run</tr></thead><tbody>' + rows + '</tbody></table></div>'
+}
+
+function age(ms) {
+  if (ms == null) return '\u2014'
+  const s = Math.round(ms / 1000)
+  return s < 60 ? s + 's' : Math.round(s / 60) + 'm'
 }
 
 function hist(h, secsIn, edges) {

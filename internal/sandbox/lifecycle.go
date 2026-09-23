@@ -77,6 +77,17 @@ func (c *CLI) Create(ctx context.Context, build, run string) error {
 	return err
 }
 
+// DestroyRun takes down every cluster a run claimed, in one call.
+//
+// Selected by the label rather than by a list this process assembled: the label
+// is what the clusters themselves say, and a teardown that trusted its own list
+// instead could remove a cluster whose claim had changed under it, or miss one
+// whose creation it never heard the end of.
+func DestroyRun(ctx context.Context, run string) error {
+	_, err := Bind("").callLongNoCluster(ctx, "cluster", "destroy", "--label", RunLabel+"="+run)
+	return err
+}
+
 // Destroy takes a cluster down. It does not purge: the describe artifact and the
 // run record are a few kilobytes and they are the reproducible account of what
 // the evidence was produced on, which is worth more than the kilobytes.

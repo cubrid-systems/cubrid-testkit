@@ -87,6 +87,9 @@ func Watch(ctx context.Context, home *conf.Home, confPaths []string, addr string
 	// own page reports it (board.go): that is where every pair's volumes and
 	// copy logs are, and it is what fills up.
 	board.Watch(csbStateRoot(), "", 0)
+	// The watcher drives no clusters of its own, so none of the rows are marked
+	// as its: it is reporting the machine, not a run's footprint.
+	watchClusters(ctx, board, nil)
 	where, stop, serr := board.Serve(addr)
 	if serr != nil {
 		return serr

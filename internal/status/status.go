@@ -108,6 +108,11 @@ type Board struct {
 	corpusDir string
 	ramDir    string
 	ramCap    int
+	// machines is one row per machine the run touches, filled by whoever knows
+	// -- the local sampler for this host's numbers, a cluster sampler for what
+	// is standing on it.
+	machines  map[string]*Machine
+	machineAt map[string]time.Time
 	// sampler reads the machine on its own ticker, because CPU and disk are
 	// counters and a rate needs two readings.
 	sampler *sampler
@@ -596,6 +601,7 @@ type view struct {
 	// going with it -- and a watcher reading a file can.
 	Note      string      `json:"note,omitempty"`
 	Machine   machineView `json:"machine"`
+	Machines  []Machine   `json:"machines,omitempty"`
 	Finished  bool        `json:"finished"`
 	Replaying bool        `json:"replaying,omitempty"`
 	Replay    *replayView `json:"replay,omitempty"`
@@ -778,6 +784,7 @@ func (b *Board) snapshot() view {
 	v.Note = b.note
 	v.Replay = b.replayAt
 	v.Machine = b.sampler.snapshot()
+	v.Machines = b.machineViews()
 	for i := len(b.recent) - 1; i >= 0; i-- {
 		f := b.recent[i]
 		v.Recent = append(v.Recent, doneView{

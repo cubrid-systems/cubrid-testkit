@@ -253,6 +253,17 @@ func (c *CLI) callNoCluster(ctx context.Context, noun, verb string, rest ...stri
 	return anon.callRaw(ctx, noun, verb, rest...)
 }
 
+// callLongNoCluster is the provisioning bound without the cluster requirement,
+// for the one destructive verb that selects its own targets.
+func (c *CLI) callLongNoCluster(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
+	long := *c
+	long.Cluster = ""
+	if long.Timeout < ProvisionTimeout {
+		long.Timeout = ProvisionTimeout
+	}
+	return long.callRaw(ctx, noun, verb, rest...)
+}
+
 // decode reads the envelope's data into v.
 func (e *envelope) decode(v any) error {
 	if len(e.Data) == 0 {

@@ -138,7 +138,11 @@ type Stranded struct {
 func (s Stranded) key() string { return s.Node + " " + s.Word + " " + s.Name }
 
 func (s Stranded) String() string {
-	out := strings.ToLower(s.Word) + " " + s.Name + " on " + s.Node
+	word := strings.ToLower(s.Word)
+	if s.Word == ownTrigger {
+		word = "user trigger"
+	}
+	out := word + " " + s.Name + " on " + s.Node
 	switch {
 	case s.Repaired:
 		out += " (repaired)"
@@ -352,9 +356,57 @@ type leftover struct {
 	name string
 }
 
-func (l leftover) drop() string { return "DROP " + l.word + " " + l.name }
+// ownTrigger is a trigger with no target class -- `create trigger t after
+// rollback ...` -- which CUBRID calls a user trigger.
+//
+// DBA cannot drop one belonging to somebody else. Measured: as dba,
+// `DROP TRIGGER [TEST_USER].[test_trigger]` answers *Not authorized to access
+// trigger "test_user.test_trigger"*, and the same statement as TEST_USER
+// succeeds. A trigger attached to a class has no such rule and dba drops it
+// normally, so the two are separated here rather than treated alike.
+//
+// It cost the tail of a 3,327-case run: `_10_system_table/_018_db_user/1006`
+// leaves one, the reset could not remove it or the user who owned it, and the
+// 65 cases after it started from a state the run did not choose.
+const ownTrigger = "OWNTRIGGER"
 
-func (l leftover) String() string { return strings.ToLower(l.word) + " " + l.name }
+// drop is the statement, or statements, that remove this object.
+//
+// A user trigger is dropped as its owner and the session is handed back to
+// dba immediately, because everything after it in the batch expects dba. The
+// login needs no password: this runs as dba, which is what makes it the
+// reset's to do and nobody else's.
+func (l leftover) drop() string {
+	if l.word == ownTrigger {
+		owner, ok := ownerOf(l.name)
+		if !ok {
+			return "DROP TRIGGER " + l.name
+		}
+		return "call login('" + owner + "') on class db_user;\n" +
+			"DROP TRIGGER " + l.name + ";\n" +
+			"call login('dba') on class db_user"
+	}
+	return "DROP " + l.word + " " + l.name
+}
+
+// ownerOf reads the owner out of `[OWNER].[name]`.
+func ownerOf(qualified string) (string, bool) {
+	if !strings.HasPrefix(qualified, "[") {
+		return "", false
+	}
+	end := strings.Index(qualified, "]")
+	if end <= 1 {
+		return "", false
+	}
+	return qualified[1:end], true
+}
+
+func (l leftover) String() string {
+	if l.word == ownTrigger {
+		return "user trigger " + l.name
+	}
+	return strings.ToLower(l.word) + " " + l.name
+}
 
 // remaining asks the master what is still there, in the order the drops need.
 //
@@ -401,6 +453,9 @@ func remaining(ctx context.Context, p *sandbox.Pair) ([]leftover, error) {
 //   - a serial a table owns is that table's auto_increment. It goes when the
 //     table goes, and naming it here would be a DROP SERIAL the engine refuses;
 //     `class_name` is what the catalog calls that attachment.
+//   - a trigger with no target class is a user trigger, and DBA cannot drop
+//     somebody else's. It is named apart so the drop can log in as its owner
+//     first; see ownTrigger.
 //   - a partition is a class of its own in `db_class` -- `list_test__p__p0`
 //     beside `list_test` -- and it cannot be dropped on its own either: the
 //     parent's DROP takes all three. Naming them here made a reset report four
@@ -416,7 +471,9 @@ const resetQuery = "SELECT w || ' ' || n FROM (" +
 	"UNION ALL SELECT 2, 'SYNONYM', '[' || synonym_owner_name || '].[' || synonym_name || ']' " +
 	"FROM db_synonym " +
 	"UNION ALL SELECT 3, 'TRIGGER', '[' || owner_name || '].[' || trigger_name || ']' " +
-	"FROM db_trigger " +
+	"FROM db_trigger WHERE target_class_name IS NOT NULL " +
+	"UNION ALL SELECT 3, 'OWNTRIGGER', '[' || owner_name || '].[' || trigger_name || ']' " +
+	"FROM db_trigger WHERE target_class_name IS NULL " +
 	"UNION ALL SELECT 4, 'SERIAL', '[' || owner || '].[' || name || ']' " +
 	"FROM db_serial WHERE class_name IS NULL " +
 	"UNION ALL SELECT 5, 'TABLE', '[' || c.owner_name || '].[' || c.class_name || ']' " +

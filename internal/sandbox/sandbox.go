@@ -64,7 +64,18 @@ const BinEnv = "TESTKIT_CSB"
 // 2,048 partitions -- and a run over `_01_object` hit this bound eight times.
 // That is a real limit, and a caller should be able to raise it (`CLI.Timeout`);
 // what it must not do is disguise it, which is what `ErrTimedOut` below is for.
+//
+// Provisioning is the exception and has a bound of its own. `cluster create`
+// builds an image if the recipe changed, creates a database and seeds a slave
+// from it; `cluster destroy` waits for servers to flush. Neither belongs under a
+// bound chosen for reads.
 const DefaultTimeout = 2 * time.Minute
+
+// ProvisionTimeout bounds `cluster create` and `cluster destroy`. Measured
+// rather than guessed: creating a pair on this machine takes about a minute
+// when the image is already built, and the first create after a recipe change
+// takes several.
+const ProvisionTimeout = 15 * time.Minute
 
 // ErrTimedOut is a call that ran past this package's own bound and was killed
 // for it. It is a distinct error because the remedy is distinct: the node did
@@ -145,10 +156,21 @@ func (c *CLI) call(ctx context.Context, noun, verb string, rest ...string) (*env
 	if strings.TrimSpace(c.Cluster) == "" {
 		return nil, fmt.Errorf("sandbox: no cluster named")
 	}
+	return c.callRaw(ctx, noun, verb, rest...)
+}
+
+// callRaw is call without the cluster requirement, so that the one verb which
+// is about the machine rather than about a cluster can use the same envelope
+// reading, the same timeout and the same error wording as everything else.
+func (c *CLI) callRaw(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout())
 	defer cancel()
 
-	argv := append([]string{noun, verb, "--cluster", c.Cluster, "--json"}, rest...)
+	argv := []string{noun, verb}
+	if strings.TrimSpace(c.Cluster) != "" {
+		argv = append(argv, "--cluster", c.Cluster)
+	}
+	argv = append(append(argv, "--json"), rest...)
 	cmd := exec.CommandContext(ctx, c.bin(), argv...)
 	var out, errOut strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errOut
@@ -209,6 +231,35 @@ func (c *CLI) Available(ctx context.Context) error {
 		return fmt.Errorf("sandbox: %s does not answer --version (%v). "+
 			"Build it from extensions/cluster-sandbox and put it on PATH, or set %s",
 			c.bin(), err, BinEnv)
+	}
+	return nil
+}
+
+// callLong is `call` with the provisioning bound rather than the read bound.
+func (c *CLI) callLong(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
+	long := *c
+	if long.Timeout < ProvisionTimeout {
+		long.Timeout = ProvisionTimeout
+	}
+	return long.call(ctx, noun, verb, rest...)
+}
+
+// callNoCluster is for the one question that is about the machine rather than
+// about a cluster: `cluster ls`. It exists because `call` requires a cluster and
+// is right to -- every other verb is meaningless without one.
+func (c *CLI) callNoCluster(ctx context.Context, noun, verb string, rest ...string) (*envelope, error) {
+	anon := *c
+	anon.Cluster = ""
+	return anon.callRaw(ctx, noun, verb, rest...)
+}
+
+// decode reads the envelope's data into v.
+func (e *envelope) decode(v any) error {
+	if len(e.Data) == 0 {
+		return fmt.Errorf("sandbox: %s returned no data", e.Command)
+	}
+	if err := json.Unmarshal(e.Data, v); err != nil {
+		return fmt.Errorf("sandbox: %s returned data this runner cannot read: %w", e.Command, err)
 	}
 	return nil
 }

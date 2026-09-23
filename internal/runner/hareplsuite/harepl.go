@@ -77,6 +77,26 @@ const (
 	// output -- what the runner prints there is the frozen surface the
 	// equivalence comparison reads (ADR-003).
 	StatusKey = "status_http"
+	// PairsKey asks for pairs instead of naming ones that already exist. It is
+	// the other half of ClusterKey and the two are mutually exclusive, because
+	// the difference between them is who may destroy what: a cluster this run
+	// was handed is never touched, and a pair this run asked for is this run's
+	// to remove. Told apart in the configuration, before anything runs, rather
+	// than guessed at the end.
+	PairsKey = "sandbox_pairs"
+	// BuildKey is the engine the asked-for pairs are built from. The run's
+	// decision and not the provisioner's: a run that let csb pick could not say
+	// which build its evidence is about.
+	BuildKey = "sandbox_build"
+	// KeepKey leaves the asked-for pairs standing. Off by default -- eleven
+	// pairs reached 53 GB on this machine and took the filesystem to 98%, and
+	// the default that produced that was "somebody will remember". It exists
+	// because a run that failed is exactly when the pair is worth keeping.
+	KeepKey = "sandbox_keep"
+	// RunKey names the run. Generated when it is not given, always printed, and
+	// written into every pair this run creates as a label, so that a run killed
+	// before it could clean up leaves clusters that still say whose they were.
+	RunKey = "run_name"
 )
 
 func clusterOf(cfgCluster string) string {
@@ -114,10 +134,35 @@ func (s *HARepl) Run(ctx context.Context, req runner.Request) error {
 	addKey := cfg.Bool(AddKeyKey, false)
 	resetEvery := strings.ToLower(strings.TrimSpace(cfg.GetOr(ResetKey, "case")))
 
+	runName := strings.TrimSpace(cfg.GetOr(RunKey, ""))
+	if runName == "" {
+		runName = sandbox.NewRunName(time.Now())
+	}
+	fmt.Printf("ha_repl: run %s\n", runName)
+	reportOrphans(ctx, runName)
+
 	names := clustersOf(cfg.GetOr(ClusterKey, ""))
-	if len(names) == 0 {
-		return setupFailed("no cluster: set %s in %s, or %s in the environment",
-			ClusterKey, req.ConfigPath, ClusterEnv)
+	wanted := cfg.Int(PairsKey, 0)
+	switch {
+	case len(names) > 0 && wanted > 0:
+		return setupFailed("%s and %s are both set in %s: one names pairs that already exist and "+
+			"is never destroyed, the other asks for pairs this run will remove. Pick which",
+			ClusterKey, PairsKey, req.ConfigPath)
+	case len(names) == 0 && wanted <= 0:
+		return setupFailed("no cluster: set %s in %s, or %s in the environment, or %s=N to have "+
+			"this run stand its own pairs up and take them down again",
+			ClusterKey, req.ConfigPath, ClusterEnv, PairsKey)
+	case wanted > 0:
+		made, merr := standUpPairs(ctx, runName, wanted, cfg.GetOr(BuildKey, os.Getenv("CUBRID")))
+		if merr != nil {
+			return setupFailed("%v", merr)
+		}
+		names = made
+		if !cfg.Bool(KeepKey, false) {
+			defer tearDownPairs(context.WithoutCancel(ctx), made)
+		} else {
+			fmt.Printf("  %s is set, so these stay up: %s\n", KeepKey, strings.Join(made, " "))
+		}
 	}
 	shards := make([]*runShard, 0, len(names))
 	for _, name := range names {
@@ -667,4 +712,125 @@ func Cases(scenario string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// standUpPairs asks csb for the pairs this run will own, and claims each with
+// the run's name.
+//
+// Serially, not concurrently. Creating a pair is mostly disk -- a database is
+// made and a slave is seeded from it by copying its volumes -- and eight of
+// those at once on one spindle is the contention this suite spent a day
+// measuring, arriving before the run has judged a single case.
+func standUpPairs(ctx context.Context, run string, n int, build string) ([]string, error) {
+	if strings.TrimSpace(build) == "" {
+		return nil, fmt.Errorf("%s=%d needs an engine to build the pairs from: set %s, or $CUBRID",
+			PairsKey, n, BuildKey)
+	}
+	var made []string
+	for i := 1; i <= n; i++ {
+		name := sandbox.PairName(run, i)
+		fmt.Printf("  standing up %s (%d of %d)\n", name, i, n)
+		if err := sandbox.Bind(name).Create(ctx, build, run); err != nil {
+			// Take back what was made before giving up. A failure halfway
+			// through otherwise leaves pairs nobody asked for and nobody
+			// remembers, which is how this machine got to 53 GB.
+			tearDownPairs(context.WithoutCancel(ctx), made)
+			return nil, fmt.Errorf("could not stand up %s: %w", name, err)
+		}
+		made = append(made, name)
+	}
+	return made, nil
+}
+
+// tearDownPairs removes the pairs this run created.
+//
+// It runs on a context detached from the run's, because the usual reason a run
+// is ending is that its context was cancelled, and a teardown that inherited
+// that cancellation would do nothing at exactly the moment it is needed.
+//
+// A failure is reported and not returned: the run's verdicts are the run's
+// result, and a pair that would not go down is an operator's problem rather
+// than a reason to call the measurement failed. The name is printed so it can
+// be finished by hand.
+func tearDownPairs(ctx context.Context, names []string) {
+	for _, name := range names {
+		if err := sandbox.Bind(name).Destroy(ctx); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"[WARN] %s was created by this run and would not go down: %v\n"+
+					"       remove it with: csb cluster destroy --cluster %s\n", name, err, name)
+			continue
+		}
+		fmt.Printf("  took down %s\n", name)
+	}
+}
+
+// reportOrphans says which clusters an earlier testkit run claimed and did not
+// take back.
+//
+// Said, never acted on. A run that destroyed another run's clusters because
+// that run was not in this process table would eventually destroy a cluster
+// belonging to a run on another terminal -- or on another machine, once a
+// cluster can span two -- and that costs more than the disk does.
+//
+// Liveness is the same /proc read the watcher uses to find runs, so a run whose
+// conf is still in its command line is live whether or not it is this one.
+func reportOrphans(ctx context.Context, self string) {
+	all, err := sandbox.Bind("").Clusters(ctx)
+	if err != nil {
+		return // nothing to say is better than a warning about the warning
+	}
+	// A run that generated its name did not write it down, so another live run
+	// started without `run_name` cannot be recognised here. Those are counted
+	// rather than ignored: the report says its list may include a run that is
+	// still going, which is the difference between a hint and a claim.
+	live := map[string]bool{self: true}
+	unnamed := 0
+	for _, conf := range Running() {
+		switch name := runNameIn(conf); name {
+		case "", self:
+			if name == "" {
+				unnamed++
+			}
+		default:
+			live[name] = true
+		}
+	}
+	orphans := sandbox.Orphans(all, live)
+	if len(orphans) == 0 {
+		return
+	}
+	var total int64
+	for _, o := range orphans {
+		total += o.Bytes
+	}
+	fmt.Fprintf(os.Stderr, "[INFO] %d cluster(s) from an earlier run are still up, holding %s:\n",
+		len(orphans), sandbox.HumanBytes(total))
+	for _, o := range orphans {
+		run, _ := o.Run()
+		fmt.Fprintf(os.Stderr, "         %-24s %-8s run %s\n", o.Name, sandbox.HumanBytes(o.Bytes), run)
+	}
+	if unnamed > 0 {
+		fmt.Fprintf(os.Stderr,
+			"       %d other run(s) are going without a %s, so one of these may still be in use;\n"+
+				"       set %s in a conf to make a run recognisable here\n", unnamed, RunKey, RunKey)
+	}
+	fmt.Fprintf(os.Stderr, "       remove them with: csb cluster destroy --cluster NAME\n")
+}
+
+// runNameIn reads a run's name out of the conf it was started with. A run that
+// was not given one generated it and did not write it down, so this reports
+// only what an operator set -- which is the case where the name was chosen to
+// be found again.
+func runNameIn(confPath string) string {
+	b, err := os.ReadFile(confPath)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && strings.TrimSpace(k) == RunKey {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }

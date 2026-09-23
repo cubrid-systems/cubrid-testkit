@@ -1,5 +1,7 @@
 # The `ha_repl` category
 
+*English · [한국어](README.ko.md)*
+
 `ha_repl` is a task of its own. It takes the `sql` corpus, runs it on a master, and checks that the
 slave ends up holding the same thing — so it is the `sql` suite's question asked across a pair
 instead of against an answer file.

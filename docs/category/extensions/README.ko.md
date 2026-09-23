@@ -12,16 +12,16 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 
 | ID | 축 | 이름 | 진입성 | 선결 의존 | requirements |
 |---|---|---|---|---|---|
-| E1 | 1 | sqllogictest 적용 | 즉시 후보 | — | [E1-sqllogictest/](E1-sqllogictest/requirements.md) |
-| E2 | 2 | Random SQL fuzzing (SQLsmith) | 즉시 후보 | — | [E2-sqlsmith/](E2-sqlsmith/requirements.md) |
-| E3 | 3 | Logic bug detection (SQLancer NoREC+TLP) | **진행 중 (동시 트랙)** | — | [E3-sqlancer/](E3-sqlancer/requirements.md) · [ADR-EXT-003](../../project/adr/ADR-EXT-003-sqlancer-cubrid.md) · 저장소 `cubrid-sqlancer` |
-| E4 | 4 | Distributed isolation testing (AWDIT/Jepsen) | 조건부 | N24 / N11 graduation | [E4-distributed-isolation/](E4-distributed-isolation/requirements.md) |
-| E5 | 5 | Parser/protocol fuzzing harness (libFuzzer) | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | [E5-parser-fuzzing/](E5-parser-fuzzing/requirements.md) |
-| E6 | 6 | Differential testing (PostgreSQL pair) | 조건부 | N13 pg-wire-compat selected 이상 | [E6-differential/](E6-differential/requirements.md) |
-| E7 | 7 | Stateful / randomized workload | 조건부 | C-004 책임 경계 정의 | [E7-workload/](E7-workload/requirements.md) |
+| E1 | 1 | sqllogictest 적용 | 즉시 후보 | — | [E1-sqllogictest/](E1-sqllogictest/requirements.ko.md) |
+| E2 | 2 | Random SQL fuzzing (SQLsmith) | 즉시 후보 | — | [E2-sqlsmith/](E2-sqlsmith/requirements.ko.md) |
+| E3 | 3 | Logic bug detection (SQLancer NoREC+TLP) | **진행 중 (동시 트랙)** | — | [E3-sqlancer/](E3-sqlancer/requirements.ko.md) · [ADR-EXT-003](../../project/adr/ADR-EXT-003-sqlancer-cubrid.md) · 저장소 `cubrid-sqlancer` |
+| E4 | 4 | Distributed isolation testing (AWDIT/Jepsen) | 조건부 | N24 / N11 graduation | [E4-distributed-isolation/](E4-distributed-isolation/requirements.ko.md) |
+| E5 | 5 | Parser/protocol fuzzing harness (libFuzzer) | 조건부 | cubrid 본 repo `-DENABLE_FUZZING` | [E5-parser-fuzzing/](E5-parser-fuzzing/requirements.ko.md) |
+| E6 | 6 | Differential testing (PostgreSQL pair) | 조건부 | N13 pg-wire-compat selected 이상 | [E6-differential/](E6-differential/requirements.ko.md) |
+| E7 | 7 | Stateful / randomized workload | 조건부 | C-004 책임 경계 정의 | [E7-workload/](E7-workload/requirements.ko.md) |
 | (E8) | 8 | Hybrid CI 통합 (Materialize 패턴) | 메타 | E2~E7·E9 중 둘 이상 채택 | (TBD — 카탈로그 항목 외) |
-| E9 | 5 확장 × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | 조건부 | **E5 선행** + SERVER_MODE in-process 기동 + **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.md) |
-| E10 | 보조 설비 | XASL fixture 생산·보관 (버전 식별 포함) | 즉시 후보 | — (엔진 변경 없음) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.md) |
+| E9 | 5 확장 × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | 조건부 | **E5 선행** + SERVER_MODE in-process 기동 + **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.ko.md) |
+| E10 | 보조 설비 | XASL fixture 생산·보관 (버전 식별 포함) | 즉시 후보 | — (엔진 변경 없음) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.ko.md) |
 
 **번호 공간 주의.** `E8` 은 축 8 *Hybrid CI 통합* 메타 자리로 예약되어 있다. E9 가 E8 을 건너뛴 것은 결번이 아니라 이 예약 때문이다.
 

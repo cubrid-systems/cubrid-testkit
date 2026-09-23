@@ -1,5 +1,7 @@
 # The `isolation` category
 
+*English · [한국어](README.ko.md)*
+
 `isolation` is CTP's concurrency corpus — 6,790 cases, each a script that drives two or more clients against one
 database so that a lock wait, a deadlock or a visibility rule happens in an order the script decides — and the third
 family testkit rewrote. Every case is still executed by CTP's own `runone.sh` and ctltool; everything around a case is

@@ -1,5 +1,7 @@
 # The `ha-shell` category
 
+*English · [한국어](README.ko.md)*
+
 `ha-shell` is the `shell` task pointed at a master/slave pair — CTP runs it as `shell` with
 `ha_shell.conf`, over the `HA/shell` tree. It is not a task of its own, and that is worth knowing
 before anything else here: **a case is a shell case**, discovered by the same rule and judged by the

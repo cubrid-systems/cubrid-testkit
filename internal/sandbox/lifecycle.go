@@ -88,6 +88,32 @@ func DestroyRun(ctx context.Context, run string) error {
 	return err
 }
 
+// DestroyNamed takes down clusters this process names rather than clusters that
+// name themselves.
+//
+// It exists because `DestroyRun` cannot serve the case it was first used for.
+// Replacing a set means removing pairs an EARLIER run made, and those carry that
+// run's claim, not this one's -- so selecting by this run's label matched
+// nothing, reported that nothing went down, and the caller built on top of what
+// was still standing. The names are what the caller has and the names are what
+// it should use.
+//
+// The error names every cluster that would not go, because a caller about to
+// reuse those names has to know which ones are still occupied.
+func DestroyNamed(ctx context.Context, names []string) error {
+	var stuck []string
+	for _, name := range names {
+		if err := Bind(name).Destroy(ctx); err != nil {
+			stuck = append(stuck, name+" ("+err.Error()+")")
+		}
+	}
+	if len(stuck) > 0 {
+		return fmt.Errorf("%d of %d cluster(s) would not go down: %s",
+			len(stuck), len(names), strings.Join(stuck, "; "))
+	}
+	return nil
+}
+
 // Destroy takes a cluster down. It does not purge: the describe artifact and the
 // run record are a few kilobytes and they are the reproducible account of what
 // the evidence was produced on, which is worth more than the kilobytes.

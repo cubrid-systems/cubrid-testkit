@@ -842,7 +842,15 @@ func resolveSet(ctx context.Context, set string, want int, run, build string, re
 						"%s asked for it\n", name, who, RebuildEnv)
 			}
 		}
-		tearDownPairs(ctx, run, have)
+		// By name, not by this run's label: these pairs carry the claim of the
+		// run that made them. And a failure here stops the rebuild, because
+		// what follows is standing pairs up on the names these occupy -- csb
+		// resumes an existing cluster rather than refusing, so carrying on
+		// would build on top of what would not go down and call it a fresh set.
+		if err := sandbox.DestroyNamed(ctx, have); err != nil {
+			return nil, false, fmt.Errorf(
+				"%s could not be rebuilt because the existing set is still up: %w", set, err)
+		}
 	}
 
 	names, merr := standUpPairs(ctx, run, set, want, build)

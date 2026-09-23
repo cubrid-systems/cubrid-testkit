@@ -221,6 +221,15 @@ func watchClusters(ctx context.Context, board *status.Board, shards []*runShard)
 		}
 		byMachine := map[string][]status.MachineCluster{}
 		for _, c := range all {
+			// Running, or costing. A destroyed cluster keeps its describe
+			// artifact on purpose -- a kilobyte saying what evidence was
+			// produced on -- and a page that lists nineteen of those beside
+			// eight real pairs has buried the eight. A cluster that is down but
+			// still holding gigabytes is the other case and must stay: that is
+			// exactly the one somebody needs to find.
+			if c.Containers == 0 && c.Bytes < 1<<20 {
+				continue
+			}
 			run, _ := c.Run()
 			row := status.MachineCluster{
 				Name: c.Name, Containers: c.Containers, Bytes: c.Bytes,

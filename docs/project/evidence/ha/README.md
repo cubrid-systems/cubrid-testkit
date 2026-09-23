@@ -99,7 +99,7 @@ is next, and the traps that cost a day each.
   image, in which an object reference is an OID. Nothing reports it: the applier logs nothing and
   `fail_counter` does not move.
 
-## Why this is the first measurement
+## Why this is the first measurement, and what it is no longer a gate on
 
 Three separate pieces of work are waiting on one number nobody has.
 
@@ -110,6 +110,17 @@ Three separate pieces of work are waiting on one number nobody has.
    verdicts as two machines is a comparison, and it needs the left-hand side.
 3. **Group B at all.** A fault-injection case is a claim about behaviour under a disturbance, and a
    corpus whose ordinary behaviour is unrecorded cannot support one.
+
+**The findings in this directory are not among them** — decided 2026-09-23, and recorded as an
+amendment to ADR-015's second admission criterion. That criterion exists to stop an improvement
+destroying the evidence that a rewrite was faithful; where the baseline cannot express the question
+there is no such evidence to destroy. CTP's `ha_repl` converts the sql corpus before running it and
+the conversion deletes every `CALL` and almost every `SELECT`
+([`ctp-ha-repl-deletes-the-call.md`](ctp-ha-repl-deletes-the-call.md)), so three of the findings
+here are about statements a CTP run never executes. There is no verdict of CTP's to diff them
+against, and they stand on their own reproductions.
+
+What still needs the baseline is what CTP can actually run: the three items above, unchanged.
 
 ## What has to be true of the pair
 

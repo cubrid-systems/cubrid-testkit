@@ -13,7 +13,7 @@
 | [004](ADR-004-first-replacement-candidate.md) | First replacement candidate | **Option C' — shell 단독** (rqg / unittest). ~~jdbc~~ 는 2026-09-02 결정으로 제외 | 2026-09-02 |
 | [013](ADR-013-regression-equivalence.md) | How regression equivalence is proven | 정규화 후 diff 0. 코퍼스 = shell 전체 3,452, 스모크 = `_01_utility` 217. `_25_unstable` 별도 집계, HA·manually·Windows 제외. **개정 2026-09-19**: 게이트는 **패치된 코퍼스**에 대해 판정한다 — 패치는 러너의 conf 키가 아니라 **트리**에 들어가고(`shard.sh`), 양쪽 러너가 같은 소스를 읽으며, 패치된 케이스는 리포트의 `PATCHED` 블록에 이름으로 남는다. 상류 전송은 별도 트랙 | 2026-09-02 |
 | [014](ADR-014-one-machine.md) | The runner's scope is one machine | 로컬이 기본, 원격도 '한 대'. 인스턴스 인벤토리·N대 deploy·기계 간 분배는 **축 O** 로 이관 (ADR-012 이 상속) | 2026-09-03 |
-| [015](ADR-015-beyond-axis.md) | Axis B — beyond | 축 T·O 는 *호환성을 지키는 재작성*이라 개선이 들어갈 자리가 없다. 세 번째 축을 두고 **입회 조건 4개**(무엇을 이기는지 명시 / parity 먼저 / 증거를 미리 선언 / 끌 수 있을 것). 등록부는 `concept/beyond-axis.md` | 2026-09-03 |
+| [015](ADR-015-beyond-axis.md) | Axis B — beyond | 축 T·O 는 *호환성을 지키는 재작성*이라 개선이 들어갈 자리가 없다. 세 번째 축을 두고 **입회 조건 4개**(무엇을 이기는지 명시 / parity 먼저 / 증거를 미리 선언 / 끌 수 있을 것). 등록부는 `concept/beyond-axis.md`. **개정 2026-09-23**: baseline 이 그 질문을 표현할 수 없는 곳에서는 입회 조건 2(parity 먼저)가 적용되지 않는다 — CTP `ha_repl` 변환이 `CALL` 전부와 사실상 모든 `SELECT` 를 삭제하므로, 그 코퍼스에 대한 parity 는 다른 코퍼스에 대한 진술이다 | 2026-09-03 |
 | [016](ADR-016-sql-executor.md) | The sql executor | 케이스 실행(문장 전송 + 결과 텍스트)은 **인터페이스 뒤, 구현 둘**. `jdbc` = CQT 의 `SQLParser`·`ConsoleDAO` 를 그대로 쓰는 Java 프로세스(JDBC 모드 parity, 구성상 동일). `native` = Go CAS 클라이언트 + 모드별 포매터(CCI 모드 먼저, `ccqt` 대체). 문장 단위 텍스트를 주고받아 `jdbc` 가 `native` 의 오라클이 된다 | 2026-09-11 |
 
 ## 예약 (미결 — 트리거 대기)

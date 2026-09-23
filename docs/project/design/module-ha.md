@@ -305,6 +305,18 @@ verdicts are the baseline everything here is measured against. Nothing in §4 sh
 baseline exists — **and it does not exist yet**, which makes it the next piece of work regardless of
 this document.
 
+> **Amended 2026-09-23 — and a Group A and Group B suite has shipped without it.** What changed is
+> not the appetite for the baseline; it is what the baseline turned out to be. CTP's `ha_repl`
+> reaches the sql corpus through a conversion that deletes every statement beginning with `CALL` and
+> every `SELECT` that does not say `INCR` or `DECR`, so a parity comparison against it is a
+> comparison against a corpus the findings' own statements are not in
+> ([`evidence/ha/ctp-ha-repl-deletes-the-call.md`](../evidence/ha/ctp-ha-repl-deletes-the-call.md)).
+> [ADR-015](../adr/ADR-015-beyond-axis.md) was amended on the same day to say the criterion does not
+> apply where the baseline cannot express the question, and what ships instead is each finding's own
+> reproduction. **The two-machine baseline is still owed** — it is what the 373 frozen shell cases
+> need, and [ADR-022](../adr/ADR-022-topology-provider.md) Consequence 3 says the same. It stopped
+> being a gate on `ha_repl`; it did not stop being work.
+
 The two groups then arrive by different routes.
 
 **Group A is a patch set, and the mechanism is already built.** A `sleep` cannot be deleted from a

@@ -156,7 +156,16 @@ type Runner interface {
 | Runner | 담당 task | Phase |
 |---|---|---|
 | `shellsuite` | `shell` `rqg` `unittest` `jdbc` | **3 (1차 대체)** |
-| `legacy` | `sql` `medium` `kcc` `neis05` `neis08` `sql_by_cci` `isolation` `ha_repl` `cdc_repl` `webconsole` | 3 (공존) |
+| `sqlsuite` | `sql` `medium` | **4** |
+| `isolationsuite` | `isolation` | **4** |
+| `hareplsuite` | `ha_repl` | **4** |
+| `legacy` | `kcc` `neis05` `neis08` `sql_by_cci` `cdc_repl` `webconsole` — 그리고 위 Runner 중 스위치가 꺼진 것 | 3 (공존) |
+
+> **2026-09-23 갱신.** 이 표는 `shellsuite` 하나만 있던 시점의 것이었다. `sqlsuite` ·
+> `isolationsuite` · `hareplsuite` 가 뒤따랐고, 각각 `TESTKIT_NATIVE` 뒤에 있다. 어떤 게이트를
+> 통과했고 무엇이 남았는지는 루트 `README.md` 의 *What runs where* 가 유일한 기록처이며, 이
+> 표는 거기에 양보한다. `hareplsuite` 는 홀로 parity 게이트를 갖지 않는데, 그 이유는
+> [ADR-015](../adr/ADR-015-beyond-axis.md) 에 2026-09-23 개정으로 적혀 있다.
 
 `jdbc` 가 `shellsuite` 에 있는 이유는 `jdbc/bin/run.sh` 가 `shell.main.JdbcLocalTest` 를 부르기 때문이다
 (`cli-tree.md` 부록 A T4). shell 모듈을 옮기면 함께 온다.

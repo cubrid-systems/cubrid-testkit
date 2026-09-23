@@ -59,7 +59,7 @@ consequences:
 | `_021_db_authorizations/1006` | `select class_name, owner_name from db_class` | `call change_owner (…)` |
 | `_022_db_trigger/1001` | `select owner, name from _db_trigger` | a trigger made by a user the slave does not have |
 | `_004_db_attribute/1003, 1007` | `select … from db_attribute` | the same, one catalog further out |
-| `_012_db_auth/1011, 1015` | `select * from dba.test_class` | **not the engine** — see below |
+| `_012_db_auth/1011, 1015` | `select * from dba.test_class` | **that read was not the engine** — the two nodes ran it as different users; see below. 1011 still differs on a later `db_auth` read, which is |
 
 ## The two `_012_db_auth` cases are about this suite, not the engine
 

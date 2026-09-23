@@ -1193,7 +1193,7 @@ func TestTheDetailPaneReadsOnlyThisRunsPartOfTheLog(t *testing.T) {
 	}
 
 	b := New(1)
-	b.Detail(path) // the run starts here: everything above belongs to a run that is over
+	b.DetailSince(path) // the run starts here: everything above belongs to a run that is over
 
 	// Nothing of this run's yet, so there is nothing to show -- not the old block.
 	if got := b.detail.block("/corpus/_01/cases/a.sh"); got != "" {

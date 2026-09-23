@@ -53,6 +53,23 @@ func (b *Board) Detail(feedbackPath string) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.detail = &detail{path: feedbackPath}
+}
+
+// DetailSince is Detail for a run that is about to write: the file's current
+// length is remembered, and only what comes after it is this run's.
+//
+// The two are separate because a replay means the opposite. A replay is handed
+// a finished log and everything in it is the run being replayed, so a replay
+// that skipped to the end would show nothing at all -- which is what happened
+// when this was one method: two tests went red saying the block they had just
+// written was not there, and they were right.
+func (b *Board) DetailSince(feedbackPath string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.detail = &detail{path: feedbackPath, from: sizeOf(feedbackPath)}
 }
 

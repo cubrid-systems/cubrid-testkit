@@ -556,7 +556,7 @@ func (s *Shell) Run(ctx context.Context, req runner.Request) error {
 		// Where the page finds what a case actually did. It is the file the run
 		// is already writing, so a click costs a scan and nothing is recorded
 		// twice.
-		board.Detail(filepath.Join(sink.Dir(), "feedback.log"))
+		board.DetailSince(filepath.Join(sink.Dir(), "feedback.log"))
 		// What the run was told to do, which the verdicts do not say and which
 		// changes what they mean: an engine default that is not the engine's, and
 		// switches that decide how faithful the run is.

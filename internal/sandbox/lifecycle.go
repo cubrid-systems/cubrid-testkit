@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -22,20 +23,23 @@ import (
 //
 // # The line that decides what may be destroyed
 //
-// **A run destroys what it created, and only that.** Not "the clusters it used"
-// -- an operator who stands a pair up to run three suites against it must still
-// have it after the first. So the two cases are told apart in the
-// configuration, before anything runs, rather than guessed at the end:
-// `sandbox_cluster` names pairs that already exist and are never touched, and
-// `sandbox_pairs` asks for pairs that are this run's to remove.
+// **A run destroys what it created, and only when it has to make it again.**
+// Not at the end of the run: a pair that survives is what makes the next run
+// cheap, and an operator who stands a pair up to run three suites against it
+// must still have it after the first.
+//
+// So destruction has exactly one trigger -- a set whose size no longer matches
+// what the conf asks for, rebuilt on request -- and never happens as a side
+// effect of running cases.
 //
 // # And the claim is written down where a dead run cannot lose it
 //
 // Ownership lives in the cluster's own describe artifact, as a label, not in
 // this process's memory. A run that is killed -- and this suite has been killed
 // four times in two days by things that had nothing to do with it -- leaves
-// clusters that still say whose they were, so they can be found afterwards.
-// `csb cluster ls` prints the label.
+// clusters that still say whose they were. `csb cluster ls` prints the label,
+// and a rebuild says out loud when it is about to destroy something no run
+// claimed.
 
 // RunLabel is the label key a run claims its clusters with. The value is the
 // run's name.
@@ -118,18 +122,41 @@ func (c *CLI) Clusters(ctx context.Context) ([]Cluster, error) {
 	return payload.Clusters, nil
 }
 
-// Orphans are clusters some testkit run claimed and did not take back.
+// MembersOf returns the clusters that belong to a named set, in order.
 //
-// Reported, never destroyed on sight. A run that removed another run's clusters
-// because that run was not in this process table would eventually remove a
-// cluster belonging to a run on another terminal, and the cost of that is worse
-// than the disk.
-func Orphans(all []Cluster, live map[string]bool) []Cluster {
-	var out []Cluster
-	for _, cl := range all {
-		if run, ok := cl.Run(); ok && !live[run] {
-			out = append(out, cl)
+// A set is `<set>-p1`, `<set>-p2`, ... and membership is decided by the name
+// alone, not by a label. That is deliberate: the set is what the conf names, and
+// a conf that named a set whose members csb knows about but testkit would not
+// claim is a conf pointing at something real. The label answers a different
+// question -- who may destroy it -- and is asked separately.
+//
+// A gap is not closed over. If `-p1` and `-p3` exist and `-p2` does not, the set
+// has two members and the size check refuses, which is right: a set with a hole
+// in it is not a set of three and quietly renumbering it would hide whatever
+// removed the middle one.
+func MembersOf(all []Cluster, set string) []string {
+	prefix := set + "-p"
+	var found []struct {
+		n    int
+		name string
+	}
+	for _, c := range all {
+		if !strings.HasPrefix(c.Name, prefix) {
+			continue
 		}
+		n, err := strconv.Atoi(c.Name[len(prefix):])
+		if err != nil || n < 1 {
+			continue
+		}
+		found = append(found, struct {
+			n    int
+			name string
+		}{n, c.Name})
+	}
+	sort.Slice(found, func(i, j int) bool { return found[i].n < found[j].n })
+	out := make([]string, 0, len(found))
+	for _, f := range found {
+		out = append(out, f.name)
 	}
 	return out
 }

@@ -30,25 +30,25 @@ func TestARunNameIsUsableAsAClusterName(t *testing.T) {
 	}
 }
 
-// An orphan is a cluster some run claimed and did not take back. A cluster
-// nobody claimed is somebody's by hand and is never one.
-func TestOnlyAClaimedClusterCanBeAnOrphan(t *testing.T) {
+// A set is its numbered members, in order, and a hole is not closed over.
+func TestASetIsItsNumberedMembers(t *testing.T) {
 	all := []Cluster{
-		{Name: "hadb"}, // made by hand
-		{Name: "tk0923aa-p1", Labels: map[string]string{RunLabel: "tk0923aa"}}, // a live run's
-		{Name: "tk0101bb-p1", Labels: map[string]string{RunLabel: "tk0101bb"}}, // nobody's
-		{Name: "other", Labels: map[string]string{"team": "qa"}},               // labelled, not by a run
+		{Name: "perf-p3"}, {Name: "perf-p1"}, {Name: "perf-p10"},
+		{Name: "perf"},       // the bare name is not a member
+		{Name: "perfx-p1"},   // a different set that shares a prefix
+		{Name: "perf-pzero"}, // not a number
 	}
-	got := Orphans(all, map[string]bool{"tk0923aa": true})
-	if len(got) != 1 || got[0].Name != "tk0101bb-p1" {
-		t.Fatalf("want only tk0101bb-p1, got %v", names(got))
+	got := MembersOf(all, "perf")
+	want := []string{"perf-p1", "perf-p3", "perf-p10"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
-}
-
-func names(cs []Cluster) []string {
-	out := make([]string, len(cs))
-	for i, c := range cs {
-		out[i] = c.Name
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
 	}
-	return out
+	if n := len(MembersOf(all, "nothing")); n != 0 {
+		t.Errorf("a set with no members should be empty, got %d", n)
+	}
 }

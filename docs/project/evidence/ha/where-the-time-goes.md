@@ -110,6 +110,69 @@ carries the effect — including the 4.58x reported for eight shards.
 | raise `n` further | twelve still helps. The knee has not been found |
 | axis O | **no case.** It is what comes after those three are spent |
 
+
+## Two categories on one machine: the part scaling one category does not show
+
+The arms above scale **one** category. A second measurement asked what happens when two run at once,
+because that is the shape a real schedule has. `shell` on a 10-case slice at 4 slots, `ha_repl` on
+the 290-case slice at 4 pairs, then both together — small samples, one machine, nothing else on it.
+
+| arm | | wall | user | sys | iowait | idle | write |
+|---|---|---:|---:|---:|---:|---:|---:|
+| A | `shell` alone | 141 s | 0.6% | 0.4% | **55.5%** | 43.5% | 54.9 M/s |
+| B | `ha_repl` alone | 44 s | 8.3% | 3.9% | 18.3% | 69.3% | 14.6 M/s |
+| C | **both together** | **182 s** | 2.9% | 1.4% | 49.1% | 46.5% | 46.7 M/s |
+
+```
+max(A,B) = 141 s        A + B = 185 s        C = 182 s
+```
+
+**C landed on the sum, not the maximum.** They did not overlap; they serialised. And the cost fell
+almost entirely on one side:
+
+| | alone | together | |
+|---|---:|---:|---|
+| `shell` | 141 s | 153 s | **1.09x** — barely touched |
+| `ha_repl` | 44 s | 182 s | **4.14x** — starved |
+
+### What did the starving, and why it is not schedulable
+
+Look at arm A. `shell` alone runs at **user 0.6%, sys 0.4%, iowait 55.5%** and 55 MB/s. It hardly
+uses a processor. Its cases create and drop a database each, so what it consumes is the disk — and
+not its bandwidth but its queue.
+
+`ha_repl` spends its time waiting for a write to reach a slave, which is waiting for a commit to
+reach the platter. When `shell` owns the queue, `ha_repl`'s small `fsync`s wait behind it. That is
+why the queue's owner barely notices and the waiter pays 4x.
+
+**And in arm C the CPU is 4.3% with 46.5% idle.** There is nothing to schedule around: the machine
+is not short of any resource that a scheduler can hand out. The contention is in paths one host has
+exactly one of — one kernel, one page cache, one I/O queue, one `fsync` path.
+
+## What this measurement does and does not license
+
+**It does not license "buy an NVMe".** Faster storage shortens the queue; it does not stop two runs
+sharing it. The shape would be the same with less of it.
+
+**It does not license scheduling categories apart** — and that is wrong twice over. A category is
+**how a test is written**, not what it costs: `shell` holds cases that build nine-gigabyte databases
+and cases that echo a string, and the corpus changes whenever someone adds a directory. So a
+category is the wrong key. And even with the right key, the contention above is not of a kind a
+scheduler can avoid, because it is not a resource being allocated.
+
+**What it does establish is that one machine shares things that cannot be partitioned**, and that a
+second machine does not share them. That is not an optimisation with a ratio attached. It is a
+different guarantee: a separate kernel and a separate queue.
+
+**Whose choice that is, is the point.** Whether to buy isolation is the person running the tests
+deciding what their run is worth — not this project deciding for them. So the job is to make the
+choice expressible, not to be clever on their behalf. The measurement's contribution is the number
+that makes the choice informed: **4.14x on the starved side, at 4% CPU.**
+
+*(Not measured: the two-machine arm. That a separate kernel and queue remove this contention follows
+from what is shared, not from an experiment run here. The one-machine half is measured; the other
+half is the mechanism.)*
+
 ## What is not claimed
 
 **That 12 is the knee.** Wall clock was still falling there and no arm beyond it was run, because
@@ -118,8 +181,13 @@ sixteen pairs do not fit on this disk with room to grow.
 **That an NVMe was measured.** The latency reading is inferred from 25 MB/s beside 40% iowait, which
 is a strong shape but not the same as having swapped the disk.
 
-**That this transfers to `shell` or `sql`.** Those run cases in slots rather than pairs, and their
-work is not a database committing per statement. The method transfers; the numbers do not.
+**That the single-category conclusion covers a real schedule.** It does not, and the section above
+is why: scaling one category leaves the machine half idle, and running two fills a path neither can
+see. "Axis O has no case" was measured about one category widening and must not be read further than
+that.
+
+**That another machine was measured.** The two-category arms are one host. What a second host
+removes follows from what a host has one of; it was not run.
 
 **That the two n=8 arms differ *only* by disk fullness.** Set B's pairs were built fresh and set A's
 had been through four arms, so their wear differs — 206-244 pages against 208-1,654. The control arm

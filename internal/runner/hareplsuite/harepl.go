@@ -818,6 +818,19 @@ func resolveSet(ctx context.Context, set string, want int, run, build string, re
 
 	switch {
 	case len(have) == want:
+		// The right number of names is not the right number of pairs. A destroy
+		// keeps the describe artifact, so a set someone removed by hand still
+		// counts every one of its names -- and reuse would then hand this run
+		// clusters with nothing running in them. It fails a moment later on
+		// "cannot be reached", which names the symptom and hides this cause.
+		if down := sandbox.DownAmong(all, have); len(down) > 0 {
+			return nil, false, fmt.Errorf(
+				"%s has the %d name(s) %s asks for, but %d of them are not running (%s).\n"+
+					"       A destroyed cluster keeps its describe artifact, so a set taken down by "+
+					"hand still counts.\n"+
+					"       Run once with %s=1 to build the set again",
+				set, want, PairsKey, len(down), strings.Join(down, " "), RebuildEnv)
+		}
 		fmt.Printf("  reusing the %d pair(s) of %s: %s\n", want, set, strings.Join(have, " "))
 		return have, false, nil
 

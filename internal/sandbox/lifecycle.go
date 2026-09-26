@@ -198,6 +198,29 @@ func MembersOf(all []Cluster, set string) []string {
 	return out
 }
 
+// DownAmong reports which of the named clusters are not running.
+//
+// It is a separate question from membership on purpose. `MembersOf` answers
+// "which of these names are taken", which is what a rebuild needs before it
+// reuses them; this answers "which of them could actually run a case", which is
+// what reuse needs. A destroy keeps the describe artifact -- a kilobyte saying
+// what evidence was produced on -- so a set whose pairs were removed by hand
+// still has every one of its names, and only the container count tells them
+// apart.
+func DownAmong(all []Cluster, names []string) []string {
+	up := map[string]int{}
+	for _, c := range all {
+		up[c.Name] = c.Containers
+	}
+	var down []string
+	for _, n := range names {
+		if up[n] == 0 {
+			down = append(down, n)
+		}
+	}
+	return down
+}
+
 // HumanBytes is what a cluster costs, said the way an operator reads it.
 func HumanBytes(n int64) string {
 	switch {

@@ -52,3 +52,31 @@ func TestASetIsItsNumberedMembers(t *testing.T) {
 		t.Errorf("a set with no members should be empty, got %d", n)
 	}
 }
+
+// The right number of names is not the right number of pairs. A destroy keeps
+// the describe artifact, so a set taken down by hand still has all its names --
+// and reuse handed the run clusters with nothing running in them.
+func TestDownAmongTellsANameFromARunningPair(t *testing.T) {
+	all := []Cluster{
+		{Name: "perf-p1", Containers: 2},
+		{Name: "perf-p2", Containers: 0}, // destroyed; only its artifact is left
+		{Name: "perf-p3", Containers: 2},
+	}
+	names := MembersOf(all, "perf")
+	if len(names) != 3 {
+		t.Fatalf("membership counts names: got %v", names)
+	}
+	down := DownAmong(all, names)
+	if len(down) != 1 || down[0] != "perf-p2" {
+		t.Errorf("down = %v, want only perf-p2", down)
+	}
+	if n := len(DownAmong(all, []string{"perf-p1", "perf-p3"})); n != 0 {
+		t.Errorf("two running pairs reported %d down", n)
+	}
+	// A name the listing does not carry at all counts as down rather than as
+	// running: it cannot run a case either way, and guessing otherwise is how a
+	// run starts against nothing.
+	if d := DownAmong(all, []string{"perf-p9"}); len(d) != 1 {
+		t.Errorf("an unknown name should count as down, got %v", d)
+	}
+}

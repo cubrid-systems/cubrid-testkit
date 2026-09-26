@@ -34,17 +34,23 @@ With `$CUBRID` pointing at an install, `$CTP_HOME` at a CTP tree, and a corpus c
 
 ```bash
 cat > /tmp/demo/sql.conf <<'EOF'
+[sql]
 scenario=/path/to/cubrid-testcases/sql
 test_category=sql
 jdbc_config_file=test_default.xml
 db_charset=en_US
-
-[sql]
 parallel_slots=1
 EOF
 
 TESTKIT_NATIVE=sql TESTKIT_CONTAIN=1 testkit sql -c /tmp/demo/sql.conf
 ```
+
+**Every key goes under `[sql]`.** A key above the section header is in a different section and is not
+read: the suite asks for `sql`'s keys by name, and there is no fall-back to the file's top. A conf
+whose `scenario` sits above the header fails with *"please make sure your scenario directory"*, which
+names the key and not the reason. CTP's own shipped `conf/sql.conf` opens with `[sql]` for the same
+reason.
+
 
 ```
 Result Root Dir:/path/to/CTP/sql/result/y2026/m9/schedule_linux_sql_64bit_1312570267_11.5.0.2568-c3967ec

@@ -1,6 +1,7 @@
 # HA: where this stands, and the four ways on
 
-- **Date:** 2026-09-22, updated 2026-09-23 (A settled, B run, C started)
+- **Date:** 2026-09-22, updated 2026-09-23 (A settled, B run, C started) and 2026-09-25
+  (the 42 classified, three runner bounds fixed, axis O settled — see §7)
 - **What this is:** the handover. Everything below is what someone starting cold needs to pick up
   any of the four candidates without rediscovering it — including the things that cost a day and
   leave no trace in the code.
@@ -302,9 +303,61 @@ defensible.
 
 | | |
 |---|---|
-| cubrid-testkit | PR **#9**, branch `feat/ha-repl-sandbox` |
-| cubrid-cluster-sandbox | PR **#6**, branch `feat/podman-backend` — **merge first**, the submodule pointer is on it |
+| cubrid-testkit | PR **#9 merged** 2026-09-23. PR **#11 open**, branch `measure/where-the-time-goes` |
+| cubrid-cluster-sandbox | PRs **#6 and #7 merged**; `main` is `4ba7e8c` and the submodule is pinned there |
 
 Open questions recorded in the sandbox repo: **OQ13** whether podman is supported or was made to
 work once, **OQ14** what actually holds a node in `to_be_active` — its escape is unit-tested and
 has never been run end to end, because the state cannot be stood up on demand.
+
+---
+
+## 7. 2026-09-25 — what changed, and what to pick up next
+
+### 7-1. Settled, do not re-open without new evidence
+
+**The 42 the scale run called failures are fully accounted for**
+([the-forty-two-and-what-they-were.md](the-forty-two-and-what-they-were.md)). Thirty-one were the
+runner: 26 eight-way contention, 2 a conf key this runner never read, 3 a bound that did not exist.
+The other eleven are the engine and all three of their causes were already documented.
+**No new engine finding in 3,327 cases.**
+
+**Axis O — the fleet — has its answer, and it is not about speed**
+([where-the-time-goes.md](where-the-time-goes.md)). Scaling *one* category leaves this machine half
+idle at twelve pairs, so speed is no argument. Running *two* categories at once lands on the sum of
+their times rather than the maximum, with the whole cost on one side (4.14x) at 4% CPU — because the
+contention is in what a host has exactly one of.
+
+So **machine separation is an isolation guarantee, not an optimisation**, and buying it is the
+caller's decision. Three framings were tried and discarded before that one; the note records why,
+so they are not tried again. In particular: **do not give the layer knowledge of which category to
+run with which.** A category is how a test is written, not what it costs, and the corpus changes.
+
+### 7-2. Open, in the order the evidence suggests
+
+| | |
+|---|---|
+| **`sql` does not run on this machine** | after the conf fix it fails compiling CQT's `TestkitExecutor` (`JunitXmlWriter` symbol). A blocker for any `sql` work here and untouched |
+| **`MembersOf` counts a set by name, not liveness** | destroy leaves the describe artifact, so a set whose pairs were removed by hand still reports N members and `reuse` then runs against nothing. It fails loudly, but the message hides the cause |
+| ADR-013 gate | `shell` over the whole corpus. Phase 3's exit condition, still open |
+| ADR-019 | isolation controller — 27 cases whose answers record `qactl`'s ordering. Does not pass |
+| two-machine baseline | ADR-022 Consequence 3 still calls it the next measurement, and `hareplsuite` is sandbox-only (`harepl.go` refuses an empty `sandbox_cluster`) |
+| csb placement + netns backend | only if machine separation is chosen. The design is in [pairs-across-machines.md](pairs-across-machines.md) and §8 of the design note |
+| the slot-provider seam | `internal/contain` is the only implementation and there is no seam. Everything else in the design note waits on it |
+
+### 7-3. Traps added this round
+
+**A reused pair is not a control, and I fell into it after writing that down.** The reproduction of
+the 42 first ran on a pair worn to 35,417 pages; the same case took 639 ms on a fresh pair and
+121,369 ms on that one, and the *verdict changed* with it. Stand a fresh pair up for anything you
+intend to compare.
+
+**Free disk is a performance variable.** The same eight pairs run the same work in 42 s at 90% full
+and 32 s at 87%. Pairs only grow, so a machine running them walks itself into the expensive region.
+`csb cluster ls`'s `DISK` column is how you see it; destroying a set is a performance action.
+
+**Run the feature to find its bugs.** Six defects this round came out of *using* what had just been
+built, not from reading it: a timeout blaming the node, `destroy --label` reporting success while
+destroying nothing, a rebuild tearing down by the wrong label **and carrying on anyway**, the status
+page listing nineteen destroyed clusters beside eight real ones, a probe bounded like a case, and
+the `sql` guide's first example failing verbatim. None was visible in review.

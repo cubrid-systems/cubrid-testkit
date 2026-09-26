@@ -57,6 +57,20 @@ is next, and the traps that cost a day each.
   key conversion was breaking any table that already auto-increments, and a `SELECT` of a serial's
   next value was being compared across the pair.
 
+- [where-the-time-goes](where-the-time-goes.md) — **2026-09-24.** The measurement that was supposed
+  to decide whether to open axis O, and the answer is **no case**. Pairs from 1 to 12: it is not the
+  cores (4.2 of 16 working at twelve pairs), not the bandwidth (25 MB/s at most), and the machine is
+  never saturated — 5.5 cores idle at n=12 while wall clock is still falling. iowait is the only term
+  that grows and it grows beside an idle disk, which makes it commit **latency** rather than
+  throughput. Also finds what nobody was looking for: **free disk is a performance variable** — the
+  same eight pairs run the same arm in 42 s at 90% full and 32 s at 87%, so cleaning up is a
+  performance setting and not hygiene. **Extended 2026-09-25** with the arms that scaling one
+  category cannot show: two categories at once land on the *sum* of their times, not the maximum —
+  `shell` 141 s and `ha_repl` 44 s become 182 s together, and the whole cost falls on `ha_repl`
+  (4.14x) while the CPU sits at 4%. There is nothing to schedule around, because the contention is in
+  what a host has one of. So machine separation is an isolation guarantee rather than a speed
+  optimisation, and buying it is the caller's choice.
+
 - [the-forty-two-and-what-they-were](the-forty-two-and-what-they-were.md) — **2026-09-23.** The
   whole-corpus run over `_01_object` reported 42 failures. **Thirty-one were the runner.** Twenty-six
   were eight-way contention pushing `_09_partition` past a sixty-second bound — the clearest of them

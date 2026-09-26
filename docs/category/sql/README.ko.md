@@ -34,17 +34,23 @@
 
 ```bash
 cat > /tmp/demo/sql.conf <<'EOF'
+[sql]
 scenario=/path/to/cubrid-testcases/sql
 test_category=sql
 jdbc_config_file=test_default.xml
 db_charset=en_US
-
-[sql]
 parallel_slots=1
 EOF
 
 TESTKIT_NATIVE=sql TESTKIT_CONTAIN=1 testkit sql -c /tmp/demo/sql.conf
 ```
+
+**모든 키가 `[sql]` 아래로 들어간다.** 섹션 머리말 위에 적은 키는 다른 섹션에 속하고 읽히지
+않는다 — 스위트는 `sql` 섹션의 키를 이름으로 가져오며 파일 맨 위로 떨어지는 폴백이 없다.
+`scenario` 가 머리말 위에 있는 conf 는 *"please make sure your scenario directory"* 로 실패하는데,
+그 메시지는 키를 말할 뿐 이유를 말하지 않는다. CTP 가 실제로 배포하는 `conf/sql.conf` 도 같은
+이유로 `[sql]` 로 시작한다.
+
 
 ```
 Result Root Dir:/path/to/CTP/sql/result/y2026/m9/schedule_linux_sql_64bit_1312570267_11.5.0.2568-c3967ec

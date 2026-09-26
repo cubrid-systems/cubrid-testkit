@@ -565,34 +565,36 @@ func TestNoCacheMeansNoPanel(t *testing.T) {
 	}
 }
 
-// Two runs on one machine is a normal thing to want, and the page is not worth
-// failing a run over.
-func TestTheDefaultPortMovesAlong(t *testing.T) {
-	a := New(1)
-	addr, stop, err := a.Serve(DefaultAddr)
-	if err != nil {
-		t.Skip("the default port is not available on this machine")
+// NearDefault is the arithmetic the moving-along does, and it is tested as
+// arithmetic: no listener, so nothing about the machine can decide the result.
+//
+// The test this replaces did bind a port, and that is why it has gone. It
+// asserted that Serve returns the address it was given, which Serve does not --
+// it returns the resolved one, so `:51523` comes back `[::]:51523` and the page
+// prints that. Worse, it skipped when the port was busy, so it passed on a
+// machine already serving a page and failed on an idle one: main's CI alternated
+// green and red on one commit for days. What it meant to test -- a second run
+// finds a free port and a pinned address is refused -- is
+// TestTheDefaultPortMovesAlongAndAPinnedOneDoesNot, which came later and tests
+// Open.
+func TestNearDefaultCountsFromTheDefault(t *testing.T) {
+	if got := NearDefault(0); got != DefaultAddr {
+		t.Errorf("the zeroth near port is %q, want the default %q", got, DefaultAddr)
 	}
-	defer stop()
-	if addr != DefaultAddr {
-		t.Fatalf("listened on %q, want the default", addr)
+	if got, want := NearDefault(1), ":51524"; got != want {
+		t.Errorf("NearDefault(1) = %q, want %q", got, want)
 	}
-	// A second board finds it taken and takes the next one.
-	b := New(1)
-	var got string
-	var stop2 func()
-	for try := 1; try <= 16; try++ {
-		got, stop2, err = b.Serve(NearDefault(try))
-		if err == nil {
-			break
+	if got, want := NearDefault(16), ":51539"; got != want {
+		t.Errorf("NearDefault(16) = %q, want %q", got, want)
+	}
+	// Distinct for distinct n, which is the property the retry loop needs.
+	seen := map[string]bool{}
+	for n := 1; n <= 16; n++ {
+		a := NearDefault(n)
+		if seen[a] {
+			t.Fatalf("NearDefault(%d) = %q, already returned", n, a)
 		}
-	}
-	if err != nil {
-		t.Fatalf("no port near the default was free: %v", err)
-	}
-	defer stop2()
-	if got == DefaultAddr || got == "" {
-		t.Errorf("the second run took %q", got)
+		seen[a] = true
 	}
 }
 

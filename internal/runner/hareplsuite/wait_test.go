@@ -1,6 +1,7 @@
 package hareplsuite
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -68,5 +69,37 @@ func TestAProbeCannotOutliveTheWaitItLivesInside(t *testing.T) {
 	if sandbox.ProbeTimeout >= sandbox.CaseTimeout {
 		t.Errorf("a probe is bounded at %v, which is not smaller than the case bound %v",
 			sandbox.ProbeTimeout, sandbox.CaseTimeout)
+	}
+}
+
+// Both things that can be wrong with an existing set must reach the rebuild,
+// because the refusal names it as the way out. The first version of the liveness
+// check did not: its case matched on the name count alone, so a set whose pairs
+// were down was refused even with the switch set, and the way out it advertised
+// was unreachable. That is the same defect as a teardown that reports success
+// and destroys nothing -- a message describing something the code will not do.
+func TestBothBadSetStatesReachTheRebuild(t *testing.T) {
+	src, err := os.ReadFile("harepl.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(src)
+	i := strings.Index(body, "func resolveSet(")
+	if i < 0 {
+		t.Fatal("resolveSet not found")
+	}
+	j := strings.Index(body[i:], "\nfunc ")
+	if j > 0 {
+		body = body[i : i+j]
+	} else {
+		body = body[i:]
+	}
+	// The reuse case has to require both the count and liveness; a case keyed on
+	// the count alone shadows the rebuild.
+	if !strings.Contains(body, "len(have) == want && len(down) == 0") {
+		t.Error("the reuse case must require liveness too, or it shadows the rebuild path")
+	}
+	if strings.Contains(body, "case len(have) == want:") {
+		t.Error("a case on the name count alone makes the rebuild unreachable for a set that is down")
 	}
 }

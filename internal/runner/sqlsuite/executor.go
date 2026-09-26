@@ -77,10 +77,39 @@ func compileExecutor(ctx context.Context, ctpHome string) (string, error) {
 		"-cp", filepath.Join(ctpHome, "sql", "lib", "*"), src)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		os.RemoveAll(dir)
-		return "", fmt.Errorf("compile the sql executor against %s: %v: %s",
-			filepath.Join(ctpHome, "sql", "lib"), err, strings.TrimSpace(string(out)))
+		lib := filepath.Join(ctpHome, "sql", "lib")
+		text := strings.TrimSpace(string(out))
+		return "", fmt.Errorf("compile the sql executor against %s: %v: %s%s",
+			lib, err, text, ctpTooOld(text))
 	}
 	return dir, nil
+}
+
+// ctpTooOld says which CTP revision a missing symbol points at, when the symbol
+// is one this file knows arrived in a particular change.
+//
+// The executor is compiled against the CTP the run was given, which is what
+// turns a mismatch into an error instead of into different output. What it does
+// not do on its own is say that the mismatch is a *revision*: javac reports a
+// missing class, and a reader with an older CTP checkout sees two lines of Java
+// and no mention of the tree those lines are about. Measured in the worst way --
+// half an hour on 2026-09-26, on a checkout sitting on a feature branch that
+// simply predated the class.
+//
+// Only symbols whose arrival is known are named. A guess here would be worse
+// than the silence it replaces.
+func ctpTooOld(javacOutput string) string {
+	known := []struct{ symbol, arrived string }{
+		{"JunitXmlWriter", "CUBRIDQA-1406, cubrid-testtools #769 -- it is on `develop`"},
+	}
+	for _, k := range known {
+		if strings.Contains(javacOutput, k.symbol) {
+			return fmt.Sprintf("\n       %s arrived in %s, so this CTP checkout is older than the "+
+				"sql suite needs. Check which branch it is on: a fetch does not help if it is not develop",
+				k.symbol, k.arrived)
+		}
+	}
+	return ""
 }
 
 // jdbc is the executor that is CQT: its parser, its connection, its renderer,

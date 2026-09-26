@@ -815,22 +815,16 @@ func resolveSet(ctx context.Context, set string, want int, run, build string, re
 		return nil, false, fmt.Errorf("cannot list the clusters on this machine, so %s cannot be resolved: %w", set, lerr)
 	}
 	have := sandbox.MembersOf(all, set)
+	// Two different things can be wrong with an existing set, and both are
+	// resolved the same way, so both have to reach the rebuild. The right number
+	// of NAMES is not the right number of PAIRS: a destroy keeps the describe
+	// artifact, so a set someone took down by hand still counts every one of its
+	// names. Reuse on those hands the run clusters with nothing running in them
+	// and fails a moment later on "cannot be reached", which names the symptom.
+	down := sandbox.DownAmong(all, have)
 
 	switch {
-	case len(have) == want:
-		// The right number of names is not the right number of pairs. A destroy
-		// keeps the describe artifact, so a set someone removed by hand still
-		// counts every one of its names -- and reuse would then hand this run
-		// clusters with nothing running in them. It fails a moment later on
-		// "cannot be reached", which names the symptom and hides this cause.
-		if down := sandbox.DownAmong(all, have); len(down) > 0 {
-			return nil, false, fmt.Errorf(
-				"%s has the %d name(s) %s asks for, but %d of them are not running (%s).\n"+
-					"       A destroyed cluster keeps its describe artifact, so a set taken down by "+
-					"hand still counts.\n"+
-					"       Run once with %s=1 to build the set again",
-				set, want, PairsKey, len(down), strings.Join(down, " "), RebuildEnv)
-		}
+	case len(have) == want && len(down) == 0:
 		fmt.Printf("  reusing the %d pair(s) of %s: %s\n", want, set, strings.Join(have, " "))
 		return have, false, nil
 
@@ -838,12 +832,19 @@ func resolveSet(ctx context.Context, set string, want int, run, build string, re
 		fmt.Printf("  %s does not exist yet; standing up %d pair(s)\n", set, want)
 
 	case !rebuild:
+		why := fmt.Sprintf("has %d pair(s) (%s) and %s=%d asks for %d",
+			len(have), strings.Join(have, " "), PairsKey, want, want)
+		if len(have) == want {
+			why = fmt.Sprintf("has the %d name(s) %s asks for, but %d of them are not running (%s) -- "+
+				"a destroyed cluster keeps its describe artifact, so a set taken down by hand still counts",
+				want, PairsKey, len(down), strings.Join(down, " "))
+		}
 		return nil, false, fmt.Errorf(
-			"%s has %d pair(s) (%s) and %s=%d asks for %d.\n"+
-				"       If the size is what you meant, run once with %s=1 and the existing "+
+			"%s %s.\n"+
+				"       If that is what you meant, run once with %s=1 and the existing "+
 				"pair(s) are destroyed and built again.\n"+
 				"       If it is not, this conf is pointing at a set that is already in use",
-			set, len(have), strings.Join(have, " "), PairsKey, want, want, RebuildEnv)
+			set, why, RebuildEnv)
 
 	default:
 		fmt.Printf("  %s=1: %s has %d pair(s) and %d are wanted, so the existing set goes first\n",

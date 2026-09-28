@@ -118,7 +118,7 @@
 알아보는 표시는 diff 가 **같은 줄들을 다른 순서로** 담은 실패, 또는
 `ERROR! Client <n> is ready.` 로 끝나며 락 테이블을 덤프하는 `wait until C<n> blocked` 다.
 
-스물일곱 중 다섯이 패치로 관리되고, `_01_ReadCommitted/catalog/db_index_04` 도 그렇다. 이것은 같은
+스물일곱 중 열다섯이 패치로 관리되고, `_01_ReadCommitted/catalog/db_index_04` 도 그렇다. 이것은 같은
 종류이면서 단독으로 돌리면 통과한다. `case_patch_dir` 을 거기로 향하게 하면 케이스마다 빠져 있던
 순서 구문을 갖고 돌아간다:
 
@@ -130,12 +130,15 @@ case_patch_dir=/path/to/cubrid-testkit-patches/isolation
 디렉터리의 `patched.txt` 에. 패치된 케이스의 판정은 패치된 케이스에 대한 주장이지 코퍼스에 대한
 주장이 아니다.
 
-나머지 스물둘은 아직 쓰이지 않았다. 스물하나는 답을 다시 기록해야 하는데, 고치는 방법이
-클라이언트가 자기만의 구문에서 스냅샷을 잡는 것이고 그런 구문은 출력을 찍기 때문이다. 스물두
-번째는 엔진이 두 클라이언트 중 어느 쪽을 먼저 풀어주느냐에 달려 있다. 각각이 왜 실패하는지와
-무엇에 달려 있는지는
-[`project/evidence/isolation-corpus-races.md`](../../project/evidence/isolation-corpus-races.md) 에
-있다.
+그중 일곱은 답도 바꾸는데, 각각 수정 자체가 찍거나 옮기는 만큼만 바꾼다. 이제 자기 문장으로 스냅샷을
+잡는 클라이언트는 그 문장의 결과를 찍고, 답의 나머지는 한 줄도 움직이지 않는다.
+
+**나머지 열둘은 케이스를 고쳐서는 쓸 수 없다.** 각각에 스냅샷을 쥐려고 sleep 하는 READ COMMITTED
+클라이언트가 있고, 그것에 보이면 안 되는 문장들이 아무 기다림 없이 다른 클라이언트로 나간다. READ
+COMMITTED 의 스냅샷은 문장이 시작할 때 잡히는데, `qactl` 의 대기 상태 — `blocked`, `unblocked`, `ready`,
+`finished` — 에는 "시작했다"가 없다. 답을 다시 기록해도 경주가 어느 쪽으로 떨어져야 하는지만 바뀐다.
+각각이 왜 실패하는지, 어느 것이 어느 쪽인지는
+[`project/evidence/isolation-corpus-races.md`](../../project/evidence/isolation-corpus-races.md) 에 있다.
 
 ## 케이스 하나를 다시 돌리기
 

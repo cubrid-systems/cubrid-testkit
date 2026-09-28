@@ -201,7 +201,11 @@ patches, the way shell's and sql's corpus problems already were, and ADR-018 con
 one deletes its patch — the run then refuses the case, which is how this repository finds out (ADR-013's rule,
 applied here).
 
-Six are carried today. Each is an ordering statement, or an answer the corpus already has and never finished, and
+Six are carried today, and **the arithmetic here is not `28 - 6`.** The gate is failed by 27 paths, not 28: the 25
+runner differences in the table above plus the two found at eight and fourteen slots. Five of the six patches are on
+one of those 27; the sixth, `db_index_04`, is the same kind but passes when run alone. So 27 - 5 = **22 unwritten**.
+
+Each of the six is an ordering statement, or an answer the corpus already has and never finished, and
 **none of them changes what the case prints** — which is why they could be written from the case's own text:
 
 | case | the change |
@@ -218,6 +222,38 @@ the client to take its snapshot in a statement of its own, and a statement of it
 changes and has to be re-recorded from a run. A `.ctl` patched without its answer fails the case for a new reason,
 which is worse than leaving it. The twenty-second is `trigger_update_11`, whose two moved lines belong to clients
 that are blocked on each other: which the engine releases first is not settled by the case's text.
+
+
+### The 22 that are not written, by name
+
+Generated from the tables above minus the patch set, so it stays honest if either moves. `trigger_update_11` is the
+one whose fix is not decidable from the case's text; every other line needs its snapshot taken in a statement of its
+own, and that statement prints, so the `.answer` has to come back from a run.
+
+| case | what differs | what writing the patch needs |
+|---|---|---|
+| `_01_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/index_column/function_index/insert_select_07` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_1` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_3` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_5` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_06_5` | different rows | a wait, then the `.answer` re-recorded |
+| `_01_ReadCommitted/primary_key_column/basic_sql/update_select_04` | different rows | a wait, then the `.answer` re-recorded |
+| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_01_5` | different rows | a wait, then the `.answer` re-recorded |
+| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_02` | different rows | a wait, then the `.answer` re-recorded |
+| `_02_RepeatableRead/trigger/basic_sql/trigger_update_11` | the same lines, in another order | the engine's release order settled first — not in the case's text |
+| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_04_RepeatableRead_ReadCommitted/no_index_column/basic_sql/update_select_04` | different rows | a wait, then the `.answer` re-recorded |
+| `_04_RepeatableRead_ReadCommitted/partition_table/range/without_index/update_delete_07` | different rows | a wait, then the `.answer` re-recorded |
+| `_04_RepeatableRead_ReadCommitted/primary_key_column/basic_sql/update_select_13` | different rows | a wait, then the `.answer` re-recorded |
+| `_04_RepeatableRead_ReadCommitted/primary_key_column/multiple_pk/select_delete_01` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_05_ReadCommitted_RepeatableRead/partition_table/range/with_index/primary_key/delete_delete_01` | different rows | a wait, then the `.answer` re-recorded |
+| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | a different number of rows | a wait, then the `.answer` re-recorded |
+| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | a different number of rows | a wait, then the `.answer` re-recorded |
 
 `TESTKIT_ISOLATION_CTL` therefore stays off, but for a different reason than before — not until upstream moves,
 until the remaining answers are re-recorded and ADR-019's gate has been run on the patched corpus. The controller

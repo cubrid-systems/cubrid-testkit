@@ -217,43 +217,86 @@ Each of the six is an ordering statement, or an answer the corpus already has an
 | `_06_features/cbrd_22705_online_index_parallel/…/groupby/delete_select_06` | the same line, the same fix |
 | `_04_RepeatableRead_ReadCommitted/…/unique_with_key/update_insert_01_1_complex` | `.answer1` gets `public.` in front of its two class names |
 
-**The other twenty-two are not written, and the reason is the same for twenty-one of them.** Kind 3's fix is for
-the client to take its snapshot in a statement of its own, and a statement of its own prints — so the answer
-changes and has to be re-recorded from a run. A `.ctl` patched without its answer fails the case for a new reason,
-which is worse than leaving it. The twenty-second is `trigger_update_11`, whose two moved lines belong to clients
-that are blocked on each other: which the engine releases first is not settled by the case's text.
+**The other twenty-two are not written.** This section used to say the reason was the same for twenty-one of them —
+kind 3's fix is for the client to take its snapshot in a statement of its own, a statement of its own prints, so the
+answer changes and has to be re-recorded from a run; and that `trigger_update_11` was the exception, its two moved
+lines belonging to clients blocked on each other.
+
+**Measured on 2026-09-28, that is three groups and not two**, and the split is decided by the controller rather than
+by the cases: five want only a wait and no new answer, five are the kind 3 described above, and twelve cannot be
+expressed at all with the wait states `qactl` has. The next section has the measurement, the case list and why.
 
 
-### The 22 that are not written, by name
+### The 22 that are not written, by name — and what each one's patch needs
 
-Generated from the tables above minus the patch set, so it stays honest if either moves. `trigger_update_11` is the
-one whose fix is not decidable from the case's text; every other line needs its snapshot taken in a statement of its
-own, and that statement prints, so the `.answer` has to come back from a run.
+**Run 2026-09-28**, engine `11.5.0.2513-5f3a30d`, one slot, `testcase_retry_num=0`, three attempts, testkit's
+controller throughout. The case list is generated from the tables above minus the patch directory, so it moves when
+either does.
 
-| case | what differs | what writing the patch needs |
+They are not one kind, and the controller is what splits them. `qactl`'s own `WAIT_USAGE_FORMAT` gives four states:
+
+```
+command := wait until c<client ID> { blocked | unblocked | ready | finished };
+```
+
+Every one of them is about a client being **idle, lock-blocked, or done**. **There is no state meaning "has begun
+executing"**, and `rendezvous with` does not fill the gap because the client has to issue it, which a client inside a
+long statement cannot. That decides where "take the snapshot in a statement of its own" is expressible:
+
+- **REPEATABLE READ** — it is. The snapshot is the transaction's, so an earlier statement takes it and
+  `MC: wait until Cn ready;` pins it. The extra statement prints, so the answer has to be re-recorded from a run.
+- **READ COMMITTED** — it is not. The snapshot is the *statement's*, re-taken each time, and what has to be ordered is
+  the moment a statement starts. Nothing in the vocabulary says that. Re-recording the answer does not help: it would
+  only move which way the race has to fall.
+- **No sleeping statement at all** — these are the first kind, two statements with nothing between them. A wait orders
+  them and **the answer does not change**, which is why the six already carried could be written from the case's text.
+
+So of the 22: **5 are writable as they stand** (a missing wait), **5 need a run** (REPEATABLE READ), and
+**12 are not a corpus fix at all** — they need a way to say "this statement has started", which is a change to
+`qactl`, not to a case.
+
+| case | the snapshot | three attempts |
 |---|---|---|
-| `_01_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/index_column/function_index/insert_select_07` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_1` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_3` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_5` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_06_5` | different rows | a wait, then the `.answer` re-recorded |
-| `_01_ReadCommitted/primary_key_column/basic_sql/update_select_04` | different rows | a wait, then the `.answer` re-recorded |
-| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_01_5` | different rows | a wait, then the `.answer` re-recorded |
-| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_02` | different rows | a wait, then the `.answer` re-recorded |
-| `_02_RepeatableRead/trigger/basic_sql/trigger_update_11` | the same lines, in another order | the engine's release order settled first — not in the case's text |
-| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_04_RepeatableRead_ReadCommitted/no_index_column/basic_sql/update_select_04` | different rows | a wait, then the `.answer` re-recorded |
-| `_04_RepeatableRead_ReadCommitted/partition_table/range/without_index/update_delete_07` | different rows | a wait, then the `.answer` re-recorded |
-| `_04_RepeatableRead_ReadCommitted/primary_key_column/basic_sql/update_select_13` | different rows | a wait, then the `.answer` re-recorded |
-| `_04_RepeatableRead_ReadCommitted/primary_key_column/multiple_pk/select_delete_01` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_05_ReadCommitted_RepeatableRead/partition_table/range/with_index/primary_key/delete_delete_01` | different rows | a wait, then the `.answer` re-recorded |
-| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | a different number of rows | a wait, then the `.answer` re-recorded |
-| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | a different number of rows | a wait, then the `.answer` re-recorded |
+| **a missing wait** | | |
+| `_01_ReadCommitted/primary_key_column/basic_sql/update_select_04` | — | NOK NOK NOK |
+| `_02_RepeatableRead/trigger/basic_sql/trigger_update_11` | — | NOK NOK NOK |
+| `_04_RepeatableRead_ReadCommitted/no_index_column/basic_sql/update_select_04` | — | NOK NOK NOK |
+| `_04_RepeatableRead_ReadCommitted/partition_table/range/without_index/update_delete_07` | — | NOK NOK NOK |
+| `_05_ReadCommitted_RepeatableRead/partition_table/range/with_index/primary_key/delete_delete_01` | — | NOK NOK NOK |
+| **REPEATABLE READ snapshot** | | |
+| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_01_5` | C4,C5,C6 | NOK NOK NOK |
+| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_02` | C4,C5,C6 | NOK NOK NOK |
+| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | C1 | NOK NOK NOK |
+| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | C1 | NOK NOK NOK |
+| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | C1 | NOK NOK NOK |
+| **READ COMMITTED snapshot** | | |
+| `_01_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | C1 | NOK NOK NOK |
+| `_01_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | C1 | NOK OK NOK |
+| `_01_ReadCommitted/index_column/function_index/insert_select_07` | C1 | NOK NOK NOK |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05` | C4,C5,C6 | NOK NOK NOK |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_1` | C4,C5,C6 | NOK NOK NOK |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_3` | C4,C5,C6 | NOK NOK NOK |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_5` | C5,C6 | NOK NOK NOK |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_06_5` | C4,C5,C6 | OK NOK NOK |
+| `_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | C2 | NOK NOK NOK |
+| `_04_RepeatableRead_ReadCommitted/primary_key_column/basic_sql/update_select_13` | C2 | NOK NOK NOK |
+| `_04_RepeatableRead_ReadCommitted/primary_key_column/multiple_pk/select_delete_01` | C2 | NOK NOK NOK |
+| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | C2 | NOK NOK NOK |
+
+**Two of the 22 did not fail three times out of three**, so under ADR-018 rule 3 they are not runner differences on
+this measurement:
+
+| case | attempts |
+|---|---|
+| `_01_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | NOK **OK** NOK |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_06_5` | **OK** NOK NOK |
+
+This is **not** presented as a correction to the table above. That table was measured on a different engine, and this
+run could not use the same one: `~/.bash_profile` fixes `$CUBRID` for every script CTP sends, so the build under test
+here is `11.5.0.2513-5f3a30d` and not the isolation tree's `11.5.0.2574-f1ae86f`
+([configuration](../../category/isolation/04-configuration.md#two-ways-the-environment-is-wrong-without-saying-so)).
+Two cases moving between builds is exactly what ADR-018 rule 3 exists to catch, and settling which it is means running
+both builds, which has not been done.
 
 `TESTKIT_ISOLATION_CTL` therefore stays off, but for a different reason than before — not until upstream moves,
 until the remaining answers are re-recorded and ADR-019's gate has been run on the patched corpus. The controller

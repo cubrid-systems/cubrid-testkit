@@ -66,3 +66,27 @@ slot's overlay.
 | `TESTKIT_SLOT_ROOT` | where slots' writes land; `/var/tmp/testkit-slots` otherwise. Put it on the fastest disk |
 | `TESTKIT_SLOT_VOLATILE=1` | mounts slot overlays volatile: syncs on them return at once. The layers are thrown away at the end anyway |
 | `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` | as for CTP; keep `CUBRID_DATABASES` under `$CUBRID`, where a slot's install overlay covers it |
+
+### Two ways the environment is wrong without saying so
+
+Measured on 2026-09-28, both costing a run each.
+
+**Only `CTP_HOME` survives the profile.** Every script runs behind
+`. ~/.bash_profile` ([`exec.Profile`](../../../internal/exec/exec.go)), which saves `CTP_HOME` and puts the caller's
+back afterwards — and does that for `CTP_HOME` alone. So a profile that exports `CUBRID` wins over the one you
+exported, while testkit's own side overlays the `$CUBRID` **it** was given. When the two differ the slot holds one
+install and the cases run against another, and what the run says is
+
+```
+ERROR! attempting to restart the database:
+ <ctlpath>/qablocked ctldb did not connect
+```
+
+which reads like a database fault and is not one. Export the `CUBRID` the profile exports, or change the profile.
+
+**An install with `ha_mode=on` cannot run isolation.** `prepare.sh` prints `The server was configured for HA.` and
+`ctldb` never comes up — the same `did not connect` line, from a different cause. This is worth knowing because a
+machine that has run HA has such an install, and it is usually the one `$HOME/CUBRID` points at. It does not have to
+be edited: `default.cubrid.ha_mode=off` in the conf is written into the **slot's** copy at DEPLOY, and the install
+on disk is untouched.
+

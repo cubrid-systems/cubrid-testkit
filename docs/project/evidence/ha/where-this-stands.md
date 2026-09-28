@@ -337,10 +337,10 @@ run with which.** A category is how a test is written, not what it costs, and th
 
 | | |
 |---|---|
-| **`sql` does not run on this machine** | after the conf fix it fails compiling CQT's `TestkitExecutor` (`JunitXmlWriter` symbol). A blocker for any `sql` work here and untouched |
-| **`MembersOf` counts a set by name, not liveness** | destroy leaves the describe artifact, so a set whose pairs were removed by hand still reports N members and `reuse` then runs against nothing. It fails loudly, but the message hides the cause |
-| ADR-013 gate | `shell` over the whole corpus. Phase 3's exit condition, still open |
-| ADR-019 | isolation controller — 27 cases whose answers record `qactl`'s ordering. Does not pass |
+| **`sql` does not run on this machine** — *diagnosed 2026-09-26* | not a broken CQT build. `/data/cub_sys/cubrid-testtools` sits on branch `feature/ai_support`, and `JunitXmlWriter` arrived in `upstream/develop` (CUBRIDQA-1406, #769). **A fetch does not fix it.** The run now says so. Four other CTP trees exist on this machine; `sql` has never been run here |
+| ~~`MembersOf` counts a set by name~~ | **fixed 2026-09-26.** Reuse requires liveness, and both ways a set can be wrong reach the rebuild — the first fix did not, and advertised a way out that was unreachable |
+| ADR-013 gate | `shell` over the whole corpus. **30 to 100 hours of machine time** by the harness's own estimate, which is why `evidence/compare/` exists: shard by shard, resumable, a completed shard skipped. Preparing it means *starting* it, not finishing it in a sitting |
+| ADR-019 | isolation controller — **27** paths fail the gate ([isolation-corpus-races.md](../isolation-corpus-races.md)): 25 of the 28 investigated at four slots, and 2 more that only appeared at eight and fourteen. **Fifteen are carried as patches in `cubrid-testkit-patches/isolation`** — ten of them written 2026-09-28 from a run, each passing five attempts under both controllers. **The other 12 are all READ COMMITTED and cannot be written as a case change**: the snapshot is the statement's, and `qactl`'s wait states have nothing for "has started". Re-recording the answer only moves the race. What unblocks them is a change to the controller |
 | two-machine baseline | ADR-022 Consequence 3 still calls it the next measurement, and `hareplsuite` is sandbox-only (`harepl.go` refuses an empty `sandbox_cluster`) |
 | csb placement + netns backend | only if machine separation is chosen. The design is in [pairs-across-machines.md](pairs-across-machines.md) and §8 of the design note |
 | the slot-provider seam | `internal/contain` is the only implementation and there is no seam. Everything else in the design note waits on it |

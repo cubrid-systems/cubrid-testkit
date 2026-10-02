@@ -1,0 +1,12 @@
+{
+  "id": "lib.backupdb", "version": 1, "owner": "hgryoo", "grade": "B", "module": "lib",
+  "topology": "single",
+  "conf": {},
+  "fixture": { "name": "narrow_1m", "version": 1 },
+  "driver": "utility",
+  "client": { "argv": ["cubrid", "backupdb", "-z", "perf_narrow_1m"], "ops": 1 },
+  "op": "run", "metric": "elapsed_s",
+  "cold": false, "warm_s": 0, "warmup": 1, "repeats": 3, "budget_s": 300, "tolerance": 0.05,
+  "counters": ["server.io_read_bytes"],
+  "background": "keep"
+}

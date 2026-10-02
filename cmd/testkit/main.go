@@ -32,6 +32,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/ctl"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
+	"github.com/cubrid-systems/cubrid-testkit/internal/perf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
 	"github.com/cubrid-systems/cubrid-testkit/internal/runner"
@@ -79,6 +80,13 @@ func main() {
 	// why it goes here rather than through run().
 	if len(os.Args) > 1 && os.Args[1] == "check-cases" {
 		os.Exit(checkCasesCmd(os.Args[2:]))
+	}
+	// perf is the weekly regression runner (ADR-EXT-011): a new entry point
+	// beside the frozen task names. validate and list read manifests and start
+	// nothing, and a session drives clusters through csb rather than running a
+	// corpus here, so it goes before containment and ignores TESTKIT_CONTAIN.
+	if len(os.Args) > 1 && os.Args[1] == "perf" {
+		os.Exit(perf.Main(os.Args[2:], os.Stdout, os.Stderr))
 	}
 
 	// Containment happens before anything else or it happens to a process that

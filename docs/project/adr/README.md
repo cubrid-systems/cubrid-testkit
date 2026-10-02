@@ -46,6 +46,6 @@ ROADMAP 초안(§4·§5)은 `ADR-005 = 공존 유지보수 정책` / `ADR-006 = 
 
 ## §6a 확장 영역 (ADR-EXT-NNN)
 
-번호 공간이 분리되어 있다. 인덱스는 [`../extensions/README.md`](../../category/extensions/README.md) 참조. **ADR-EXT-003 (SQLancer/E3)은 사용자 결정으로 동시 트랙 승격 — 작성 중.** 나머지는 incubating 트리거 대기.
+번호 공간이 분리되어 있다. 인덱스는 [`../extensions/README.md`](../../category/extensions/README.md) 참조. **ADR-EXT-003 (SQLancer/E3)은 사용자 결정으로 동시 트랙 승격 — 작성 중.** **[ADR-EXT-011](ADR-EXT-011-perf-runner.md) (성능 회귀 러너/E11)은 2026-10-02 초안 — 사용자 검토.** 나머지는 incubating 트리거 대기.
 
 **전제:** ADR-001 Consequence 4 — 모든 §6a 확장은 *외부 도구 subprocess 구동 + 결과 아티팩트 ingest* 형태로 통합하고, dialect 지식은 코드가 아니라 **데이터(카탈로그 파일)** 로 공유한다.

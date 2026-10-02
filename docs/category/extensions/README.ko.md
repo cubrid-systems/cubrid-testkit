@@ -22,6 +22,7 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 | (E8) | 8 | Hybrid CI 통합 (Materialize 패턴) | 메타 | E2~E7·E9 중 둘 이상 채택 | (TBD — 카탈로그 항목 외) |
 | E9 | 5 확장 × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | 조건부 | **E5 선행** + SERVER_MODE in-process 기동 + **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.ko.md) |
 | E10 | 보조 설비 | XASL fixture 생산·보관 (버전 식별 포함) | 즉시 후보 | — (엔진 변경 없음) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.ko.md) |
+| E11 | 측정 | 주간 성능 회귀 러너 (`testkit perf`) | **진행 중** | cluster-sandbox #8~#12 (열림), 허브 | [E11-perf-runner/](E11-perf-runner/requirements.ko.md) · [ADR-EXT-011](../../project/adr/ADR-EXT-011-perf-runner.md) · Spec·Design 은 cubrid_cv `plan/perf_regression/` |
 
 **번호 공간 주의.** `E8` 은 축 8 *Hybrid CI 통합* 메타 자리로 예약되어 있다. E9 가 E8 을 건너뛴 것은 결번이 아니라 이 예약 때문이다.
 
@@ -29,7 +30,7 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 
 ## E-번호가 아닌 것 — `extensions/cluster-sandbox`
 
-`extensions/` 아래 submodule 이지만 **카탈로그의 항목이 아니다.** E1~E10 은 전부
+`extensions/` 아래 submodule 이지만 **카탈로그의 항목이 아니다.** E1~E11 은 전부
 *테스트 능력* — 새 오라클, 새 케이스 포맷, 새 생성기 — 이고, `cubrid-cluster-sandbox`
 는 **환경 제공자**다. 무엇을 검증하는지가 아니라 어디서 도는지를 바꾼다.
 
@@ -98,6 +99,7 @@ extensions/E{N}-{name}/
 | (ADR-EXT-008) | E8 (Hybrid CI) 정식 진입 | *예약* — 축 8 메타 항목 자리 |
 | ADR-EXT-009 | E9 incubating 정식 진입 | 입력 IR + **스케줄 표현** + 참가자 수 상한 + corpus 위치 + 본 repo 책임 경계(rendezvous 핸들러) |
 | ADR-EXT-010 | E10 incubating 정식 진입 | 생산 경로(csql/CCI/JDBC) + 픽스처 포맷 + 버전 식별 방식 + 보관 위치 |
+| ADR-EXT-011 | ~~trigger~~ **초안 2026-10-02** | 동결 task 옆의 새 진입점(NF, 격리 없음) + 파서는 testkit·데이터는 engine-suite(C-004 를 이 축에 대해 닫음) + 닫힌 스키마 + 결과는 conbench 용 engine-suite 형식 |
 
 ---
 

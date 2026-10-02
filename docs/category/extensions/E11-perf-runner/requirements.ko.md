@@ -55,7 +55,7 @@ E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 상한과 함께 표로 낸다.
 
 거부 목록은 Spec §7.2 의 것이다: 모르는 키, 빠진 키, 틀린 타입, 디렉터리와 다른 id, 수집 층 목록
-밖의 카운터, `repeats < 3`, `warmup < 1`, `tolerance ≤ 0`, 다른 드라이버 모양의 client,
+밖의 카운터(statdump 이름은 엔진 자신의 표 — `statdump_names.go`, develop `5f3a30d` 기준 234개 — 로 확인한다), `repeats < 3`, `warmup < 1`, `tolerance ≤ 0`, 다른 드라이버 모양의 client,
 `warm_s = 0` 인 restore_snapshot, suite 에 없거나 버전이 다른 픽스처. `branches.conf` 는 모르는 키,
 `owner=` 없는 줄, `owner/repo` 가 아닌 `repo=`, 날짜가 아닌 날짜, 맞을 수 없는 glob, 두 번 등록된
 브랜치를 거부한다. `perf.conf` 도 닫힌 키 집합이다.

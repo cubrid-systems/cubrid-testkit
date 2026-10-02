@@ -27,29 +27,33 @@ import (
 // schema, so a key the table does not have is refused by name rather than
 // carried as a silent typo.
 type Case struct {
-	ID         string            `json:"id"`
-	Version    int               `json:"version"`
-	Owner      string            `json:"owner"`
-	Grade      string            `json:"grade"`
-	Module     string            `json:"module"`
-	Topology   string            `json:"topology"`
-	Conf       map[string]string `json:"conf"`
-	Fixture    FixtureRef        `json:"fixture"`
-	Driver     string            `json:"driver"`
-	Client     json.RawMessage   `json:"client"`
-	Op         string            `json:"op"`
-	Metric     string            `json:"metric"`
-	Cold       bool              `json:"cold"`
-	WarmS      int               `json:"warm_s"`
-	Warmup     int               `json:"warmup"`
-	Repeats    int               `json:"repeats"`
-	BudgetS    int               `json:"budget_s"`
-	Tolerance  float64           `json:"tolerance"`
-	Counters   []string          `json:"counters"`
-	Background string            `json:"background"`
-	Notes      string            `json:"notes,omitempty"`
+	ID         string                     `json:"id"`
+	Version    int                        `json:"version"`
+	Owner      string                     `json:"owner"`
+	Grade      string                     `json:"grade"`
+	Module     string                     `json:"module"`
+	Topology   string                     `json:"topology"`
+	RawConf    map[string]json.RawMessage `json:"conf"`
+	Fixture    FixtureRef                 `json:"fixture"`
+	Driver     string                     `json:"driver"`
+	Client     json.RawMessage            `json:"client"`
+	Op         string                     `json:"op"`
+	Metric     string                     `json:"metric"`
+	Cold       bool                       `json:"cold"`
+	WarmS      int                        `json:"warm_s"`
+	Warmup     int                        `json:"warmup"`
+	Repeats    int                        `json:"repeats"`
+	BudgetS    int                        `json:"budget_s"`
+	Tolerance  float64                    `json:"tolerance"`
+	Counters   []string                   `json:"counters"`
+	Background string                     `json:"background"`
+	Notes      string                     `json:"notes,omitempty"`
 
-	// Dir is where the manifest was read from; the id has to agree with it.
+	// Conf is the cubrid.conf overrides as the file will carry them: a JSON
+	// string, number or true/false, each written out as text.
+	Conf map[string]string `json:"-"`
+	// Dir is where the manifest was read from, absolute; the id has to agree
+	// with it.
 	Dir string `json:"-"`
 	// Exactly one of these is set, by Driver.
 	JDBC    *JDBCClient    `json:"-"`
@@ -87,9 +91,16 @@ type CDCClient struct {
 }
 
 // MaxPassS is the longest a case can take on one pair when every pass runs to
-// its budget: warmup and measured passes, on both builds. The session compares
-// it with what is left of the weekend before starting the case (Design §5.9).
-func (c *Case) MaxPassS() int { return (c.Warmup + c.Repeats) * 2 * c.BudgetS }
+// its budget, for an interleave mode: in case mode warmup and measured passes
+// on both builds; in round mode every round is one warmup and one measured
+// pass, repeats times, on both (Design §5.9). The session compares it with
+// what is left of the weekend before starting the case.
+func (c *Case) MaxPassS(interleave string) int {
+	if interleave == "round" {
+		return (1 + 1) * c.Repeats * 2 * c.BudgetS
+	}
+	return (c.Warmup + c.Repeats) * 2 * c.BudgetS
+}
 
 // Fixture is one fixture.json: a database the cases assume, built once per
 // build at session start and reset before every pass.
@@ -120,13 +131,13 @@ var (
 // its working set before measuring -- warm_s = 0 is refused for it.
 const ResetRestoreSnapshot = "restore_snapshot"
 
-// The closed counter list is the collect layer's (notes/collect_layer.md):
-// statdump counters by their own name, the disk and network counters, and
-// the per-process L0 counters qualified by the role they are read from. A name
-// outside it used to produce a column of nulls in sandbox scenarios; here it
-// is refused before anything runs.
+// The closed counter list is the collect layer's (notes/collect_layer.md): a
+// statdump statistic by the engine's own name (statdump_names.go), the disk
+// and network counters, and the per-process L0 counters qualified by the
+// role they are read from -- the four roles counters.json carries (Design
+// §4.2). A name outside it used to produce a column of nulls in sandbox
+// scenarios; here it is refused before anything runs.
 var (
-	statdumpRe   = regexp.MustCompile(`^Num_[A-Za-z0-9_]+$`)
 	roleCounter  = regexp.MustCompile(`^(server|broker|cas|client)\.([a-z_]+)$`)
 	bareCounters = map[string]bool{
 		"dev_reads": true, "dev_writes": true, "dev_flushes": true, "dev_busy": true,
@@ -141,7 +152,7 @@ var (
 
 // KnownCounter says whether a counters[] entry is on the closed list.
 func KnownCounter(name string) bool {
-	if bareCounters[name] || statdumpRe.MatchString(name) {
+	if bareCounters[name] || statdumpNames[name] {
 		return true
 	}
 	if m := roleCounter.FindStringSubmatch(name); m != nil {
@@ -155,11 +166,15 @@ func KnownCounter(name string) bool {
 type Problems struct {
 	Path string
 	List []string
+
+	cause error // the read error, when the file could not be read at all
 }
 
 func (p *Problems) Error() string {
 	return p.Path + ": " + strings.Join(p.List, "; ")
 }
+
+func (p *Problems) Unwrap() error { return p.cause }
 
 func (p *Problems) add(format string, args ...any) {
 	p.List = append(p.List, fmt.Sprintf(format, args...))
@@ -180,7 +195,13 @@ var caseKeys = []string{"id", "version", "owner", "grade", "module", "topology",
 // Spec lists for validate. The fixture it names is looked up in the suite the
 // directory sits in, because the one rule that spans both files (a restored
 // snapshot needs warming) cannot be checked from either alone.
-func ReadCase(dir string) (*Case, error) {
+func ReadCase(dir string) (*Case, error) { return readCase(dir, nil) }
+
+// readCase is ReadCase with the suite's fixtures already read: at suite level
+// a fixture's own problems are reported once, by the fixture, and a case that
+// uses it is not a second report of the same thing.
+func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
+	dir = absolute(dir)
 	path := filepath.Join(dir, "case.json")
 	p := &Problems{Path: path}
 	raw, err := os.ReadFile(path)
@@ -188,7 +209,7 @@ func ReadCase(dir string) (*Case, error) {
 		p.add("%v", err)
 		return nil, p
 	}
-	if _, ok := presence(p, raw, caseKeys, []string{"notes"}); !ok {
+	if !presence(p, raw, "", caseKeys, []string{"notes"}) {
 		return nil, p
 	}
 	var c Case
@@ -214,6 +235,10 @@ func ReadCase(dir string) (*Case, error) {
 	oneOf(p, "grade", c.Grade, Grades)
 	oneOf(p, "module", c.Module, Modules)
 	oneOf(p, "topology", c.Topology, Topologies)
+	c.Conf = confText(p, c.RawConf)
+	if sub, ok := rawKey(raw, "fixture"); ok {
+		presence(p, sub, "fixture.", []string{"name", "version"}, nil)
+	}
 	if c.Fixture.Name == "" || c.Fixture.Version < 1 {
 		p.add("fixture needs a name and a version of 1 or more, got %+v", c.Fixture)
 	}
@@ -244,14 +269,30 @@ func ReadCase(dir string) (*Case, error) {
 	oneOf(p, "background", c.Background, Backgrounds)
 
 	// The fixture's rules that need the case: version agreement, and warming
-	// after a restored snapshot.
+	// after a restored snapshot. A fixture with problems of its own is said
+	// to have them -- "ok" from a case whose fixture cannot load would be a
+	// session stopping on Saturday night.
 	if c.Fixture.Name != "" {
 		root := filepath.Dir(filepath.Dir(filepath.Dir(dir)))
 		fdir := filepath.Join(root, "fixtures", c.Fixture.Name)
-		if _, err := os.Stat(filepath.Join(fdir, "fixture.json")); err != nil {
-			p.add("fixture %q is not in %s", c.Fixture.Name, filepath.Join(root, "fixtures"))
-		} else if f, err := ReadFixture(fdir); err == nil {
+		switch f, known := suite[c.Fixture.Name]; {
+		case suite != nil && known:
 			checkFixtureUse(p, &c, f)
+		case suite != nil:
+			p.add("fixture %q is not in %s", c.Fixture.Name, filepath.Join(root, "fixtures"))
+		default:
+			f, err := ReadFixture(fdir)
+			switch {
+			case f == nil && errors.Is(err, os.ErrNotExist):
+				p.add("fixture %q is not in %s", c.Fixture.Name, filepath.Join(root, "fixtures"))
+			case f == nil:
+				p.add("fixture %q is not readable: %v", c.Fixture.Name, firstProblem(err))
+			default:
+				if err != nil {
+					p.add("fixture %s has problems of its own; validate %s", c.Fixture.Name, fdir)
+				}
+				checkFixtureUse(p, &c, f)
+			}
 		}
 	}
 	return &c, p.err()
@@ -266,13 +307,43 @@ func checkFixtureUse(p *Problems, c *Case, f *Fixture) {
 	}
 }
 
+// confText turns the conf object into the text cubrid.conf will carry. A
+// string, a number or true/false each have one spelling; an object, an array
+// or null do not belong in a parameter value.
+func confText(p *Problems, raw map[string]json.RawMessage) map[string]string {
+	out := map[string]string{}
+	keys := make([]string, 0, len(raw))
+	for k := range raw {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := bytes.TrimSpace(raw[k])
+		var s string
+		switch {
+		case len(v) == 0 || v[0] == '{' || v[0] == '[' || string(v) == "null":
+			p.add("conf.%s must be a string, a number or true/false, got %s", k, v)
+			continue
+		case v[0] == '"':
+			if err := json.Unmarshal(v, &s); err != nil {
+				p.add("conf.%s: %v", k, err)
+				continue
+			}
+		default:
+			s = string(v)
+		}
+		out[k] = s
+	}
+	return out
+}
+
 func readClient(p *Problems, c *Case) {
-	if len(c.Client) == 0 {
+	if len(bytes.TrimSpace(c.Client)) == 0 || string(bytes.TrimSpace(c.Client)) == "null" {
 		return
 	}
 	switch c.Driver {
 	case "jdbc":
-		if _, ok := presence(p, c.Client, []string{"main", "args"}, nil); !ok {
+		if !presence(p, c.Client, "client.", []string{"main", "args"}, nil) {
 			return
 		}
 		var j JDBCClient
@@ -285,7 +356,7 @@ func readClient(p *Problems, c *Case) {
 		}
 		c.JDBC = &j
 	case "utility":
-		if _, ok := presence(p, c.Client, []string{"argv", "ops"}, nil); !ok {
+		if !presence(p, c.Client, "client.", []string{"argv", "ops"}, nil) {
 			return
 		}
 		var u UtilityClient
@@ -301,7 +372,7 @@ func readClient(p *Problems, c *Case) {
 		}
 		c.Utility = &u
 	case "cdc-api":
-		if _, ok := presence(p, c.Client, []string{"bin", "args"}, nil); !ok {
+		if !presence(p, c.Client, "client.", []string{"bin", "args"}, nil) {
 			return
 		}
 		var d CDCClient
@@ -320,16 +391,19 @@ var fixtureKeys = []string{"name", "version", "rows", "schema_sql", "load", "res
 
 // ReadFixture reads fixtures/<name>/fixture.json. The files it names have to
 // be beside it: a load script that is not there fails at session start, after
-// two clusters were built for it.
+// two clusters were built for it. The fixture is returned with its problems
+// when it decoded, so a case can still apply the rules that need it.
 func ReadFixture(dir string) (*Fixture, error) {
+	dir = absolute(dir)
 	path := filepath.Join(dir, "fixture.json")
 	p := &Problems{Path: path}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		p.add("%v", err)
+		p.cause = err
 		return nil, p
 	}
-	if _, ok := presence(p, raw, fixtureKeys, nil); !ok {
+	if !presence(p, raw, "", fixtureKeys, nil) {
 		return nil, p
 	}
 	var f Fixture
@@ -344,8 +418,8 @@ func ReadFixture(dir string) (*Fixture, error) {
 	if f.Version < 1 {
 		p.add("version must be 1 or more, got %d", f.Version)
 	}
-	if f.Rows < 1 {
-		p.add("rows must be 1 or more, got %d", f.Rows)
+	if f.Rows < 0 {
+		p.add("rows must be 0 or more, got %d", f.Rows)
 	}
 	for _, kv := range []struct{ key, file string }{{"schema_sql", f.SchemaSQL}, {"load", f.Load}} {
 		if kv.file == "" {
@@ -367,33 +441,58 @@ type Suite struct {
 }
 
 // LoadSuite reads every manifest under root and returns every problem found,
-// joined, so one validate run names them all.
+// joined, so one validate run names them all. The suite comes back with what
+// did read, beside the error, so list can still show it.
 func LoadSuite(root string) (*Suite, error) {
+	root = absolute(root)
 	s := &Suite{Root: root, Fixtures: map[string]*Fixture{}}
 	var errs []error
-	if st, err := os.Stat(filepath.Join(root, "cases")); err != nil || !st.IsDir() {
+	modules, err := os.ReadDir(filepath.Join(root, "cases"))
+	if err != nil {
 		return nil, fmt.Errorf("%s: no cases/ directory; is this benchmarks/regression?", root)
 	}
-	fixtures, _ := filepath.Glob(filepath.Join(root, "fixtures", "*", "fixture.json"))
-	for _, m := range fixtures {
-		f, err := ReadFixture(filepath.Dir(m))
-		if err != nil {
-			errs = append(errs, err)
-			continue
+	if fixtures, err := os.ReadDir(filepath.Join(root, "fixtures")); err == nil {
+		for _, e := range fixtures {
+			if !e.IsDir() {
+				continue
+			}
+			dir := filepath.Join(root, "fixtures", e.Name())
+			f, err := ReadFixture(dir)
+			if err != nil {
+				errs = append(errs, err)
+			}
+			if f != nil {
+				s.Fixtures[f.Name] = f
+			}
 		}
-		s.Fixtures[f.Name] = f
 	}
-	cases, _ := filepath.Glob(filepath.Join(root, "cases", "*", "*", "case.json"))
-	for _, m := range cases {
-		c, err := ReadCase(filepath.Dir(m))
-		if err != nil {
-			errs = append(errs, err)
+	for _, m := range modules {
+		mdir := filepath.Join(root, "cases", m.Name())
+		if !m.IsDir() {
+			if m.Name() == "case.json" {
+				errs = append(errs, fmt.Errorf("%s: a case.json belongs in cases/<module>/<name>/, not here", mdir))
+			}
 			continue
 		}
-		s.Cases = append(s.Cases, c)
+		names, _ := os.ReadDir(mdir)
+		for _, n := range names {
+			dir := filepath.Join(mdir, n.Name())
+			if !n.IsDir() {
+				if n.Name() == "case.json" {
+					errs = append(errs, fmt.Errorf("%s: a case.json belongs in cases/<module>/<name>/, not here", dir))
+				}
+				continue
+			}
+			c, err := readCase(dir, s.Fixtures)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			s.Cases = append(s.Cases, c)
+		}
 	}
 	sort.Slice(s.Cases, func(i, j int) bool { return s.Cases[i].ID < s.Cases[j].ID })
-	if len(cases) == 0 {
+	if len(s.Cases) == 0 && len(errs) == 0 {
 		errs = append(errs, fmt.Errorf("%s: no cases/<module>/<name>/case.json", root))
 	}
 	return s, errors.Join(errs...)
@@ -411,19 +510,20 @@ func (s *Suite) Case(id string) *Case {
 
 // presence decodes the key set alone and reports what is missing and what is
 // unknown, every one by name, before the typed decode has a chance to say
-// only "unknown field" for the first of them.
-func presence(p *Problems, raw []byte, required, optional []string) (map[string]json.RawMessage, bool) {
+// only "unknown field" for the first of them. A key set to null is missing:
+// the value is not there either way.
+func presence(p *Problems, raw []byte, at string, required, optional []string) bool {
 	var keys map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &keys); err != nil {
-		p.add("not a JSON object: %v", err)
-		return nil, false
+	if err := json.Unmarshal(raw, &keys); err != nil || keys == nil {
+		p.add("%snot a JSON object", at)
+		return false
 	}
 	known := map[string]bool{}
 	var missing, unknown []string
 	for _, k := range required {
 		known[k] = true
-		if _, ok := keys[k]; !ok {
-			missing = append(missing, k)
+		if v, ok := keys[k]; !ok || string(bytes.TrimSpace(v)) == "null" {
+			missing = append(missing, at+k)
 		}
 	}
 	for _, k := range optional {
@@ -431,7 +531,7 @@ func presence(p *Problems, raw []byte, required, optional []string) (map[string]
 	}
 	for k := range keys {
 		if !known[k] {
-			unknown = append(unknown, k)
+			unknown = append(unknown, at+k)
 		}
 	}
 	sort.Strings(unknown)
@@ -441,7 +541,16 @@ func presence(p *Problems, raw []byte, required, optional []string) (map[string]
 	if len(unknown) > 0 {
 		p.add("unknown key %s", strings.Join(unknown, ", "))
 	}
-	return keys, len(missing) == 0 && len(unknown) == 0
+	return len(missing) == 0 && len(unknown) == 0
+}
+
+func rawKey(raw []byte, key string) (json.RawMessage, bool) {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(raw, &keys) != nil {
+		return nil, false
+	}
+	v, ok := keys[key]
+	return v, ok && string(bytes.TrimSpace(v)) != "null"
 }
 
 // strict decodes with unknown fields refused and a type error named by field.
@@ -465,4 +574,21 @@ func oneOf(p *Problems, key, got string, allowed []string) {
 		}
 	}
 	p.add("%s %q is not one of %s", key, got, strings.Join(allowed, ", "))
+}
+
+// absolute is the directory as the rules need it: without the trailing slash
+// tab-completion adds, and with the parents a relative "." does not have.
+func absolute(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return filepath.Clean(dir)
+}
+
+func firstProblem(err error) string {
+	var p *Problems
+	if errors.As(err, &p) && len(p.List) > 0 {
+		return p.List[0]
+	}
+	return err.Error()
 }

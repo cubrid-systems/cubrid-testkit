@@ -1,6 +1,8 @@
 package perf
 
 import (
+	"bufio"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
@@ -74,12 +76,16 @@ var (
 // which is the loader's contract and not something this file changes.
 func ReadConf(file string) (*Conf, error) {
 	p := &Problems{Path: file}
-	home := &conf.Home{Path: os.Getenv("CTP_HOME")}
+	home, err := conf.FindHome()
+	if err != nil {
+		home = &conf.Home{}
+	}
 	cfg, err := home.Load(file)
 	if err != nil {
 		p.add("%v", err)
 		return nil, p
 	}
+	duplicateKeys(p, file)
 	c := &Conf{Path: file, BranchesMax: 3}
 
 	known := map[string]bool{}
@@ -91,24 +97,33 @@ func ReadConf(file string) (*Conf, error) {
 			p.add("missing %s", k)
 		}
 	}
+	// A pair that could not be read is remembered, so its overlap is not
+	// also reported as having no pair.
+	broken := map[string]bool{}
 	for _, k := range cfg.Keys() {
 		v := strings.TrimSpace(cfg.GetOr(k, ""))
 		switch {
 		case strings.HasPrefix(k, "pair."):
+			name := strings.TrimPrefix(k, "pair.")
 			target, ref, ok := strings.Cut(v, ";")
 			target, ref = strings.TrimSpace(target), strings.TrimSpace(ref)
-			if !ok || target == "" || ref == "" || strings.Contains(ref, ";") {
-				p.add("%s wants \"<target> ; <reference>\", got %q", k, v)
+			if name == "" {
+				p.add("pair. has no name")
 				continue
 			}
-			c.Pairs = append(c.Pairs, Pair{Name: strings.TrimPrefix(k, "pair."), Target: target, Reference: ref})
+			if !ok || target == "" || ref == "" || strings.Contains(ref, ";") {
+				p.add("%s wants \"<target> ; <reference>\", got %q", k, v)
+				broken[name] = true
+				continue
+			}
+			c.Pairs = append(c.Pairs, Pair{Name: name, Target: target, Reference: ref})
 		case strings.HasPrefix(k, "overlap."):
 			// handled after the pairs, whatever order the file has them in
 		case !known[k]:
 			p.add("unknown key %s", k)
 		}
 	}
-	if len(c.Pairs) == 0 {
+	if len(c.Pairs) == 0 && len(broken) == 0 {
 		p.add("no pair.<name> = <target> ; <reference>; a session has nothing to compare")
 	}
 	for _, k := range cfg.Keys() {
@@ -118,6 +133,7 @@ func ReadConf(file string) (*Conf, error) {
 		name, v := strings.TrimPrefix(k, "overlap."), strings.TrimSpace(cfg.GetOr(k, ""))
 		i := indexPair(c.Pairs, name)
 		switch {
+		case broken[name]:
 		case i < 0:
 			p.add("%s has no pair.%s to overlap", k, name)
 		case v == "":
@@ -144,12 +160,12 @@ func ReadConf(file string) (*Conf, error) {
 	c.ReportWebhookFormat = cfg.GetOr("report.webhook_format", "")
 	c.ConbenchURL = cfg.GetOr("conbench.url", "")
 
-	c.BranchesMax = intAtLeast(p, cfg, "branches.max", 3, 1)
+	c.BranchesMax = intAtLeast(p, cfg, "branches.max", 3, 0)
 	c.SessionBudgetS = intAtLeast(p, cfg, "session_budget_s", 0, 1)
 	c.DiskMinGB = intAtLeast(p, cfg, "disk_min_gb", 0, 0)
 	if v, ok := cfg.Get("canary_tolerance"); ok {
 		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		if err != nil || !(f > 0) {
+		if err != nil || math.IsInf(f, 0) || math.IsNaN(f) || !(f > 0) {
 			p.add("canary_tolerance must be a number above 0, got %q", v)
 		}
 		c.CanaryTolerance = f
@@ -169,6 +185,15 @@ func ReadConf(file string) (*Conf, error) {
 	if c.ReportMode != "" {
 		oneOf(p, "report.mode", c.ReportMode, ReportModes)
 	}
+	// FR-25: team mode sends the mail and posts to the channel, so both have
+	// to be there before the session that would send them.
+	if c.ReportMode == "team" {
+		for _, kv := range []struct{ key, v string }{{"report.mail", c.ReportMail}, {"report.webhook", c.ReportWebhook}} {
+			if kv.v == "" {
+				p.add("report.mode is team and %s is not set", kv.key)
+			}
+		}
+	}
 	if c.MemoryCap != "" && !memoryCapRe.MatchString(c.MemoryCap) {
 		p.add("memory_cap wants a size like 24G, got %q", c.MemoryCap)
 	}
@@ -186,6 +211,38 @@ func ReadConf(file string) (*Conf, error) {
 		p.add("report.webhook is set and report.webhook_format is not")
 	}
 	return c, p.err()
+}
+
+// duplicateKeys reads the file once more as lines, because the loader keeps
+// the last value of a repeated key and says nothing -- and a second
+// pair.develop that silently replaces the first is a session comparing the
+// wrong builds. branches.conf refuses a duplicate; so does this.
+func duplicateKeys(p *Problems, file string) {
+	f, err := os.Open(file)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	first := map[string]int{}
+	sc := bufio.NewScanner(f)
+	continued := false
+	for n := 1; sc.Scan(); n++ {
+		line := strings.TrimLeft(sc.Text(), " \t\f")
+		if continued {
+			continued = strings.HasSuffix(line, `\`)
+			continue
+		}
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
+			continue
+		}
+		continued = strings.HasSuffix(line, `\`)
+		key := strings.TrimSpace(line[:strings.IndexAny(line+"=", "=:")])
+		if prev, dup := first[key]; dup {
+			p.add("%s appears twice, on line %d and line %d; the second would win in silence", key, prev, n)
+			continue
+		}
+		first[key] = n
+	}
 }
 
 func indexPair(pairs []Pair, name string) int {

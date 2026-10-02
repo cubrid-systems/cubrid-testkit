@@ -28,7 +28,8 @@ names every problem; exit 2 when there is one. list prints the suite's cases.
 session and run are not in this build yet (Design §12, M2).`
 
 // Main is the perf entry point: testkit perf <verb> ..., routed before
-// containment because none of this is a run.
+// containment because none of this is a run. Measurements and tables go to
+// stdout; everything said about the run goes to stderr (Spec §7.1).
 func Main(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage)
@@ -74,9 +75,9 @@ func validate(args []string, stdout, stderr io.Writer) int {
 	case filepath.Base(target) == "fixture.json":
 		what, err = "fixture", first(ReadFixture(filepath.Dir(target)))
 	case filepath.Base(target) == "branches.conf":
-		what, err = "branches", validateBranches(target, stdout)
+		what, err = "branches", validateBranches(target, stderr)
 	case strings.HasSuffix(target, ".conf"):
-		what, err = "conf", validateConf(target, stdout)
+		what, err = "conf", validateConf(target, stderr)
 	default:
 		fmt.Fprintf(stderr, "testkit perf validate: %s is not a case, a fixture, a suite, branches.conf or a .conf\n", target)
 		return ExitRefused
@@ -91,14 +92,14 @@ func validate(args []string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-func validateBranches(path string, stdout io.Writer) error {
+func validateBranches(path string, stderr io.Writer) error {
 	all, err := ReadBranches(path)
 	if err != nil {
 		return err
 	}
 	for _, b := range all {
 		if b.Expired(time.Now()) {
-			fmt.Fprintf(stdout, "note: %s expired %s and will not run\n", b.Name, b.Until.Format("2006-01-02"))
+			fmt.Fprintf(stderr, "note: %s expired %s and will not run\n", b.Name, b.Until.Format("2006-01-02"))
 		}
 	}
 	return nil
@@ -106,39 +107,41 @@ func validateBranches(path string, stdout io.Writer) error {
 
 // validateConf reads the conf and then what it points at: the suite and the
 // registrations, and that every canary is a case the suite has. A conf that
-// passes here is one the session will not stop on.
-func validateConf(path string, stdout io.Writer) error {
+// passes here is one the session will not stop on. A suite with problems is
+// reported as itself, and the checks that need a whole suite wait for one.
+func validateConf(path string, stderr io.Writer) error {
 	c, err := ReadConf(path)
 	if err != nil {
 		return err
 	}
 	p := &Problems{Path: path}
-	s, err := LoadSuite(c.Suite)
-	if err != nil {
-		p.add("suite: %v", err)
-	} else {
+	s, suiteErr := LoadSuite(c.Suite)
+	if suiteErr == nil {
 		for _, id := range c.Canaries {
 			if s.Case(id) == nil {
 				p.add("canary %s is not a case in %s", id, c.Suite)
 			}
 		}
 	}
+	var branchErr error
 	if c.Branches != "" {
-		if all, err := ReadBranches(c.Branches); err != nil {
-			p.add("branches: %v", err)
-		} else if s != nil {
-			run, left := Active(all, c.BranchesMax, time.Now())
+		all, err := ReadBranches(c.Branches)
+		branchErr = err
+		if err == nil {
+			_, left := Active(all, c.BranchesMax, time.Now())
 			for _, l := range left {
-				fmt.Fprintf(stdout, "note: %s\n", l)
+				fmt.Fprintf(stderr, "note: %s\n", l)
 			}
-			for _, b := range run {
-				if n := countSelected(s, b); n == 0 {
-					p.add("branches.conf line %d: %s selects no case with cases=%s", b.Line, b.Name, strings.Join(b.Cases, ","))
+			if suiteErr == nil {
+				for _, b := range all {
+					if countSelected(s, b) == 0 {
+						p.add("%s line %d: %s selects no case with cases=%s", c.Branches, b.Line, b.Name, strings.Join(b.Cases, ","))
+					}
 				}
 			}
 		}
 	}
-	return p.err()
+	return errors.Join(suiteErr, branchErr, p.err())
 }
 
 func countSelected(s *Suite, b Branch) int {
@@ -152,7 +155,10 @@ func countSelected(s *Suite, b Branch) int {
 }
 
 // list prints what the session would consider: one line per case, with the
-// pass budget and the bound the session checks the weekend against.
+// pass budget and the bound the session checks the weekend against -- for
+// the conf's interleave mode, or case mode when there is only a suite. A
+// case that could not be read is reported after the table, and the exit says
+// so.
 func list(args []string, stdout, stderr io.Writer) int {
 	var confPath, suite string
 	for i := 0; i < len(args); i++ {
@@ -170,6 +176,7 @@ func list(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, usage)
 		return ExitRefused
 	}
+	mode := "case"
 	if confPath != "" {
 		c, err := ReadConf(confPath)
 		if err != nil {
@@ -178,26 +185,28 @@ func list(args []string, stdout, stderr io.Writer) int {
 			}
 			return ExitRefused
 		}
-		suite = c.Suite
+		suite, mode = c.Suite, c.Interleave
 	}
 	s, err := LoadSuite(suite)
+	if s != nil {
+		tw := tabwriter.NewWriter(stdout, 0, 8, 2, ' ', 0)
+		fmt.Fprintf(tw, "ID\tVER\tGRADE\tOWNER\tDRIVER\tFIXTURE\tPASS_S\tMAX_S(%s)\n", mode)
+		total := 0
+		for _, c := range s.Cases {
+			fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s@%d\t%d\t%d\n",
+				c.ID, c.Version, c.Grade, c.Owner, c.Driver, c.Fixture.Name, c.Fixture.Version, c.BudgetS, c.MaxPassS(mode))
+			total += c.MaxPassS(mode)
+		}
+		tw.Flush()
+		fmt.Fprintf(stdout, "\n%d case(s), %d fixture(s); one pair is at most %s in %s mode when every pass runs to its budget\n",
+			len(s.Cases), len(s.Fixtures), (time.Duration(total) * time.Second).String(), mode)
+	}
 	if err != nil {
 		for _, line := range problemLines(err) {
 			fmt.Fprintln(stderr, line)
 		}
 		return ExitRefused
 	}
-	tw := tabwriter.NewWriter(stdout, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tVER\tGRADE\tOWNER\tDRIVER\tFIXTURE\tPASS_S\tMAX_S")
-	total := 0
-	for _, c := range s.Cases {
-		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s@%d\t%d\t%d\n",
-			c.ID, c.Version, c.Grade, c.Owner, c.Driver, c.Fixture.Name, c.Fixture.Version, c.BudgetS, c.MaxPassS())
-		total += c.MaxPassS()
-	}
-	tw.Flush()
-	fmt.Fprintf(stdout, "\n%d case(s), %d fixture(s); one pair is at most %s when every pass runs to its budget\n",
-		len(s.Cases), len(s.Fixtures), (time.Duration(total) * time.Second).String())
 	return ExitOK
 }
 
@@ -209,19 +218,24 @@ func exists(path string) bool {
 }
 
 // problemLines renders an error as one line per problem, each with its file,
-// so the output reads as a list of things to fix.
+// so the output reads as a list of things to fix. A joined error is walked
+// first: errors.As would stop at the first file's problems and lose the
+// rest.
 func problemLines(err error) []string {
-	var out []string
-	var p *Problems
-	if errors.As(err, &p) && len(p.List) > 0 {
-		for _, l := range p.List {
-			out = append(out, p.Path+": "+l)
+	if err == nil {
+		return nil
+	}
+	if j, ok := err.(interface{ Unwrap() []error }); ok {
+		var out []string
+		for _, e := range j.Unwrap() {
+			out = append(out, problemLines(e)...)
 		}
 		return out
 	}
-	if j, ok := err.(interface{ Unwrap() []error }); ok {
-		for _, e := range j.Unwrap() {
-			out = append(out, problemLines(e)...)
+	if p, ok := err.(*Problems); ok {
+		out := make([]string, 0, len(p.List))
+		for _, l := range p.List {
+			out = append(out, p.Path+": "+l)
 		}
 		return out
 	}

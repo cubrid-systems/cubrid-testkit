@@ -57,7 +57,8 @@ with what it points at: the suite, the registrations, and that each canary is a 
 bound the session checks the weekend against.
 
 The refusals are the Spec's (§7.2): an unknown key, a missing key, a wrong type, an id that is not
-the directory, a counter off the collect layer's list, `repeats < 3`, `warmup < 1`,
+the directory, a counter off the collect layer's list (a statdump name is checked against the engine's own
+table, `statdump_names.go`, 234 names at develop `5f3a30d`), `repeats < 3`, `warmup < 1`,
 `tolerance ≤ 0`, a client shaped for another driver, a restored snapshot with `warm_s = 0`, and a
 fixture the suite does not have or has at another version. `branches.conf` refuses an unknown key,
 a line without `owner=`, a `repo=` that is not `owner/repo`, a date that is not a date, a glob

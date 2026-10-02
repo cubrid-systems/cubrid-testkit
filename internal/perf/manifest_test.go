@@ -64,18 +64,30 @@ func TestSuiteReadsEveryCaseAndFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Cases) != 3 || len(s.Fixtures) != 2 {
+	if len(s.Cases) != 4 || len(s.Fixtures) != 2 {
 		t.Fatalf("cases=%d fixtures=%d", len(s.Cases), len(s.Fixtures))
 	}
-	if got := []string{s.Cases[0].ID, s.Cases[1].ID, s.Cases[2].ID}; strings.Join(got, ",") != "lib.backupdb,storage.bulk_update,txn.commit_single" {
-		t.Errorf("cases are not by id: %v", got)
+	var ids []string
+	for _, c := range s.Cases {
+		ids = append(ids, c.ID)
+	}
+	if strings.Join(ids, ",") != "cdc.extract_rate,lib.backupdb,storage.bulk_update,txn.commit_single" {
+		t.Errorf("cases are not by id: %v", ids)
 	}
 	c := s.Case("txn.commit_single")
 	if c.JDBC == nil || c.JDBC.Main != "CommitSingle" || len(c.JDBC.Args) != 2 {
 		t.Errorf("jdbc client = %+v", c.JDBC)
 	}
-	if c.MaxPassS() != (1+5)*2*120 {
-		t.Errorf("MaxPassS = %d", c.MaxPassS())
+	if c.MaxPassS("case") != (1+5)*2*120 || c.MaxPassS("round") != (1+1)*5*2*120 {
+		t.Errorf("MaxPassS = %d / %d", c.MaxPassS("case"), c.MaxPassS("round"))
+	}
+	if c.Conf["data_buffer_size"] != "4G" || !filepath.IsAbs(c.Dir) {
+		t.Errorf("conf=%v dir=%q", c.Conf, c.Dir)
+	}
+	// A number or a bool in conf is the text cubrid.conf will carry.
+	d := s.Case("cdc.extract_rate")
+	if d.CDC == nil || d.CDC.Bin != "cdc_extract" || d.Conf["supplemental_log"] != "2" || d.Conf["cdc_flag"] != "true" {
+		t.Errorf("cdc case = %+v conf=%v", d.CDC, d.Conf)
 	}
 	u := s.Case("lib.backupdb")
 	if u.Utility == nil || u.Utility.Ops != 1 || u.Utility.Argv[1] != "backupdb" {
@@ -106,7 +118,7 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 		{"tolerance of zero", "txn.commit_single", func(m map[string]any) { m["tolerance"] = 0 }, "tolerance must be above 0"},
 		{"a client shaped for another driver", "txn.commit_single", func(m map[string]any) {
 			m["client"] = map[string]any{"argv": []string{"x"}, "ops": 1}
-		}, "missing main, args"},
+		}, "missing client.main, client.args; unknown key client.argv, client.ops"},
 		{"a restored snapshot with no warming", "storage.bulk_update", func(m map[string]any) { m["warm_s"] = 0 }, "warm_s must be above 0"},
 		{"a fixture version the suite does not have", "txn.commit_single", func(m map[string]any) {
 			m["fixture"] = map[string]any{"name": "narrow_1m", "version": 2}
@@ -118,6 +130,21 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 		{"a utility with no ops", "lib.backupdb", func(m map[string]any) {
 			m["client"] = map[string]any{"argv": []string{"cubrid", "backupdb"}, "ops": 0}
 		}, "client.ops must be 1 or more"},
+		{"a topology off the list", "txn.commit_single", func(m map[string]any) { m["topology"] = "ha" }, `topology "ha" is not one of single`},
+		{"an op off the list", "txn.commit_single", func(m map[string]any) { m["op"] = "txn" }, `op "txn" is not one of`},
+		{"a metric off the list", "txn.commit_single", func(m map[string]any) { m["metric"] = "p99" }, `metric "p99" is not one of`},
+		{"a background off the list", "txn.commit_single", func(m map[string]any) { m["background"] = "off" }, `background "off" is not one of`},
+		// A statdump name is the engine's own spelling, not a pattern.
+		{"a misspelt statdump counter", "txn.commit_single", func(m map[string]any) { m["counters"] = []string{"Num_file_iosynchs"} }, `counter "Num_file_iosynchs"`},
+		// Go's decoder matches field names without regard to case; the schema
+		// is closed below the top level too.
+		{"a fixture key in the wrong case", "txn.commit_single", func(m map[string]any) {
+			m["fixture"] = map[string]any{"NAME": "narrow_1m", "version": 1}
+		}, "unknown key fixture.NAME"},
+		{"a required key set to null", "txn.commit_single", func(m map[string]any) { m["conf"] = nil }, "missing conf"},
+		{"a conf value that is an object", "txn.commit_single", func(m map[string]any) {
+			m["conf"] = map[string]any{"data_buffer_size": map[string]any{"v": 1}}
+		}, "conf.data_buffer_size must be a string"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -150,7 +177,7 @@ func TestFixtureRefusalsNameTheProblem(t *testing.T) {
 		{"a reset off the list", func(_ string, m map[string]any) { m["reset"] = "reload" }, `reset "reload" is not one of`},
 		{"an unknown key", func(_ string, m map[string]any) { m["size"] = "1G" }, "unknown key size"},
 		{"a load script that is not there", func(_ string, m map[string]any) { m["load"] = "populate.sh" }, `load names "populate.sh"`},
-		{"no rows", func(_ string, m map[string]any) { m["rows"] = 0 }, "rows must be 1 or more"},
+		{"negative rows", func(_ string, m map[string]any) { m["rows"] = -1 }, "rows must be 0 or more"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -189,13 +216,82 @@ func TestEveryProblemIsReportedTogether(t *testing.T) {
 	}
 }
 
+// Tab-completion leaves a trailing slash, and "." from inside the directory
+// is the same directory; the id rule reads the directory, so both have to
+// name the right one.
+func TestACaseIsReadFromWhateverSpellingOfItsDirectory(t *testing.T) {
+	root := copySuite(t)
+	dir := caseDir(root, "txn.commit_single")
+	for _, spelling := range []string{dir, dir + string(filepath.Separator), filepath.Join(dir, "..", "commit_single")} {
+		if c, err := ReadCase(spelling); err != nil || c.Dir != dir {
+			t.Errorf("ReadCase(%q): err=%v dir=%q", spelling, err, c.Dir)
+		}
+	}
+	t.Chdir(dir)
+	if c, err := ReadCase("."); err != nil || c.Dir != dir {
+		t.Errorf(`ReadCase("."): err=%v dir=%q`, err, c.Dir)
+	}
+	t.Chdir(filepath.Join(root, "fixtures", "wide_100k"))
+	if f, err := ReadFixture("."); err != nil || f.Name != "wide_100k" {
+		t.Errorf(`ReadFixture("."): err=%v`, err)
+	}
+}
+
+// A case whose fixture cannot load is not ok: the rules that span both
+// files are still applied to what did decode, and the fixture is named.
+func TestACaseSaysWhenItsFixtureIsBroken(t *testing.T) {
+	root := copySuite(t)
+	rewrite(t, filepath.Join(root, "fixtures", "wide_100k", "fixture.json"), func(m map[string]any) { m["load"] = "nope.sh" })
+	dir := caseDir(root, "storage.bulk_update")
+	rewrite(t, filepath.Join(dir, "case.json"), func(m map[string]any) { m["warm_s"] = 0 })
+	_, err := ReadCase(dir)
+	if err == nil {
+		t.Fatal("accepted")
+	}
+	for _, want := range []string{"fixture wide_100k has problems of its own", "warm_s must be above 0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q does not say %q", err, want)
+		}
+	}
+}
+
+// Three broken files are three reports, and a case.json at the wrong depth
+// is not silently nothing.
+func TestTheSuiteReportsEveryBrokenFile(t *testing.T) {
+	root := copySuite(t)
+	rewrite(t, filepath.Join(root, "fixtures", "narrow_1m", "fixture.json"), func(m map[string]any) { m["rows"] = -1 })
+	rewrite(t, filepath.Join(caseDir(root, "lib.backupdb"), "case.json"), func(m map[string]any) { m["grade"] = "Z" })
+	rewrite(t, filepath.Join(caseDir(root, "txn.commit_single"), "case.json"), func(m map[string]any) { m["repeats"] = 1 })
+	if err := os.WriteFile(filepath.Join(root, "cases", "txn", "case.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSuite(root)
+	if err == nil {
+		t.Fatal("accepted")
+	}
+	for _, want := range []string{"narrow_1m/fixture.json", "lib/backupdb/case.json", "txn/commit_single/case.json", "cases/txn/case.json: a case.json belongs in"} {
+		if !strings.Contains(err.Error(), filepath.FromSlash(want)) {
+			t.Errorf("the suite's error does not name %q:\n%v", want, err)
+		}
+	}
+	// What did read is still there, for list; and a case whose fixture is the
+	// broken one is not a second report of the fixture.
+	if s == nil || s.Case("storage.bulk_update") == nil || s.Case("cdc.extract_rate") == nil {
+		t.Errorf("the readable cases were dropped with the broken ones: %+v", s)
+	}
+	if strings.Contains(err.Error(), "problems of its own") {
+		t.Errorf("the fixture's problem was reported again through its cases:\n%v", err)
+	}
+}
+
 func TestKnownCounters(t *testing.T) {
-	for _, ok := range []string{"Num_file_iosynches", "dev_flushes", "net_packets", "cas.rw_syscalls", "server.cpu_user", "client.ctxsw_vol", "syscalls_by_type"} {
+	for _, ok := range []string{"Num_file_iosynches", "DWB_flush_block", "Time_ha_replication_delay", "Num_dwb_flushed_block_volumes",
+		"dev_flushes", "net_packets", "cas.rw_syscalls", "server.cpu_user", "client.ctxsw_vol", "syscalls_by_type"} {
 		if !KnownCounter(ok) {
 			t.Errorf("%s is on the list and was refused", ok)
 		}
 	}
-	for _, bad := range []string{"fsyncs", "rw_syscalls", "cas.fsync", "master.cpu_user", "num_file_iosynches", ""} {
+	for _, bad := range []string{"fsyncs", "rw_syscalls", "cas.fsync", "master.cpu_user", "num_file_iosynches", "Num_file_iosynchs", "Num_", ""} {
 		if KnownCounter(bad) {
 			t.Errorf("%q is not on the list and was accepted", bad)
 		}

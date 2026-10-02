@@ -75,6 +75,59 @@ func TestConfReadsTheSpecsExample(t *testing.T) {
 	}
 }
 
+func appendLine(t *testing.T, path, line string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The loader keeps the last value of a repeated key and says nothing; a
+// second pair.develop is a session comparing the wrong builds.
+func TestConfRefusesADuplicateKey(t *testing.T) {
+	path := writeConf(t, copySuite(t))
+	appendLine(t, path, "pair.develop = other ; builds")
+	_, err := ReadConf(path)
+	if err == nil || !strings.Contains(err.Error(), "pair.develop appears twice") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// overlap.<name> binds to its pair wherever the file puts the two, and when
+// the pair itself could not be read the overlap is not also blamed.
+func TestOverlapBindsInAnyOrder(t *testing.T) {
+	suite := copySuite(t)
+	c, err := ReadConf(writeConf(t, suite, "pair.develop = develop-HEAD ; /ref"))
+	if err != nil || c.Pairs[0].Overlap != "/data/builds/cubrid/release-11.5-1a2b3c4" {
+		t.Errorf("pair = %+v err = %v", c.Pairs, err)
+	}
+	_, err = ReadConf(writeConf(t, suite, "pair.develop = develop-HEAD"))
+	if err == nil || strings.Contains(err.Error(), "has no pair") {
+		t.Errorf("a broken pair blamed its overlap: %v", err)
+	}
+}
+
+// FR-25: team mode sends the mail and posts to the channel, so both have to
+// be there; dry mode needs neither.
+func TestTeamModeNeedsSomewhereToSend(t *testing.T) {
+	suite := copySuite(t)
+	if _, err := ReadConf(writeConf(t, suite, "report.mode = team")); err != nil {
+		t.Errorf("team mode with mail and webhook was refused: %v", err)
+	}
+	_, err := ReadConf(writeConf(t, suite, "report.mode = team", "report.mail"))
+	if err == nil || !strings.Contains(err.Error(), "report.mode is team and report.mail is not set") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := ReadConf(writeConf(t, suite, "report.mail", "report.webhook", "report.webhook_format", "branches.max = 0")); err != nil {
+		t.Errorf("dry mode without a destination, and branches.max = 0, was refused: %v", err)
+	}
+}
+
 func TestConfRefusalsNameTheKey(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -95,6 +148,8 @@ func TestConfRefusalsNameTheKey(t *testing.T) {
 		{"a memory cap in words", []string{"memory_cap = half"}, "memory_cap wants a size like 24G"},
 		{"a webhook with no format", []string{"report.webhook_format"}, "report.webhook is set and report.webhook_format is not"},
 		{"a conbench url with no scheme", []string{"conbench.url = 100.118.51.99:5000"}, "conbench.url is not a URL"},
+		{"a tolerance of infinity", []string{"canary_tolerance = inf"}, "canary_tolerance must be a number above 0"},
+		{"a pair with no name", []string{"pair. = a ; b"}, "pair. has no name"},
 	}
 	suite := copySuite(t)
 	for _, c := range cases {

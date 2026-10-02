@@ -17,7 +17,7 @@ type Branch struct {
 	Repo  string // owner/repo on GitHub; CUBRID/cubrid when the line does not say
 	Owner string // GitHub login the flag goes to
 	Cases []string
-	Until time.Time // zero when open-ended
+	Until time.Time // local midnight of the until= day; zero when open-ended
 	Line  int
 }
 
@@ -25,10 +25,11 @@ type Branch struct {
 // team branches are usually on a personal fork, and that is what repo= is for.
 const DefaultRepo = "CUBRID/cubrid"
 
-// Expired says whether the registration's until date has passed. The summary
-// writes "expired" for it; the session does not run it.
+// Expired says whether the registration's until day has passed -- the whole
+// day, in this machine's zone, because the session starts at 02:00 local and
+// an until= read as UTC would run a Friday registration on Saturday.
 func (b Branch) Expired(now time.Time) bool {
-	return !b.Until.IsZero() && now.After(b.Until.Add(24*time.Hour-time.Nanosecond))
+	return !b.Until.IsZero() && !now.Before(b.Until.AddDate(0, 0, 1))
 }
 
 // Selects says whether a case id is on the registration's cases= list; a
@@ -49,8 +50,9 @@ func (b Branch) Selects(id string) bool {
 //
 //	<branch>  repo=<owner/repo>  owner=<login>  [cases=<glob,glob>]  [until=<YYYY-MM-DD>]
 //
-// Every problem is reported with its line, and a key the format does not have
-// is one of them -- a misspelt until= would otherwise register a branch for
+// A '#' at the start of a line or after a space begins a comment. Every
+// problem is reported with its line, and a key the format does not have is
+// one of them -- a misspelt until= would otherwise register a branch for
 // ever.
 func ReadBranches(file string) ([]Branch, error) {
 	p := &Problems{Path: file}
@@ -65,16 +67,12 @@ func ReadBranches(file string) ([]Branch, error) {
 	seen := map[string]int{}
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := uncomment(sc.Text())
+		if line == "" {
 			continue
 		}
 		fields := strings.Fields(line)
 		b := Branch{Name: fields[0], Repo: DefaultRepo, Line: n}
-		if strings.Contains(b.Name, "=") {
-			p.add("line %d: the branch name comes first, before any key=value", n)
-			continue
-		}
 		if prev, dup := seen[b.Name]; dup {
 			p.add("line %d: %s is already registered on line %d", n, b.Name, prev)
 			continue
@@ -103,7 +101,7 @@ func ReadBranches(file string) ([]Branch, error) {
 					b.Cases = append(b.Cases, g)
 				}
 			case "until":
-				t, err := time.Parse("2006-01-02", v)
+				t, err := time.ParseInLocation("2006-01-02", v, time.Local)
 				if err != nil {
 					p.add("line %d: until=%q is not YYYY-MM-DD", n, v)
 				}
@@ -123,19 +121,39 @@ func ReadBranches(file string) ([]Branch, error) {
 	return out, p.err()
 }
 
-// Active applies the two rules that take a registration out of a session
-// without an error: an until date that passed, and the cap on how many run.
-// The ones left out are returned with the reason, for the summary.
-func Active(all []Branch, max int, now time.Time) (run []Branch, left []string) {
-	for _, b := range all {
-		switch {
-		case b.Expired(now):
-			left = append(left, fmt.Sprintf("%s: expired %s", b.Name, b.Until.Format("2006-01-02")))
-		case len(run) >= max:
-			left = append(left, fmt.Sprintf("%s: beyond branches.max=%d", b.Name, max))
-		default:
-			run = append(run, b)
+func uncomment(line string) string {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "#") {
+		return ""
+	}
+	for _, sep := range []string{" #", "\t#"} {
+		if i := strings.Index(line, sep); i >= 0 {
+			line = line[:i]
 		}
+	}
+	return strings.TrimSpace(line)
+}
+
+// Active applies the two rules that take a registration out of a session
+// without an error: an until day that passed, and the cap on how many run.
+// Lines are appended as branches are registered, so the oldest are the first
+// lines, and those are what the cap skips (Spec §7.5.1). The ones left out
+// are returned with the reason, for the summary.
+func Active(all []Branch, limit int, now time.Time) (run []Branch, left []string) {
+	var live []Branch
+	for _, b := range all {
+		if b.Expired(now) {
+			left = append(left, fmt.Sprintf("%s: expired %s", b.Name, b.Until.Format("2006-01-02")))
+			continue
+		}
+		live = append(live, b)
+	}
+	for i, b := range live {
+		if len(live)-i > limit {
+			left = append(left, fmt.Sprintf("%s: beyond branches.max=%d, and the oldest registration", b.Name, limit))
+			continue
+		}
+		run = append(run, b)
 	}
 	return run, left
 }

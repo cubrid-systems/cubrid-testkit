@@ -4,8 +4,8 @@
 
 **Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.2, Design v0.1.2 (인터페이스와
 알고리즘은 거기에 있다. 이 항목은 그중 무엇이 testkit 에 들어오는지, 왜 여기인지를 적는다)
-**Status:** incubating — **진행 중** (ADR-EXT-011 초안 2026-10-02. `perf validate`·`perf list` 가
-트리에 있고, `session`·`run` 은 M2)
+**Status:** incubating — **진행 중** (ADR-EXT-011 초안 2026-10-02. `perf validate`·`perf list`·`perf run` 이
+트리에 있고, `session` 은 M3)
 **축 매핑:** 여덟 축 어디도 아니다 — *측정* 역량이지 오라클이 아니다. 가장 가까운 이웃은
 E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 **Companion docs:** cubrid_cv 의 Spec 과 Design. `io-contract` 는 Spec §7
@@ -60,10 +60,16 @@ E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 `owner=` 없는 줄, `owner/repo` 가 아닌 `repo=`, 날짜가 아닌 날짜, 맞을 수 없는 glob, 두 번 등록된
 브랜치를 거부한다. `perf.conf` 도 닫힌 키 집합이다.
 
+`testkit perf run <case-id> --suite <dir> --build <target> --build <reference> [--repeats N] [--out <dir>]
+[--cpuset <list>] [--client-cpuset <list>] [--client-image <image>] [--keep]` 은 케이스 하나에 대한 세션의
+경로다: `internal/sandbox` 를 통한 `single` 클러스터 둘(`CreateWith`: 클라이언트 이미지, 핀 고정, 케이스의
+`cubrid.conf` 키, broker 의 CAS 수 고정), 각각에 픽스처를 만들고 reflink 스냅샷, AB 워밍업과 ABBA 측정 패스,
+패스마다 L0·statdump 스냅샷과 클라이언트 자체 보고, 판정, 그리고 Spec §7.6 의 파일들을 `--out` 아래에
+(`regression-case.json`, `cases.csv`, `counters.json`, describe 아티팩트, `session.json`). 표준 출력 마지막
+줄이 비율이다. publish 는 하지 않는다. cpuset 둘은 CPU 목록 자체에 쉼표가 있어 플래그 둘로 받는다.
+
 ## 5. 다음
 
-- **M2** — `session`·`run`: `internal/sandbox` 에 생성 옵션 추가, ABBA 패스, L0·statdump 수집,
-  판정, sidecar (Design §6.1).
-- **M0** — Design 이 기대는 허브 확인: rootless podman 아래의 csb, cpuset 위임, bind mount 된
-  디렉터리의 내용 교체, reflink 시간 (Design §12).
-- perf-client 이미지와 첫 카나리 — engine-suite 쪽.
+- **M3** — `session`: `perf.conf` 의 쌍 전부, 두 클러스터 사이의 카나리, 빌드 단계의 `builds.json`,
+  `summary.md`·`ledger_rows.md`, 허브의 timer·sudoers, cbingest 분기 (Design §12).
+- engine-suite 쪽: 빌드 단계의 `build_fingerprint.sh`, 나머지 1차 케이스.

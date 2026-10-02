@@ -128,6 +128,15 @@ var (
 	Resets      = []string{"none", "truncate_and_reload", "restore_snapshot"}
 )
 
+// Names that become a database name, a path and a shell word are kept to
+// what all three take: a fixture's name (perf_<name> is its database, and a
+// dash in a database name is one createdb refuses), a case's name, and the
+// Java class a jdbc client starts.
+var (
+	plainNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	javaMainRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
 // ResetRestoreSnapshot restarts the server, so a case that uses it has to warm
 // its working set before measuring -- warm_s = 0 is refused for it.
 const ResetRestoreSnapshot = "restore_snapshot"
@@ -226,6 +235,9 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 	}
 	if c.Module != module {
 		p.add("module %q does not match the directory, which says %q", c.Module, module)
+	}
+	if !plainNameRe.MatchString(name) {
+		p.add("the case directory %q must be lowercase letters, digits and underscores", name)
 	}
 	if c.Version < 1 {
 		p.add("version must be 1 or more, got %d", c.Version)
@@ -352,8 +364,8 @@ func readClient(p *Problems, c *Case) {
 			p.add("client: %v", err)
 			return
 		}
-		if j.Main == "" {
-			p.add("client.main is empty")
+		if !javaMainRe.MatchString(j.Main) {
+			p.add("client.main %q is not a Java class name", j.Main)
 		}
 		c.JDBC = &j
 	case "utility":
@@ -381,8 +393,8 @@ func readClient(p *Problems, c *Case) {
 			p.add("client: %v", err)
 			return
 		}
-		if d.Bin == "" {
-			p.add("client.bin is empty")
+		if !plainNameRe.MatchString(d.Bin) {
+			p.add("client.bin %q must be lowercase letters, digits and underscores (it is src/<bin>.c and bin/<bin>)", d.Bin)
 		}
 		c.CDC = &d
 	}
@@ -420,6 +432,9 @@ func ReadFixture(dir string) (*Fixture, error) {
 	f.Dir = dir
 	if want := filepath.Base(dir); f.Name != want {
 		p.add("name %q does not match the directory, which says %q", f.Name, want)
+	}
+	if !plainNameRe.MatchString(f.Name) {
+		p.add("name %q must be lowercase letters, digits and underscores: perf_%s is a database name", f.Name, f.Name)
 	}
 	if f.Version < 1 {
 		p.add("version must be 1 or more, got %d", f.Version)

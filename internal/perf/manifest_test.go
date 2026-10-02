@@ -93,8 +93,8 @@ func TestSuiteReadsEveryCaseAndFixture(t *testing.T) {
 	if u.Utility == nil || u.Utility.Ops != 1 || u.Utility.Argv[1] != "backupdb" {
 		t.Errorf("utility client = %+v", u.Utility)
 	}
-	if s.Fixtures["wide_100k"].Reset != ResetRestoreSnapshot {
-		t.Errorf("fixture = %+v", s.Fixtures["wide_100k"])
+	if f := s.Fixtures["wide_100k"]; f.Reset != ResetRestoreSnapshot || f.Size != "4G" {
+		t.Errorf("fixture = %+v", f)
 	}
 }
 
@@ -175,9 +175,11 @@ func TestFixtureRefusalsNameTheProblem(t *testing.T) {
 	}{
 		{"a name that is not the directory", func(_ string, m map[string]any) { m["name"] = "narrow" }, `name "narrow" does not match`},
 		{"a reset off the list", func(_ string, m map[string]any) { m["reset"] = "reload" }, `reset "reload" is not one of`},
-		{"an unknown key", func(_ string, m map[string]any) { m["size"] = "1G" }, "unknown key size"},
+		{"an unknown key", func(_ string, m map[string]any) { m["comment"] = "x" }, "unknown key comment"},
 		{"a load script that is not there", func(_ string, m map[string]any) { m["load"] = "populate.sh" }, `load names "populate.sh"`},
 		{"negative rows", func(_ string, m map[string]any) { m["rows"] = -1 }, "rows must be 0 or more"},
+		{"no size", func(_ string, m map[string]any) { delete(m, "size") }, "missing size"},
+		{"a size createdb would not take", func(_ string, m map[string]any) { m["size"] = "2 GB" }, `size wants a volume size like 2G`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -1,1 +1,1 @@
-{ "name": "wide_100k", "version": 1, "rows": 100000, "schema_sql": "schema.sql", "load": "load.sh", "reset": "restore_snapshot" }
+{ "name": "wide_100k", "version": 1, "rows": 100000, "size": "4G", "schema_sql": "schema.sql", "load": "load.sh", "reset": "restore_snapshot" }

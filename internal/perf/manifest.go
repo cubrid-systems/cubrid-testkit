@@ -108,6 +108,7 @@ type Fixture struct {
 	Name      string `json:"name"`
 	Version   int    `json:"version"`
 	Rows      int    `json:"rows"`
+	Size      string `json:"size"` // the first volume, as createdb --db-volume-size takes it: 2G, 512M
 	SchemaSQL string `json:"schema_sql"`
 	Load      string `json:"load"`
 	Reset     string `json:"reset"`
@@ -387,7 +388,12 @@ func readClient(p *Problems, c *Case) {
 	}
 }
 
-var fixtureKeys = []string{"name", "version", "rows", "schema_sql", "load", "reset"}
+var fixtureKeys = []string{"name", "version", "rows", "size", "schema_sql", "load", "reset"}
+
+// volumeSizeRe is what createdb --db-volume-size takes: a number and a unit.
+// The size is given up front so that loading never grows the database on its
+// own, which would put a volume extension inside somebody's measured pass.
+var volumeSizeRe = regexp.MustCompile(`^[0-9]+[KMGT]$`)
 
 // ReadFixture reads fixtures/<name>/fixture.json. The files it names have to
 // be beside it: a load script that is not there fails at session start, after
@@ -420,6 +426,9 @@ func ReadFixture(dir string) (*Fixture, error) {
 	}
 	if f.Rows < 0 {
 		p.add("rows must be 0 or more, got %d", f.Rows)
+	}
+	if !volumeSizeRe.MatchString(f.Size) {
+		p.add("size wants a volume size like 2G or 512M, got %q", f.Size)
 	}
 	for _, kv := range []struct{ key, file string }{{"schema_sql", f.SchemaSQL}, {"load", f.Load}} {
 		if kv.file == "" {

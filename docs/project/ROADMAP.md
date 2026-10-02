@@ -33,7 +33,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 │   │   └── inventory/     jdbc/sql_by_cci/ha_repl/cdc_repl/cci_compat (0/5 미착수)
 │   ├── concept/           Phase 1 — north-star / 동결 명세 / non-goals / 마이그레이션 제외
 │   ├── design/            Phase 2 — 아키텍처/모듈 설계 (미착수)
-│   ├── extensions/        §6a 확장 E1~E10 (E8 은 Hybrid CI 메타 자리로 예약)
+│   ├── extensions/        §6a 확장 E1~E11 (E8 은 Hybrid CI 메타 자리로 예약)
 │   └── survey/            DBMS 테스팅 생태계 조사
 ├── extensions/
 │   └── cubrid-sqlancer/   submodule — §6a-E3 SQLancer provider (별도 private 저장소)
@@ -45,7 +45,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 > **이 트리는 계획이지 현황이 아니다 (2026-09-23 주석).** Phase 0 에 세운 배치이며, 기록으로
 > 남긴다. 실제로 갈라진 곳은 넷이다 — `docs/` 밑이 `docs/project/` 와 `docs/category/` 로
 > 갈라져 `adr/` `analysis/` `concept/` `design/` `survey/` 는 `docs/project/` 아래에 있고,
-> `extensions/E1~E10` 문서는 `docs/category/extensions/` 에 있다. `extensions/` 서브모듈은
+> `extensions/E1~E11` 문서는 `docs/category/extensions/` 에 있다. `extensions/` 서브모듈은
 > `cubrid-sqlancer` 하나가 아니라 `cluster-sandbox` 가 함께 있다. `design/ (미착수)` 와
 > `inventory/ (0/5 미착수)` 는 더 이상 맞지 않다 — Phase 2 는 완료됐고, `ha_repl` 은
 > `design/module-ha.md` · [ADR-022](adr/ADR-022-topology-provider.md) ·
@@ -506,6 +506,26 @@ UBSan 10 건을 매번 낸다. 억제 파일(42 + 3 규칙)로 **0 건** 이 되
 
 **참조**: `extensions/E10-xasl-fixtures/requirements.md`
 
+### E11 — 주간 성능 회귀 러너 (`testkit perf`)
+
+**목표**: 기본 연산의 고정 카탈로그를 매주 같은 장비에서 대상 빌드와 기준 빌드로 교차해 재고,
+비율을 빌드 지문과 함께 이력으로 남긴다. 등록한 팀 브랜치는 merge-base 와 같은 방식으로 비교한다.
+
+**왜 testkit 인가**: 러너다 — 클러스터를 세우고(ADR-022, `internal/sandbox`), 일정에 따라 프로그램을
+돌리고, `/proc`·statdump 를 모아 파일로 쓴다. task 이름은 동결(F1)이므로 **새 하위 명령**(NF)으로
+들어가고, 코퍼스 실행이 아니므로 격리 앞에서 라우팅된다. 케이스·픽스처·스크립트는
+`cubrid-engine-suite` `benchmarks/regression/` 에 있고 파서는 testkit 에 있다 — C-004 를 이 축에 대해
+닫는 경계다.
+
+**축 매핑**: 없음 — 오라클이 아니라 *측정*. 카탈로그 ID 만 받는다.
+
+**현황 (2026-10-02)**: `perf validate`·`perf list` 와 명세·등록·conf 파서가 트리에 있다. `session`·`run`
+은 M2. 선결은 cluster-sandbox #8~#12(열림)와 허브 확인(M0).
+
+**ADR**: ADR-EXT-011 (초안).
+
+**참조**: `extensions/E11-perf-runner/requirements.md`, cubrid_cv `plan/perf_regression/` Spec·Design
+
 ### §6a 부록 — 엔진 강건성 fuzzing 우선순위 사다리
 
 fuzzing 계열 항목(E3·E5·E9)과 *아직 카탈로그에 없는* 후보를 하나의 우선순위로 정렬한
@@ -561,6 +581,7 @@ engine-suite `feat/spatial-probes` 브랜치)에 귀속되며, 그 트랙이 재
 | E7 | 조건부 | C-004 책임 경계 정의 | extensions/E7-workload/ |
 | E9 | 조건부 | **E5 선행** + SERVER_MODE in-process 기동(확인됨) + **E10** | extensions/E9-storage-fuzzing/ |
 | E10 | 즉시 후보 | — (엔진 변경 없음) | extensions/E10-xasl-fixtures/ |
+| E11 | 진행 중 | cluster-sandbox #8~#12, 허브(M0) | extensions/E11-perf-runner/ |
 
 근거: `survey/dbms-testing-ecosystem.md` (8축 분류, §11 카탈로그 확장 후보).
 

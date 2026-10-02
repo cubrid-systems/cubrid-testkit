@@ -1,0 +1,1 @@
+{ "name": "narrow_1m", "version": 1, "rows": 1000000, "schema_sql": "schema.sql", "load": "load.sh", "reset": "none" }

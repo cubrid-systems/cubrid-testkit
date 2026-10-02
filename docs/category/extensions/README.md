@@ -25,6 +25,7 @@ a lot of room for new decisions.
 | (E8) | 8 | Hybrid CI integration (the Materialize pattern) | meta | two or more of E2–E7 · E9 adopted | (TBD — not a catalogue entry) |
 | E9 | 5 extended × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | conditional | **E5 first**, plus in-process SERVER_MODE startup and **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.md) |
 | E10 | supporting | Producing and keeping XASL fixtures, version identification included | candidate now | — (no engine change) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.md) |
+| E11 | measurement | Weekly performance-regression runner (`testkit perf`) | **in progress** | cluster-sandbox #8–#12 (open), the hub | [E11-perf-runner/](E11-perf-runner/requirements.md) · [ADR-EXT-011](../../project/adr/ADR-EXT-011-perf-runner.md) · Spec and Design in cubrid_cv `plan/perf_regression/` |
 
 **A note on the numbering.** `E8` is **reserved** for axis 8, *Hybrid CI integration*, as a meta
 entry. E9 skipping over E8 is that reservation, not a gap.
@@ -33,7 +34,7 @@ entry. E9 skipping over E8 is that reservation, not a gap.
 
 ## The one that has no E number — `extensions/cluster-sandbox`
 
-It is a submodule under `extensions/`, and it is **not a catalogue entry.** E1–E10 are all *testing
+It is a submodule under `extensions/`, and it is **not a catalogue entry.** E1–E11 are all *testing
 capabilities* — a new oracle, a new case format, a new generator — and `cubrid-cluster-sandbox` is
 an **environment provider.** It changes where a test runs, not what is verified.
 
@@ -109,6 +110,7 @@ incubating.
 | (ADR-EXT-008) | E8 (Hybrid CI) formally enters | *reserved* — the axis 8 meta slot |
 | ADR-EXT-009 | E9 formally enters incubating | the input IR, **how a schedule is expressed**, the cap on participants, where the corpus lives, the boundary in the cubrid repository (the rendezvous handler) |
 | ADR-EXT-010 | E10 formally enters incubating | the production path (csql/CCI/JDBC), the fixture format, how a version is identified, where fixtures are kept |
+| ADR-EXT-011 | ~~trigger~~ **Proposed 2026-10-02** | a new entry point beside the frozen tasks (NF, no containment), the one parser in testkit and the data in engine-suite (C-004 closed for this axis), closed schemas, results in engine-suite's format for conbench |
 
 ---
 

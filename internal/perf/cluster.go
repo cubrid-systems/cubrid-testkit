@@ -65,12 +65,19 @@ const workPerf = "/work/perf"
 // is one createdb will not make (the engine builds its log names from it).
 const seedDB = "seed"
 
-// brokerCAS is the CAS count the broker is pinned to, so that no CAS is spawned
-// inside a measured window (sandbox --broker-set, S6). The Spec says "the
-// group's largest client count"; a case has no such field yet, so this is a
-// constant that covers the primary list's single-connection cases and is
-// recorded in the describe artifact either way.
-const brokerCAS = 4
+// brokerCAS is the CAS count the broker is pinned to, so that no CAS is
+// spawned inside a measured window (sandbox --broker-set, S6): the largest
+// client count among the cases the cluster serves (Spec §7.2 clients), and
+// one when none of them goes through the broker.
+func brokerCAS(cases []*Case) int {
+	n := 1
+	for _, c := range cases {
+		if c.Driver == "jdbc" && c.Clients > n {
+			n = c.Clients
+		}
+	}
+	return n
+}
 
 // createSide stands a side up for the cases it will run: the union of their
 // cubrid.conf overrides, the pinned CAS count, the pinning, the client image,
@@ -96,7 +103,7 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 		CPUSet: r.CPUSet, ClientCPUSet: r.ClientCPUSet,
 		Set: set,
 		BrokerSet: []string{
-			fmt.Sprintf("MIN_NUM_APPL_SERVER=%d", brokerCAS), fmt.Sprintf("MAX_NUM_APPL_SERVER=%d", brokerCAS),
+			fmt.Sprintf("MIN_NUM_APPL_SERVER=%d", brokerCAS(cases)), fmt.Sprintf("MAX_NUM_APPL_SERVER=%d", brokerCAS(cases)),
 			"SQL_LOG=OFF",
 		},
 		Labels:  map[string]string{"perf.session": r.SessionID, "perf.role": role},

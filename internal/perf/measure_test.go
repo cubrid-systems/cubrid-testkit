@@ -193,6 +193,13 @@ func TestClusterNamesFollowCSBsRule(t *testing.T) {
 	if u := confUnion([]*Case{{Conf: map[string]string{"log_buffer_size": "16M", "data_buffer_size": "4G"}}}); strings.Join(u, " ") != "data_buffer_size=4G log_buffer_size=16M" {
 		t.Errorf("conf union = %v", u)
 	}
+	// The broker is pinned to the largest client count that goes through it.
+	if n := brokerCAS([]*Case{{Driver: "jdbc", Clients: 1}, {Driver: "jdbc", Clients: 16}, {Driver: "utility"}}); n != 16 {
+		t.Errorf("brokerCAS = %d", n)
+	}
+	if n := brokerCAS([]*Case{{Driver: "utility"}}); n != 1 {
+		t.Errorf("brokerCAS with no jdbc case = %d", n)
+	}
 }
 
 func abs(x float64) float64 {

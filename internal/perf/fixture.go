@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -57,6 +58,18 @@ func (r *Runner) buildFixture(ctx context.Context, s *Side, f *Fixture) error {
 		fmt.Sprintf("cd %s && bash %s/%s %s %d", fdir, fdir, shellJoin([]string{f.Load}), db, f.Rows), 30*time.Minute); err != nil {
 		return err
 	}
+	// The snapshot is the state every pass starts from, so it must not carry
+	// the loader's vacuum backlog or dirty pages: both would be paid inside
+	// the first passes, and only on the side that happened to get them.
+	if note, err := r.waitVacuum(ctx, s, db, 10*time.Minute); err != nil {
+		return fmt.Errorf("%s: vacuum after load: %w", s.Role, err)
+	} else if note != "" {
+		r.logf("%s: %s", s.Role, note)
+	}
+	if err := r.mustExecLog(ctx, s, "checkpoint", log("checkpoint"),
+		fmt.Sprintf("printf ';checkpoint\\n' | csql --sysadm -u dba %s", db), 5*time.Minute); err != nil {
+		return err
+	}
 	if err := r.serverStop(ctx, s, db); err != nil {
 		return err
 	}
@@ -104,8 +117,11 @@ func (r *Runner) reset(ctx context.Context, s *Side, c *Case, f *Fixture) error 
 	return fmt.Errorf("fixture %s: reset %q is not one this runner knows", f.Name, f.Reset)
 }
 
-// snapshot copies a database directory's contents out, with reflinks where
-// the filesystem has them and a plain copy where it does not.
+// snapshot copies a database directory's contents out. Plain copies, not
+// reflinks: a live volume that shared extents with its snapshot would pay
+// XFS copy-on-write on the first write to each block, inside the measured
+// window and on the hub only (M0 measured reflinks at 0.13 s and plain
+// copies at 0.8 s for 5 GB; the difference is not worth a bias).
 func snapshot(dbDir, snap string) error {
 	if err := os.RemoveAll(snap); err != nil {
 		return err
@@ -158,12 +174,50 @@ func dirEntries(dir string) ([]string, error) {
 }
 
 func reflinkCopy(src []string, dstDir string) error {
-	args := append([]string{"-a", "--reflink=auto"}, src...)
+	args := append([]string{"-a", "--reflink=never"}, src...)
 	args = append(args, dstDir+string(os.PathSeparator))
 	if out, err := exec.Command("cp", args...).CombinedOutput(); err != nil {
 		return fmt.Errorf("cp: %v: %s", err, out)
 	}
 	return exec.Command("sync").Run()
+}
+
+// waitVacuum waits until the database has no log pages left to vacuum, or
+// the bound passes. The gauge is read from statdump without a watcher. The
+// note says when the bound hit; the caller decides what that means.
+func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.Duration) (note string, err error) {
+	deadline := time.Now().Add(bound)
+	zeros := 0
+	for {
+		res, err := r.exec(ctx, s.N1, fmt.Sprintf("cubrid statdump %s 2>/dev/null | awk -F= '/^Num_vacuum_log_pages_to_vacuum/ {gsub(/ /, \"\", $2); print $2}'", db), time.Minute)
+		if err != nil {
+			return "", err
+		}
+		v := strings.TrimSpace(res.Stdout)
+		if v == "0" {
+			zeros++
+			if zeros >= 2 {
+				return "", nil
+			}
+		} else {
+			zeros = 0
+		}
+		if time.Now().After(deadline) {
+			return fmt.Sprintf("vacuum still had %s log pages to do after %s", firstNonEmptyStr(v, "?"), bound), nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func firstNonEmptyStr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 func (r *Runner) mustExec(ctx context.Context, s *Side, what, script string, timeout time.Duration) error {

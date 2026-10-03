@@ -209,8 +209,18 @@ func (r *Runner) runOne(ctx context.Context, c *Case, f *Fixture) (int, string) 
 	session.Target = BuildRef{Build: r.Builds[0], Fingerprint: readFingerprint(r.Builds[0])}
 	session.Reference = BuildRef{Build: r.Builds[1], Fingerprint: readFingerprint(r.Builds[1])}
 	session.Target.Commit, session.Reference.Commit = session.Target.Fingerprint.Commit, session.Reference.Fingerprint.Commit
+	// Spec §12: the builds are Release. A Debug build's numbers are about
+	// the asserts, not the engine, and are refused before a cluster exists.
+	for _, b := range []BuildRef{session.Target, session.Reference} {
+		if b.Fingerprint.BuildType == "Debug" {
+			r.logf("%s is a Debug build; only Release builds are measured (Spec §12)", b.Build)
+			return ExitRefused, ""
+		}
+	}
+	// FR-2's fingerprint_changed is about the previous session; this is the
+	// two builds of this run against each other, said under its own name.
 	if !SameFingerprint(session.Target.Fingerprint, session.Reference.Fingerprint) {
-		session.Notes = append(session.Notes, "fingerprint_changed: the two builds differ in compiler, build type, flags or a third-party library")
+		session.Notes = append(session.Notes, "builds_differ: the two builds differ in compiler, build type, flags or a third-party library")
 	}
 	writeSession := func(state, reason string) {
 		session.State, session.ExitReason, session.Ended = state, reason, time.Now()

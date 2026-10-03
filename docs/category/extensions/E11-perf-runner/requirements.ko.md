@@ -2,10 +2,10 @@
 
 *[English](requirements.md) · 한국어*
 
-**Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.2, Design v0.1.2 (인터페이스와
+**Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.3, Design v0.1.3 (인터페이스와
 알고리즘은 거기에 있다. 이 항목은 그중 무엇이 testkit 에 들어오는지, 왜 여기인지를 적는다)
-**Status:** incubating — **진행 중** (ADR-EXT-011 초안 2026-10-02. `perf validate`·`perf list`·`perf run` 이
-트리에 있고, `session` 은 M3)
+**Status:** incubating — **진행 중** (ADR-EXT-011 초안 2026-10-02. `perf validate`·`perf list` 가 트리에
+있고(M1), `perf run` 은 #16 으로 머지됐다(M2, 2026-10-03). `session` 은 M3)
 **축 매핑:** 여덟 축 어디도 아니다 — *측정* 역량이지 오라클이 아니다. 가장 가까운 이웃은
 E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 **Companion docs:** cubrid_cv 의 Spec 과 Design. `io-contract` 는 Spec §7
@@ -27,7 +27,7 @@ E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 - 러너다: 클러스터를 세우고, 일정에 따라 그 위에서 프로그램을 돌리고, 프로그램과 `/proc` 이 말하는
   것을 모아 파일로 쓴다. 그것이 testkit 이 하는 일이다.
 - testkit 이 이미 하는 방식으로 `cubrid-cluster-sandbox` 를 소비한다(ADR-022, `internal/sandbox`).
-  sandbox 가 이것을 위해 얻은 플래그 — `ha_mode=off` 인 `single`, `cubrid.conf` 로 가는 `--set`,
+  sandbox 가 이것을 위해 얻은 플래그 다섯 — `ha_mode=off` 인 `single`, `cubrid.conf` 로 가는 `--set`,
   `--client-image`, `--broker-set`, `--cpuset` — 를 쓴다.
 - **새 진입점** `testkit perf` 로, 동결된 task 이름 옆에 선다(`external-surface-freeze` §6-1: task
   목록은 F1, 새 하위 명령은 NF). `testkit shell`·`testkit sql` 이 하는 일은 아무것도 바뀌지 않고,
@@ -56,14 +56,17 @@ E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 
 거부 목록은 Spec §7.2 의 것이다: 모르는 키, 빠진 키, 틀린 타입, 디렉터리와 다른 id, 수집 층 목록
 밖의 카운터(statdump 이름은 엔진 자신의 표 — `statdump_names.go`, develop `5f3a30d` 기준 234개 — 로 확인한다), `repeats < 3`, `warmup < 1`, `tolerance ≤ 0`, 다른 드라이버 모양의 client,
-`warm_s = 0` 인 restore_snapshot, suite 에 없거나 버전이 다른 픽스처. `branches.conf` 는 모르는 키,
+드라이버에 맞지 않는 `clients`(utility 는 0, 나머지는 1 이상), `warm_s = 0` 인 restore_snapshot, `2G` 같은
+볼륨 크기가 아닌 픽스처 `size`, `[a-z][a-z0-9_]*` 밖의 픽스처 이름·케이스 디렉터리·`client.bin`(픽스처 이름은
+데이터베이스 `perf_<name>` 이 되고 createdb 는 대시를 거부한다), Java 클래스 이름이 아닌 `client.main`,
+suite 에 없거나 버전이 다른 픽스처. `branches.conf` 는 모르는 키,
 `owner=` 없는 줄, `owner/repo` 가 아닌 `repo=`, 날짜가 아닌 날짜, 맞을 수 없는 glob, 두 번 등록된
 브랜치를 거부한다. `perf.conf` 도 닫힌 키 집합이다.
 
 `testkit perf run <case-id> --suite <dir> --build <target> --build <reference> [--repeats N] [--out <dir>]
 [--cpuset <list>] [--client-cpuset <list>] [--client-image <image>] [--keep]` 은 케이스 하나에 대한 세션의
 경로다: `internal/sandbox` 를 통한 `single` 클러스터 둘(`CreateWith`: 클라이언트 이미지, 핀 고정, 케이스의
-`cubrid.conf` 키, broker 의 CAS 수 고정), 각각에 픽스처를 만들고 reflink 스냅샷, AB 워밍업과 ABBA 측정 패스,
+`cubrid.conf` 키, broker 의 CAS 수를 가장 큰 `clients` 로 고정), 각각에 픽스처를 만들고 일반 복사(`--reflink=never`)로 스냅샷, AB 워밍업과 ABBA 측정 패스,
 패스마다 L0·statdump 스냅샷과 클라이언트 자체 보고, 판정, 그리고 Spec §7.6 의 파일들을 `--out` 아래에
 (`regression-case.json`, `cases.csv`, `counters.json`, describe 아티팩트, `session.json`). 표준 출력 마지막
 줄이 비율이다. publish 는 하지 않는다. cpuset 둘은 CPU 목록 자체에 쉼표가 있어 플래그 둘로 받는다.

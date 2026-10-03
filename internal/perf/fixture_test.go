@@ -80,6 +80,21 @@ func TestJudgeCountsACounterThatAppearedAsAChange(t *testing.T) {
 	}
 }
 
+// FR-21 reads counts of work, not times, ratios or gauges.
+func TestDeterministicIsCountValuedOnly(t *testing.T) {
+	for _, yes := range []string{"Num_file_iosynches", "Num_log_append_records", "Num_dwb_flushed_block_volumes", "dev_flushes", "net_packets"} {
+		if !deterministic(yes) {
+			t.Errorf("%s should decide", yes)
+		}
+	}
+	for _, no := range []string{"Num_object_locks_time_waited_usec", "Time_ha_replication_delay", "Data_page_buffer_hit_ratio",
+		"Num_data_page_fixed", "Num_data_page_lru1", "client.rw_syscalls", "dev_reads", "server.cpu_user", "not_a_name"} {
+		if deterministic(no) {
+			t.Errorf("%s should not decide", no)
+		}
+	}
+}
+
 func TestL0NullFieldIsMissingNotZero(t *testing.T) {
 	pre, _ := parseL0([]byte(`{"roles":{"server":{"10":{"utime_ms":100,"stime_ms":50,"runq_wait_ms":null,"syscr":10,"syscw":5}}},"disk":null}`))
 	post, _ := parseL0([]byte(`{"roles":{"server":{"10":{"utime_ms":400,"stime_ms":150,"runq_wait_ms":null,"syscr":30,"syscw":5}}},"disk":null}`))

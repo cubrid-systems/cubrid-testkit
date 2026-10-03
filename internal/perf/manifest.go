@@ -27,27 +27,31 @@ import (
 // schema, so a key the table does not have is refused by name rather than
 // carried as a silent typo.
 type Case struct {
-	ID         string                     `json:"id"`
-	Version    int                        `json:"version"`
-	Owner      string                     `json:"owner"`
-	Grade      string                     `json:"grade"`
-	Module     string                     `json:"module"`
-	Topology   string                     `json:"topology"`
-	RawConf    map[string]json.RawMessage `json:"conf"`
-	Fixture    FixtureRef                 `json:"fixture"`
-	Driver     string                     `json:"driver"`
-	Client     json.RawMessage            `json:"client"`
-	Op         string                     `json:"op"`
-	Metric     string                     `json:"metric"`
-	Cold       bool                       `json:"cold"`
-	WarmS      int                        `json:"warm_s"`
-	Warmup     int                        `json:"warmup"`
-	Repeats    int                        `json:"repeats"`
-	BudgetS    int                        `json:"budget_s"`
-	Tolerance  float64                    `json:"tolerance"`
-	Counters   []string                   `json:"counters"`
-	Background string                     `json:"background"`
-	Notes      string                     `json:"notes,omitempty"`
+	ID       string                     `json:"id"`
+	Version  int                        `json:"version"`
+	Owner    string                     `json:"owner"`
+	Grade    string                     `json:"grade"`
+	Module   string                     `json:"module"`
+	Topology string                     `json:"topology"`
+	RawConf  map[string]json.RawMessage `json:"conf"`
+	Fixture  FixtureRef                 `json:"fixture"`
+	Driver   string                     `json:"driver"`
+	// Clients is how many connections the program opens at once. The broker
+	// of a cluster is pinned to the largest count among the cases it serves,
+	// so no CAS is spawned inside a measured window; a utility opens none.
+	Clients    int             `json:"clients"`
+	Client     json.RawMessage `json:"client"`
+	Op         string          `json:"op"`
+	Metric     string          `json:"metric"`
+	Cold       bool            `json:"cold"`
+	WarmS      int             `json:"warm_s"`
+	Warmup     int             `json:"warmup"`
+	Repeats    int             `json:"repeats"`
+	BudgetS    int             `json:"budget_s"`
+	Tolerance  float64         `json:"tolerance"`
+	Counters   []string        `json:"counters"`
+	Background string          `json:"background"`
+	Notes      string          `json:"notes,omitempty"`
 
 	// Conf is the cubrid.conf overrides as the file will carry them: a JSON
 	// string, number or true/false, each written out as text.
@@ -128,6 +132,15 @@ var (
 	Resets      = []string{"none", "truncate_and_reload", "restore_snapshot"}
 )
 
+// Names that become a database name, a path and a shell word are kept to
+// what all three take: a fixture's name (perf_<name> is its database, and a
+// dash in a database name is one createdb refuses), a case's name, and the
+// Java class a jdbc client starts.
+var (
+	plainNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	javaMainRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
 // ResetRestoreSnapshot restarts the server, so a case that uses it has to warm
 // its working set before measuring -- warm_s = 0 is refused for it.
 const ResetRestoreSnapshot = "restore_snapshot"
@@ -189,7 +202,7 @@ func (p *Problems) err() error {
 }
 
 var caseKeys = []string{"id", "version", "owner", "grade", "module", "topology", "conf", "fixture", "driver",
-	"client", "op", "metric", "cold", "warm_s", "warmup", "repeats", "budget_s", "tolerance", "counters",
+	"clients", "client", "op", "metric", "cold", "warm_s", "warmup", "repeats", "budget_s", "tolerance", "counters",
 	"background"}
 
 // ReadCase reads cases/<module>/<name>/case.json and applies every rule the
@@ -227,6 +240,9 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 	if c.Module != module {
 		p.add("module %q does not match the directory, which says %q", c.Module, module)
 	}
+	if !plainNameRe.MatchString(name) {
+		p.add("the case directory %q must be lowercase letters, digits and underscores", name)
+	}
 	if c.Version < 1 {
 		p.add("version must be 1 or more, got %d", c.Version)
 	}
@@ -244,6 +260,12 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 		p.add("fixture needs a name and a version of 1 or more, got %+v", c.Fixture)
 	}
 	oneOf(p, "driver", c.Driver, Drivers)
+	switch {
+	case c.Driver == "utility" && c.Clients != 0:
+		p.add("clients must be 0 for a utility, which opens no connection; got %d", c.Clients)
+	case c.Driver != "utility" && c.Clients < 1:
+		p.add("clients must be 1 or more for a %s client, got %d", c.Driver, c.Clients)
+	}
 	readClient(p, &c)
 	oneOf(p, "op", c.Op, Ops)
 	oneOf(p, "metric", c.Metric, Metrics)
@@ -352,8 +374,8 @@ func readClient(p *Problems, c *Case) {
 			p.add("client: %v", err)
 			return
 		}
-		if j.Main == "" {
-			p.add("client.main is empty")
+		if !javaMainRe.MatchString(j.Main) {
+			p.add("client.main %q is not a Java class name", j.Main)
 		}
 		c.JDBC = &j
 	case "utility":
@@ -381,8 +403,8 @@ func readClient(p *Problems, c *Case) {
 			p.add("client: %v", err)
 			return
 		}
-		if d.Bin == "" {
-			p.add("client.bin is empty")
+		if !plainNameRe.MatchString(d.Bin) {
+			p.add("client.bin %q must be lowercase letters, digits and underscores (it is src/<bin>.c and bin/<bin>)", d.Bin)
 		}
 		c.CDC = &d
 	}
@@ -420,6 +442,9 @@ func ReadFixture(dir string) (*Fixture, error) {
 	f.Dir = dir
 	if want := filepath.Base(dir); f.Name != want {
 		p.add("name %q does not match the directory, which says %q", f.Name, want)
+	}
+	if !plainNameRe.MatchString(f.Name) {
+		p.add("name %q must be lowercase letters, digits and underscores: perf_%s is a database name", f.Name, f.Name)
 	}
 	if f.Version < 1 {
 		p.add("version must be 1 or more, got %d", f.Version)

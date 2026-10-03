@@ -130,6 +130,9 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 		{"a utility with no ops", "lib.backupdb", func(m map[string]any) {
 			m["client"] = map[string]any{"argv": []string{"cubrid", "backupdb"}, "ops": 0}
 		}, "client.ops must be 1 or more"},
+		{"no clients", "txn.commit_single", func(m map[string]any) { delete(m, "clients") }, "missing clients"},
+		{"zero clients on a jdbc case", "txn.commit_single", func(m map[string]any) { m["clients"] = 0 }, "clients must be 1 or more for a jdbc client"},
+		{"clients on a utility", "lib.backupdb", func(m map[string]any) { m["clients"] = 2 }, "clients must be 0 for a utility"},
 		{"a topology off the list", "txn.commit_single", func(m map[string]any) { m["topology"] = "ha" }, `topology "ha" is not one of single`},
 		{"an op off the list", "txn.commit_single", func(m map[string]any) { m["op"] = "txn" }, `op "txn" is not one of`},
 		{"a metric off the list", "txn.commit_single", func(m map[string]any) { m["metric"] = "p99" }, `metric "p99" is not one of`},

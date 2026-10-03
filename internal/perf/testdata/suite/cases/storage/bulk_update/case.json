@@ -4,6 +4,7 @@
   "conf": {},
   "fixture": { "name": "wide_100k", "version": 1 },
   "driver": "jdbc",
+  "clients": 1,
   "client": { "main": "BulkUpdate", "args": [] },
   "op": "row", "metric": "elapsed_s",
   "cold": true, "warm_s": 5, "warmup": 1, "repeats": 3, "budget_s": 300, "tolerance": 0.05,

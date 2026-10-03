@@ -4,8 +4,8 @@
 
 **Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.2, Design v0.1.2 (the interface
 and the algorithms live there; this entry says what of it enters testkit, and why here)
-**Status:** incubating — **in progress** (ADR-EXT-011 proposed 2026-10-02; `perf validate` and
-`perf list` are in the tree, `session` and `run` follow in M2)
+**Status:** incubating — **in progress** (ADR-EXT-011 proposed 2026-10-02; `perf validate`,
+`perf list` and `perf run` are in the tree, `session` follows in M3)
 **Axis mapping:** none of the eight — a *measurement* capability, not an oracle. The nearest
 neighbour is E7 (workload), and this is what C-004 left on testkit's side of the line
 **Companion docs:** the Spec and the Design in cubrid_cv; `io-contract` is Spec §7
@@ -64,10 +64,18 @@ fixture the suite does not have or has at another version. `branches.conf` refus
 a line without `owner=`, a `repo=` that is not `owner/repo`, a date that is not a date, a glob
 that cannot match, and a branch registered twice. `perf.conf` is a closed key set too.
 
+`testkit perf run <case-id> --suite <dir> --build <target> --build <reference> [--repeats N] [--out <dir>]
+[--cpuset <list>] [--client-cpuset <list>] [--client-image <image>] [--keep]` is a session's path for one
+case: two `single` clusters through `internal/sandbox` (`CreateWith`: client image, pinning, the case's
+`cubrid.conf` keys, the broker's CAS count pinned), the fixture built on each with a reflink snapshot,
+the AB warm-up and ABBA measured passes, the L0 and statdump snapshots around each pass, the client's
+own report, the judgment, and the files of Spec §7.6 under `--out` (`regression-case.json`, `cases.csv`,
+`counters.json`, the describe artifacts, `session.json`). The last line of standard output is the ratio.
+Nothing is published. The two cpusets are two flags because a CPU list has commas of its own.
+
 ## 5. What comes next
 
-- **M2** — `session` and `run`: `internal/sandbox` gains the create options, the ABBA passes,
-  L0 and statdump collection, judgment, sidecars (Design §6.1).
-- **M0** — the hub checks the Design depends on: csb under rootless podman, cpuset delegation,
-  replacing a bind-mounted directory's contents, reflink timing (Design §12).
-- The perf-client image and the first canaries, in engine-suite.
+- **M3** — `session`: every pair of `perf.conf`, the canaries across two clusters, `builds.json` from
+  the build step, `summary.md` and `ledger_rows.md`, the timer and sudoers on the hub, the cbingest
+  branch (Design §12).
+- In engine-suite: `build_fingerprint.sh` from the build step, the rest of the primary cases.

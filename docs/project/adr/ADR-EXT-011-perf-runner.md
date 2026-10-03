@@ -1,6 +1,7 @@
 # ADR-EXT-011: 주간 성능 회귀 러너는 testkit 의 새 진입점이다 (E11)
 
 - **Status:** **Proposed** (2026-10-02) — 사용자 검토
+- **구현 상태:** M2(`run`)는 머지됐다 (#16, 2026-10-03). `session` 은 M3
 - **Date:** 2026-10-02
 - **Trigger:** cubrid_cv `plan/perf_regression/` Spec v0.1.2 §7.1 — "testkit 의 task 이름 목록은
   동결되어 있으므로 이 축은 새 하위 명령으로 들어간다"
@@ -25,7 +26,7 @@
 | F1 | task 이름을 더할 수 있는가 | **없다.** `external-surface-freeze` §6-1 이 task 목록을 F1 로 동결했다. 새 하위 명령은 NF 다 |
 | F2 | 격리(`contain.Enter`) 앞에서 라우팅되는 하위 명령이 이미 있는가 | **있다.** `isolation-ctl`, `sizing`, `check-cases` — 코퍼스를 돌리지 않는 명령은 거기 선다 |
 | F3 | sandbox 를 소비하는 길이 있는가 | **있다.** ADR-022, `internal/sandbox` 가 csb 를 subprocess + `--json` 으로 부른다 |
-| F4 | sandbox 가 성능 모드에 필요한 것을 갖췄는가 | **PR 로 열려 있다.** cluster-sandbox #8 (`single` = `ha_mode=off`), #9 (`--set` → `cubrid.conf`), #10 (`--client-image`), #11 (`--broker-set`), #12 (`--cpuset`), 모두 실제 엔진으로 e2e 통과 |
+| F4 | sandbox 가 성능 모드에 필요한 것을 갖췄는가 | **머지됐다** (#8~#12, 62843f8; testkit 핀 #14). cluster-sandbox #8 (`single` = `ha_mode=off`), #9 (`--set` → `cubrid.conf`), #10 (`--client-image`), #11 (`--broker-set`), #12 (`--cpuset`), 모두 실제 엔진으로 e2e 통과 |
 | F5 | conf 파서를 새로 써야 하는가 | **아니다.** `perf.conf` 는 다른 conf 와 같은 flat properties 이고 `conf.Home.Load` 가 그대로 읽는다 |
 
 ## 3. Decision

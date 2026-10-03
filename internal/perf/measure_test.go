@@ -142,12 +142,21 @@ func TestL0DeltaSumsPidsPresentInBothAndNamesChurn(t *testing.T) {
 	if d["cas.rw_syscalls"] != 400 || !strings.Contains(missing["cas"], "cas pid churn") {
 		t.Errorf("cas delta=%v missing=%v", d["cas.rw_syscalls"], missing)
 	}
-	per := perOp(d, 1000)
-	if per["server.cpu_user"] == nil || *per["server.cpu_user"] != 0.3 {
-		t.Errorf("per op = %v", per["server.cpu_user"])
+	// Server-side counters are divided by measured + warm-up ops; a client
+	// counter by measured ops alone.
+	d["client.cpu_user"] = 500
+	per, miss := perOp(d, 1000, 500, true)
+	if per["server.cpu_user"] == nil || *per["server.cpu_user"] != 0.2 || per["client.cpu_user"] == nil || *per["client.cpu_user"] != 0.5 || len(miss) != 0 {
+		t.Errorf("per op = %v %v missing=%v", per["server.cpu_user"], per["client.cpu_user"], miss)
 	}
-	if per := perOp(d, 0); per["server.cpu_user"] != nil {
+	if per, _ := perOp(d, 0, 0, true); per["server.cpu_user"] != nil {
 		t.Error("per op with zero ops must be null")
+	}
+	// A warming case whose client did not say how much it warmed: the
+	// server-side values are missing, the client's are not.
+	per, miss = perOp(d, 1000, 0, false)
+	if _, ok := per["server.cpu_user"]; ok || !strings.Contains(miss["server.cpu_user"], "warm_ops") || per["client.cpu_user"] == nil {
+		t.Errorf("unknown warm-up: per=%v missing=%v", per, miss)
 	}
 }
 

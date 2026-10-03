@@ -16,6 +16,7 @@ import (
 // clientRecord is the one JSON line a client prints last (Spec §7.3).
 type clientRecord struct {
 	Ops       float64             `json:"ops"`
+	WarmOps   *float64            `json:"warm_ops"` // what the warm-up did; the server-side snapshots bracket it
 	ElapsedNs float64             `json:"elapsed_ns"`
 	P50Ns     *float64            `json:"p50_ns"`
 	P99Ns     *float64            `json:"p99_ns"`

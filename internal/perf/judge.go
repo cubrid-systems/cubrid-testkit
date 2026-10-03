@@ -3,6 +3,7 @@ package perf
 import (
 	"math"
 	"sort"
+	"strings"
 )
 
 // Flags and statuses (Spec §7.6.2).
@@ -113,12 +114,31 @@ func judge(c *Case, cr *caseResult, repeats int) Verdict {
 }
 
 // deterministic says whether a counter is one FR-21 reads: the engine's own
-// statistics and the counts of what left the machine (flushes, packets).
-// Syscall counts are not among them: a JVM's socket I/O is recv/send, which
-// the kernel's read/write accounting does not see, so the client's count is
-// a few dozen whatever the work was.
+// count-valued statistics and the counts of what left the machine (flushes,
+// packets). Not among them: times and ratios, whose difference is not a
+// count of work; the page-buffer gauges, whose before/after difference means
+// nothing; and syscall counts -- a JVM's socket I/O is recv/send, which the
+// kernel's read/write accounting does not see.
 func deterministic(name string) bool {
-	return statdumpNames[name] || name == "dev_flushes" || name == "net_packets"
+	if name == "dev_flushes" || name == "net_packets" {
+		return true
+	}
+	if !statdumpNames[name] || statdumpGauges[name] {
+		return false
+	}
+	for _, s := range []string{"_usec", "_ratio", "_time"} {
+		if strings.HasSuffix(name, s) {
+			return false
+		}
+	}
+	return !strings.HasPrefix(name, "Time_")
+}
+
+// statdumpGauges are the statistics that describe a state, not work done.
+var statdumpGauges = map[string]bool{
+	"Num_data_page_fixed": true, "Num_data_page_dirty": true,
+	"Num_data_page_lru1": true, "Num_data_page_lru2": true, "Num_data_page_lru3": true,
+	"Num_data_page_victim_candidate": true, "Num_prior_lsa_list_size": true,
 }
 
 func nulls(passes []*pass) int {

@@ -295,10 +295,17 @@ func statdumpDelta(pre, post map[string]float64, wanted []string) (delta map[str
 	return
 }
 
-// perOp divides raw differences by the op count, and says null where the
-// count is zero or the counter did not move at all (Design §5.5.1).
-func perOp(raw map[string]float64, ops float64) map[string]*float64 {
-	out := map[string]*float64{}
+// perOp divides raw differences by the ops that produced them. The client's
+// own counters (client.*, net_*) cover the measured window and are divided by
+// the measured ops; everything read in the database node -- the roles, the
+// disk, statdump -- was snapshotted before the warm-up and after the
+// measurement, so it is divided by the warm-up's ops too. Without that, a
+// server-side value is inflated by the warm-up's share and moves with the
+// warm-up's speed, which FR-21 would read as a workload change. A divisor
+// of zero makes the value null; a counter that did not move is 0, not null
+// (so a build that stopped doing something is seen as a change).
+func perOp(raw map[string]float64, measuredOps, warmOps float64, warmKnown bool) (out map[string]*float64, missing map[string]string) {
+	out, missing = map[string]*float64{}, map[string]string{}
 	names := make([]string, 0, len(raw))
 	for k := range raw {
 		names = append(names, k)
@@ -306,12 +313,25 @@ func perOp(raw map[string]float64, ops float64) map[string]*float64 {
 	sort.Strings(names)
 	for _, k := range names {
 		v := raw[k]
-		if ops <= 0 {
+		divisor := measuredOps + warmOps
+		if clientSide(k) {
+			divisor = measuredOps
+		} else if !warmKnown {
+			missing[k] = k + ": the client did not report warm_ops, and the snapshot includes the warm-up"
+			continue
+		}
+		if divisor <= 0 {
 			out[k] = nil
 			continue
 		}
-		x := v / ops
+		x := v / divisor
 		out[k] = &x
 	}
-	return out
+	return out, missing
+}
+
+// clientSide says whether a counter was measured by the client over its
+// measured window alone.
+func clientSide(name string) bool {
+	return strings.HasPrefix(name, "client.") || strings.HasPrefix(name, "net_")
 }

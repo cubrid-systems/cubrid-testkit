@@ -94,8 +94,8 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 
 	// A cluster of this name left by an earlier session would be resumed by
 	// create, not replaced; it goes first (Design §7).
-	if err := s.CLI.DestroyPurge(ctx); err == nil {
-		r.logf("%s: removed what was left of an earlier %s", s.Role, s.Name)
+	if removed, err := s.CLI.DestroyPurge(ctx); err == nil && len(removed) > 0 {
+		r.logf("%s: removed what was left of an earlier %s: %s", s.Role, s.Name, strings.Join(removed, " "))
 	}
 	set := confUnion(cases)
 	opts := sandbox.CreateOptions{
@@ -313,7 +313,7 @@ func (r *Runner) destroySide(s *Side) error {
 	// Purged, not just destroyed: the describe artifact is already in the
 	// results directory, and a record left behind is what the next session's
 	// "remove what is left" would otherwise have to deal with.
-	if err := s.CLI.DestroyPurge(ctx); err != nil {
+	if _, err := s.CLI.DestroyPurge(ctx); err != nil {
 		r.logf("%s: destroy %s: %v", s.Role, s.Name, err)
 		return fmt.Errorf("%s %s: %w", s.Role, s.Name, err)
 	}

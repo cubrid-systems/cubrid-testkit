@@ -223,6 +223,7 @@ var statdumpGauges = map[string]bool{
 	"Num_data_page_fixed": true, "Num_data_page_dirty": true,
 	"Num_data_page_lru1": true, "Num_data_page_lru2": true, "Num_data_page_lru3": true,
 	"Num_data_page_victim_candidate": true, "Num_prior_lsa_list_size": true,
+	"Num_data_page_avoid_dealloc": true, "Num_data_page_avoid_victim": true,
 }
 
 func nulls(passes []*pass) int {

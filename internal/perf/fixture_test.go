@@ -88,7 +88,7 @@ func TestDeterministicIsCountValuedOnly(t *testing.T) {
 		}
 	}
 	for _, no := range []string{"Num_object_locks_time_waited_usec", "Time_ha_replication_delay", "Data_page_buffer_hit_ratio",
-		"Num_data_page_fixed", "Num_data_page_lru1", "client.rw_syscalls", "dev_reads", "server.cpu_user", "not_a_name"} {
+		"Num_data_page_fixed", "Num_data_page_lru1", "Num_data_page_avoid_victim", "client.rw_syscalls", "dev_reads", "server.cpu_user", "not_a_name"} {
 		if deterministic(no) {
 			t.Errorf("%s should not decide", no)
 		}

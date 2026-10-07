@@ -519,8 +519,8 @@ UBSan 10 건을 매번 낸다. 억제 파일(42 + 3 규칙)로 **0 건** 이 되
 
 **축 매핑**: 없음 — 오라클이 아니라 *측정*. 카탈로그 ID 만 받는다.
 
-**현황 (2026-10-02)**: `perf validate`·`perf list` 와 명세·등록·conf 파서가 트리에 있다. `session`·`run`
-은 M2. 선결은 cluster-sandbox #8~#12(열림)와 허브 확인(M0).
+**현황 (2026-10-04)**: `perf validate`·`perf list` 와 명세·등록·conf 파서가 트리에 있다. `run` 은 M2 완료
+(2026-10-03), `session` 은 M3. 선결(#8~#12, M0)은 완료.
 
 **ADR**: ADR-EXT-011 (초안).
 
@@ -581,7 +581,7 @@ engine-suite `feat/spatial-probes` 브랜치)에 귀속되며, 그 트랙이 재
 | E7 | 조건부 | C-004 책임 경계 정의 | extensions/E7-workload/ |
 | E9 | 조건부 | **E5 선행** + SERVER_MODE in-process 기동(확인됨) + **E10** | extensions/E9-storage-fuzzing/ |
 | E10 | 즉시 후보 | — (엔진 변경 없음) | extensions/E10-xasl-fixtures/ |
-| E11 | 진행 중 | cluster-sandbox #8~#12, 허브(M0) | extensions/E11-perf-runner/ |
+| E11 | 진행 중 — `run` M2 완료(2026-10-03), `session` M3 | cluster-sandbox #8~#12, 허브(M0) — 완료 | extensions/E11-perf-runner/ |
 
 근거: `survey/dbms-testing-ecosystem.md` (8축 분류, §11 카탈로그 확장 후보).
 

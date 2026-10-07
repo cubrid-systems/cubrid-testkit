@@ -15,6 +15,7 @@ type pass struct {
 	Side       string              `json:"side"`
 	Phase      string              `json:"phase"`
 	Ops        *float64            `json:"ops"`
+	WarmOps    *float64            `json:"warm_ops"`
 	ElapsedNs  *float64            `json:"elapsed_ns"`
 	P50Ns      *float64            `json:"p50_ns"`
 	P99Ns      *float64            `json:"p99_ns"`
@@ -102,6 +103,13 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	var sdpre map[string]float64
 	wantStatdump := hasStatdump(c)
 	if phase == "measure" {
+		// Vacuum left by the reset or the previous pass must not run inside
+		// the window; wait for it, within a bound, and say when the bound hit.
+		if note, err := r.waitVacuum(ctx, s, db, time.Minute); err != nil {
+			p.Notes = append(p.Notes, "vacuum wait: "+err.Error())
+		} else if note != "" {
+			p.Notes = append(p.Notes, note)
+		}
 		if note, err := r.watcherEnsure(ctx, s, db); err != nil {
 			p.Notes = append(p.Notes, "watcher: "+err.Error())
 		} else if note != "" {
@@ -140,7 +148,7 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		r.logf("%s %s rep %d: null (%s, rc %d)", c.ID, s.Role, k, reason, rc)
 	}
 	if rec != nil {
-		p.Ops, p.ElapsedNs, p.P50Ns, p.P99Ns = &rec.Ops, &rec.ElapsedNs, rec.P50Ns, rec.P99Ns
+		p.Ops, p.WarmOps, p.ElapsedNs, p.P50Ns, p.P99Ns = &rec.Ops, rec.WarmOps, &rec.ElapsedNs, rec.P50Ns, rec.P99Ns
 		if p.NullReason == "" {
 			v := metricValue(c, rec)
 			if v == nil {
@@ -184,11 +192,21 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 			}
 		}
 	}
-	ops := 0.0
+	ops, warm := 0.0, 0.0
 	if p.Ops != nil {
 		ops = *p.Ops
 	}
-	p.PerOp = perOp(p.Raw, ops)
+	// A case that warms has warm-up ops in the server-side window; one that
+	// does not (warm_s = 0) has none, whatever the client reported.
+	warmKnown := c.WarmS == 0
+	if p.WarmOps != nil {
+		warm, warmKnown = *p.WarmOps, true
+	}
+	var miss map[string]string
+	p.PerOp, miss = perOp(p.Raw, ops, warm, warmKnown)
+	for k, v := range miss {
+		p.Missing[k] = v
+	}
 	return p
 }
 

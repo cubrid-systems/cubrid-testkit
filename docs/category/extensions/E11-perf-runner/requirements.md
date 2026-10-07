@@ -2,10 +2,10 @@
 
 *English · [한국어](requirements.ko.md)*
 
-**Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.2, Design v0.1.2 (the interface
+**Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.3, Design v0.1.3 (the interface
 and the algorithms live there; this entry says what of it enters testkit, and why here)
-**Status:** incubating — **in progress** (ADR-EXT-011 proposed 2026-10-02; `perf validate`,
-`perf list` and `perf run` are in the tree, `session` follows in M3)
+**Status:** incubating — **in progress** (ADR-EXT-011 proposed 2026-10-02; `perf validate` and
+`perf list` are in the tree (M1), `perf run` was merged in #16 (M2, 2026-10-03), `session` follows in M3)
 **Axis mapping:** none of the eight — a *measurement* capability, not an oracle. The nearest
 neighbour is E7 (workload), and this is what C-004 left on testkit's side of the line
 **Companion docs:** the Spec and the Design in cubrid_cv; `io-contract` is Spec §7
@@ -29,7 +29,7 @@ registers itself in a file and is compared against its merge-base the same way.
 - It is a runner: it stands clusters up, runs a program against them on a schedule, collects what the
   program and `/proc` say, and writes files. That is what testkit is.
 - It consumes `cubrid-cluster-sandbox` the way testkit already does (ADR-022, `internal/sandbox`),
-  with the four flags the sandbox gained for it (`single` with `ha_mode=off`, `--set` to
+  with the five flags the sandbox gained for it (`single` with `ha_mode=off`, `--set` to
   `cubrid.conf`, `--client-image`, `--broker-set`, and `--cpuset`).
 - It is a **new entry point**, `testkit perf`, beside the frozen task names (`external-surface-freeze`
   §6-1: the task list is F1; a new subcommand is NF). Nothing in it changes what `testkit shell`
@@ -59,17 +59,20 @@ bound the session checks the weekend against.
 The refusals are the Spec's (§7.2): an unknown key, a missing key, a wrong type, an id that is not
 the directory, a counter off the collect layer's list (a statdump name is checked against the engine's own
 table, `statdump_names.go`, 234 names at develop `5f3a30d`), `repeats < 3`, `warmup < 1`,
-`tolerance ≤ 0`, a client shaped for another driver, a restored snapshot with `warm_s = 0`, and a
-fixture the suite does not have or has at another version. `branches.conf` refuses an unknown key,
+`tolerance ≤ 0`, a client shaped for another driver, a `clients` count that does not fit the driver (0 for a
+utility, 1 or more otherwise), a restored snapshot with `warm_s = 0`, a fixture `size` that is not a volume
+size such as `2G`, a fixture name, case directory or `client.bin` outside `[a-z][a-z0-9_]*` (a fixture's name
+becomes the database `perf_<name>`, and createdb refuses a dash), a `client.main` that is not a Java class
+name, and a fixture the suite does not have or has at another version. `branches.conf` refuses an unknown key,
 a line without `owner=`, a `repo=` that is not `owner/repo`, a date that is not a date, a glob
 that cannot match, and a branch registered twice. `perf.conf` is a closed key set too.
 
 `testkit perf run <case-id> --suite <dir> --build <target> --build <reference> [--repeats N] [--out <dir>]
 [--cpuset <list>] [--client-cpuset <list>] [--client-image <image>] [--keep]` is a session's path for one
 case: two `single` clusters through `internal/sandbox` (`CreateWith`: client image, pinning, the case's
-`cubrid.conf` keys, the broker's CAS count pinned), the fixture built on each with a reflink snapshot,
-the AB warm-up and ABBA measured passes, the L0 and statdump snapshots around each pass, the client's
-own report, the judgment, and the files of Spec §7.6 under `--out` (`regression-case.json`, `cases.csv`,
+`cubrid.conf` keys, the broker's CAS count pinned to the largest `clients`), the fixture built on each and
+snapshotted with a plain copy (`--reflink=never`), the AB warm-up and ABBA measured passes, the L0 and
+statdump snapshots around each pass, the client's own report, the judgment, and the files of Spec §7.6 under `--out` (`regression-case.json`, `cases.csv`,
 `counters.json`, the describe artifacts, `session.json`). The last line of standard output is the ratio.
 Nothing is published. The two cpusets are two flags because a CPU list has commas of its own.
 

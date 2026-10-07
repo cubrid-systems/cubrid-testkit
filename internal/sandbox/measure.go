@@ -92,12 +92,20 @@ func (c *CLI) CreateWith(ctx context.Context, o CreateOptions) error {
 	return err
 }
 
-// DestroyPurge takes a cluster down and removes its record too. The perf
-// runner uses fixed names per session and csb's create resumes a cluster of
-// the same name, so what is left of an earlier session has to go entirely.
-func (c *CLI) DestroyPurge(ctx context.Context) error {
-	_, err := c.callLong(ctx, "cluster", "destroy", "--purge")
-	return err
+// DestroyPurge takes a cluster down and removes its record too, and says
+// what it removed (nothing, for a name that had nothing). The perf runner
+// uses fixed names per session and csb's create resumes a cluster of the
+// same name, so what is left of an earlier session has to go entirely.
+func (c *CLI) DestroyPurge(ctx context.Context) ([]string, error) {
+	env, err := c.callLong(ctx, "cluster", "destroy", "--purge")
+	if err != nil {
+		return nil, err
+	}
+	var data struct {
+		Removed []string `json:"removed"`
+	}
+	_ = json.Unmarshal(env.Data, &data)
+	return data.Removed, nil
 }
 
 // DescribeRaw returns `cluster describe` as csb printed it, for a results

@@ -28,7 +28,9 @@ type Sidecar struct {
 	Interleave   string      `json:"interleave"`
 	ClientImage  ClientImage `json:"client_image"`
 	SessionValid bool        `json:"session_valid"`
-	Cases        []CaseEntry `json:"cases"`
+	// CanaryOf names the pair a canary sidecar (pair "canary") belongs to.
+	CanaryOf string      `json:"canary_of,omitempty"`
+	Cases    []CaseEntry `json:"cases"`
 }
 
 // ClientImage is the client node's image, by name and by the id the runtime
@@ -41,6 +43,7 @@ type ClientImage struct {
 }
 
 type BuildRef struct {
+	Ref         string      `json:"ref,omitempty"` // what perf.conf or the registration called it (session)
 	Build       string      `json:"build"`
 	Commit      string      `json:"commit"`
 	Fingerprint Fingerprint `json:"fingerprint"`
@@ -86,7 +89,7 @@ func metricUnit(metric string) string {
 func caseEntry(c *Case, cr *caseResult, v Verdict) CaseEntry {
 	e := CaseEntry{
 		ID: c.ID, Version: c.Version, Metric: c.Metric, Op: c.Op,
-		Target: sideValues(c, cr.measured("target")), Reference: sideValues(c, cr.measured("reference")),
+		Target: sideValues(c, cr.measured("target")), Reference: sideValues(c, cr.measured(cr.refRole())),
 		Ratio: v.Ratio, RatioOfMeans: v.RatioOfMeans, Pairs: v.Pairs, Confirmed: v.Confirmed,
 		Tolerance: c.Tolerance, Flag: v.Flag, Counters: v.Counters, Status: v.Status,
 	}

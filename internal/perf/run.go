@@ -33,6 +33,11 @@ type Runner struct {
 	Repeats              int // 0 means the case's
 	Keep                 bool
 
+	// PauseIdle pauses the other side's containers during a pass (session).
+	PauseIdle bool
+	// Guard reads the host around every measured pass (session, stage 3).
+	Guard *hostGuard
+
 	Log io.Writer
 }
 

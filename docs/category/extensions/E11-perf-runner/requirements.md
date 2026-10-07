@@ -5,7 +5,7 @@
 **Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.3, Design v0.1.3 (the interface
 and the algorithms live there; this entry says what of it enters testkit, and why here)
 **Status:** incubating — **in progress** (ADR-EXT-011 proposed 2026-10-02; `perf validate` and
-`perf list` are in the tree (M1), `perf run` was merged in #16 (M2, 2026-10-03), `session` follows in M3)
+`perf list` are in the tree (M1), `perf run` was merged in #16 (M2, 2026-10-03), `session` in M3 (2026-10-07))
 **Axis mapping:** none of the eight — a *measurement* capability, not an oracle. The nearest
 neighbour is E7 (workload), and this is what C-004 left on testkit's side of the line
 **Companion docs:** the Spec and the Design in cubrid_cv; `io-contract` is Spec §7
@@ -76,9 +76,31 @@ statdump snapshots around each pass, the client's own report, the judgment, and 
 `counters.json`, the describe artifacts, `session.json`). The last line of standard output is the ratio.
 Nothing is published. The two cpusets are two flags because a CPU list has commas of its own.
 
+`testkit perf session -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>] [--out <dir>]
+[--deadline <RFC3339>] [--id <run-id>] [--keep]` is the weekly session (Design §5.1, M3): the conf, the
+suite and the registrations read and refused as one (exit 2), the builds taken from `builds.manifest`
+(`builds.go` -- a pair the file does not have or whose tree is missing is `skipped: build missing`, a file
+older than 24 h skips every pair as `builds stale`), the fingerprints read and compared with the previous
+`*_perf-weekly` run under `$BENCH_RUNS` (FR-2), a Debug build refused, the host checked (`hub.go`: csb,
+the client image, disk, `MemAvailable`, the page-cache sudo line, bench-mode and boost recorded, and the
+`cub_server`/`postgres`/`mysqld` outside any container ended or the session refused with exit 3 -- guard
+stage 1), stale `pf-` clusters purged, then every pair: the canaries A/A on two clusters both running the
+reference build, the pair invalid and its cases `skipped` when one is outside `canary_tolerance`, then the
+cases in a per-session shuffle, grouped by `cubrid.conf` overrides (one cluster per group, `schedule.go`),
+with the idle side's containers paused during every pass and only the current fixture's server up on each
+side (`cluster.go`), the host's foreign CPU and `pswpin` read around every measured pass (guard stage 3,
+`null(contaminated)` beyond a core or any swap-in), five more ABBA pairs when the estimate is outside the
+tolerance without agreement (FR-20.1), the lease (`$BENCH_RUNS/.lease.json`) checked at every case boundary
+(L7), the budget or the `$PERF_DEADLINE` honoured at pair and case boundaries (`skipped: budget`, exit 0),
+and the files: a sidecar per pair (and `canary/`, `overlap/`), `counters.json` per case, `summary.md`,
+`ledger_rows.md`, `session.json` (`summary.go`). `--dry-run` writes the plan and `session.json` and creates
+nothing (Spec §13 A1). The results directory is `$REPORTS_DIR` when bench-client set it, and the run id is
+its name.
+
 ## 5. What comes next
 
-- **M3** — `session`: every pair of `perf.conf`, the canaries across two clusters, `builds.json` from
-  the build step, `summary.md` and `ledger_rows.md`, the timer and sudoers on the hub, the cbingest
-  branch (Design §12).
-- In engine-suite: `build_fingerprint.sh` from the build step, the rest of the primary cases.
+- On the hub: the `perf-weekly` wrapper and units, `builds.json` from the build step, `hub.json` and the
+  dashboard page (`bench-hub`), the T3 drill (Design §6.5.1 L11).
+- In conbench: the `regression-case.json` ingest branch; in engine-suite: `build_fingerprint.sh`.
+- Later: the canary redesign (Design §13 13), build isolation (§13 12), the T1 thresholds for the
+  contamination guard and the minimum absolute counter change.

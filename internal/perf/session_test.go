@@ -149,7 +149,7 @@ func TestConfGroupsFollowTheShuffledOrder(t *testing.T) {
 
 func TestBudgetBoundsAndTheClock(t *testing.T) {
 	c := &Case{ID: "x.y", Warmup: 1, Repeats: 5, BudgetS: 120, WarmS: 10}
-	if got := caseBound(c); got != 6*2*120*time.Second+fixtureSwitchBound {
+	if got := caseBound(c); got != 6*2*(120+10+60)*time.Second+fixtureSwitchBound {
 		t.Errorf("caseBound = %s", got)
 	}
 	if got := remeasureBound(c); got != 5*2*130*time.Second {
@@ -276,35 +276,46 @@ func TestForeignServersSkipContainers(t *testing.T) {
 // something else used; swap-in or more than a core of it is contamination.
 func TestHostDeltaReadsTheServerCoresAndJudges(t *testing.T) {
 	stat := "cpu  1 2 3 4 5 6 7 8 0 0\ncpu0 100 0 50 1000 10 1 2 0 0 0\ncpu1 200 0 50 1000 10 1 2 0 0 0\ncpu2 999 0 0 0 0 0 0 0 0 0\n"
-	busy, err := serverBusyFromStat(stat, []int{0, 1})
-	if err != nil || busy != (100+50+1+2+200+50+1+2)/clockTicks {
-		t.Errorf("busy = %v, %v", busy, err)
+	busy, irq, err := serverBusyFromStat(stat, []int{0, 1})
+	if err != nil || busy != (100+50+200+50)/clockTicks || irq != (1+2+1+2)/clockTicks {
+		t.Errorf("busy = %v irq = %v, %v", busy, irq, err)
 	}
-	if _, err := serverBusyFromStat(stat, []int{0, 7}); err == nil {
+	if _, _, err := serverBusyFromStat(stat, []int{0, 7}); err == nil {
 		t.Error("a core /proc/stat does not have must be an error")
 	}
 	cores, err := parseCPUList("0-7,16-23")
 	if err != nil || len(cores) != 16 || cores[8] != 16 {
 		t.Errorf("parseCPUList = %v, %v", cores, err)
 	}
-	g := &hostGuard{}
+	g := &hostGuard{threshold: 1}
 	pre := hostSnapshot{at: time.Unix(0, 0), busyS: 100, clusterS: 90, pswpin: 5}
 	post := hostSnapshot{at: time.Unix(60, 0), busyS: 190, clusterS: 170, pswpin: 5}
 	d := g.delta(pre, post)
-	if d.ForeignCPU != 10 || d.ElapsedS != 60 || d.contaminated() != "" {
-		t.Errorf("10 s of foreign CPU over 60 s is not contamination: %+v (%s)", d, d.contaminated())
+	if d.ForeignCPU != 10 || d.ElapsedS != 60 || d.contaminated(g.threshold) != "" {
+		t.Errorf("10 s of foreign CPU over 60 s is not contamination: %+v (%s)", d, d.contaminated(g.threshold))
 	}
 	post.busyS = 100 + 90 + 80
-	if d := g.delta(pre, post); d.contaminated() == "" {
+	if d := g.delta(pre, post); d.contaminated(g.threshold) == "" {
 		t.Errorf("90 s of foreign CPU over 60 s is contamination: %+v", d)
 	}
+	if d := g.delta(pre, post); d.contaminated(0) != "" {
+		t.Error("a threshold of 0 records and nulls nothing")
+	}
 	post.busyS, post.pswpin = 190, 6
-	if d := g.delta(pre, post); !strings.Contains(d.contaminated(), "swapped") {
-		t.Errorf("a page swapped in is contamination: %+v", d)
+	if d := g.delta(pre, post); !strings.Contains(d.contaminated(0), "swapped") {
+		t.Errorf("a page swapped in is contamination whatever the threshold: %+v", d)
 	}
 	post.unreadable = []string{"x"}
-	if d := g.delta(pre, post); d.contaminated() != "" {
+	if d := g.delta(pre, post); d.contaminated(g.threshold) != "" {
 		t.Error("an unreadable counter is not contamination")
+	}
+	// The cgroups follow the clusters that are up: a destroyed cluster's
+	// vanished cpu.stat must not make every later reading unreadable.
+	g.add("pf-x-t", "/nonexistent/t")
+	g.add("pf-x-r", "/nonexistent/r")
+	g.remove("pf-x-t")
+	if len(g.cgroups) != 1 || g.cgroups["pf-x-r"] == "" {
+		t.Errorf("cgroups = %v", g.cgroups)
 	}
 }
 
@@ -374,10 +385,20 @@ func TestSummaryTablesAndLedgerRows(t *testing.T) {
 	}
 	md, _ := os.ReadFile(filepath.Join(s.Out, "summary.md"))
 	text := string(md)
+	s.left = []string{"old/expired: expired 2020-01-01", "too/many: beyond branches.max=3, and the oldest registration"}
+	develop.Overlap = &BuildRef{Ref: "/b/11.5.0-1a2b3c4", Build: "/b/11.5.0-1a2b3c4", Commit: "1a2b3c4000"}
+	develop.overlapEntries = []CaseEntry{{ID: "sql.pk_select", Version: 1, Ratio: f(1.09), Tolerance: 0.05, Flag: FlagRegression, Status: StatusOK}}
+	if err := s.summary(); err != nil {
+		t.Fatal(err)
+	}
+	md, _ = os.ReadFile(filepath.Join(s.Out, "summary.md"))
+	text = string(md)
 	for _, want := range []string{
 		"# perf-weekly", "develop 9fc1a2b vs 11.4.6 0e7d3c1",
+		"| develop+overlap | sql.pk_select@v1 | 1.09 ↑ | ±0.05 | lee |",
+		"| old/expired | 제외됨 — 만료 2020-01-01 |", "| too/many | 제외됨 — beyond branches.max=3",
 		"세션: develop: 유효 (카나리 2/2 허용폭 안)",
-		"## flag 2", "| develop | txn.commit_single@v1 | 1.11 ↑ | ±0.05 | hgryoo | `testkit perf run txn.commit_single",
+		"## flag 3", "| develop | txn.commit_single@v1 | 1.11 ↑ | ±0.05 | hgryoo | `testkit perf run txn.commit_single",
 		"| develop | sql.pk_select@v1 | 0.93 ↓ (improvement) | ±0.05 | lee |",
 		"## 미판정 (지난 세션) 1", "| storage.create_index@v1 | 20261004_perf-weekly | 1.08 |",
 		"| feature/dwb-rework | 제외됨 — fetch |",
@@ -394,5 +415,87 @@ func TestSummaryTablesAndLedgerRows(t *testing.T) {
 	rows, _ := os.ReadFile(filepath.Join(s.Out, "ledger_rows.md"))
 	if !strings.Contains(string(rows), "| 20261011_perf-weekly | txn.commit_single@v1 | 1.11 | (미판정) | | develop/txn.commit_single |") || strings.Contains(string(rows), "backupdb") {
 		t.Errorf("ledger_rows.md:\n%s", rows)
+	}
+}
+
+// An overlap comparison's passes carry the overlap side's role; the judge
+// and the sidecar read them as the reference (FR-29).
+func TestJudgeReadsTheOverlapSideAsReference(t *testing.T) {
+	cs := &Case{ID: "x.y", Metric: "elapsed_s", Tolerance: 0.05, Repeats: 3}
+	cr := &caseResult{Case: cs, Reference: "overlap"}
+	for k := 1; k <= 3; k++ {
+		cr.Passes = append(cr.Passes, measuredPass("target", k, 11, nil), measuredPass("overlap", k, 10, nil))
+	}
+	v := judge(cs, cr, 3)
+	if v.Status != StatusOK || v.Ratio == nil || abs(*v.Ratio-1.1) > 1e-9 || v.Flag != FlagRegression {
+		t.Errorf("verdict = %+v", v)
+	}
+	e := caseEntry(cs, cr, v)
+	if len(e.Reference.Values) != 3 || e.Reference.Values[0] == nil || *e.Reference.Values[0] != 10 {
+		t.Errorf("the sidecar's reference values are the overlap side's: %+v", e.Reference)
+	}
+}
+
+// FR-2 looks back to the newest session that measured the pair: one that
+// skipped it is not a fingerprint to compare with.
+func TestPreviousPairSkipsSessionsThatDidNotMeasureIt(t *testing.T) {
+	root := t.TempDir()
+	write := func(id string, p SessionPair) {
+		dir := filepath.Join(root, id, "results")
+		_ = os.MkdirAll(dir, 0o755)
+		doc := SessionDoc{Pairs: []*SessionPair{&p}}
+		if err := writeJSON(filepath.Join(dir, "session.json"), &doc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("20260927_perf-weekly", SessionPair{Name: "develop", Target: BuildRef{Fingerprint: Fingerprint{Compiler: "gcc 8.5.0", BuildType: "RelWithDebInfo"}}})
+	write("20261004_perf-weekly", SessionPair{Name: "develop", Skipped: "builds stale"})
+	write("20261011_perf-weekly", SessionPair{Name: "develop", Target: BuildRef{Fingerprint: Fingerprint{Compiler: "gcc 8.5.1"}}})
+	p, id := previousPair(root, "20261011_perf-weekly", "develop")
+	if p == nil || id != "20260927_perf-weekly" || p.Target.Fingerprint.Compiler != "gcc 8.5.0" {
+		t.Errorf("previous = %v from %q", p, id)
+	}
+	if p, _ := previousPair(root, "20261011_perf-weekly", "feature/x"); p != nil {
+		t.Error("a pair no session measured has no previous")
+	}
+}
+
+// A session with nothing to run ends well, before any host check: the
+// summary says why and the exit is 0 (L9, Design §8).
+func TestSessionWithNothingToRunEndsWell(t *testing.T) {
+	dir := t.TempDir()
+	abs, _ := filepath.Abs(filepath.Join("testdata", "suite"))
+	manifest := filepath.Join(dir, "builds.json")
+	writeManifest(t, manifest, time.Now().Add(-48*time.Hour), map[string]*ManifestPair{})
+	conf := strings.Join([]string{
+		"pair.develop = develop-HEAD ; /nonexistent/ref",
+		"suite = " + abs,
+		"builds = " + dir,
+		"builds.manifest = " + manifest,
+		"canaries = txn.commit_single",
+		"canary_tolerance = 0.05",
+		"interleave = case",
+		"session_budget_s = 3600",
+		"csb = /nonexistent/csb",
+		"csb_home = " + filepath.Join(dir, "csb"),
+		"client_image = localhost/perf-client:none",
+		"report.mode = dry",
+	}, "\n") + "\n"
+	confPath := filepath.Join(dir, "perf.conf")
+	_ = os.WriteFile(confPath, []byte(conf), 0o644)
+	out := filepath.Join(dir, "out")
+	code, _, errs := run("session", "-c", confPath, "--out", out, "--id", "20261011_perf-weekly")
+	if code != ExitOK {
+		t.Fatalf("code=%d\n%s", code, errs)
+	}
+	b, _ := os.ReadFile(filepath.Join(out, "session.json"))
+	var doc SessionDoc
+	_ = json.Unmarshal(b, &doc)
+	if doc.State != "complete" || doc.ExitReason != "nothing to run" || doc.Pairs[0].Skipped != "builds stale" || doc.Valid {
+		t.Errorf("doc = %s/%s, pair %q, valid %t", doc.State, doc.ExitReason, doc.Pairs[0].Skipped, doc.Valid)
+	}
+	md, _ := os.ReadFile(filepath.Join(out, "summary.md"))
+	if !strings.Contains(string(md), "develop: 건너뜀 (builds stale)") || strings.Contains(string(md), "incomplete") {
+		t.Errorf("summary.md:\n%s", md)
 	}
 }

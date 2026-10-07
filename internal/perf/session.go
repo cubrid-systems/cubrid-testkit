@@ -33,8 +33,9 @@ type Session struct {
 
 	doc       *SessionDoc
 	leaseFile string
-	tracking  bool // whether the lease is this run's to lose
-	runs      string
+	tracking  bool     // whether the lease is this run's to lose
+	runs      string   // the runs root, for the previous sessions
+	left      []string // registrations left out: "<branch>: <reason>"
 }
 
 // SessionDoc is session.json (Design §4.2).
@@ -159,7 +160,8 @@ func (s *Session) note(format string, args ...any) {
 	s.logf(format, args...)
 }
 
-func (s *Session) writeDoc(state, reason string) {
+// setState settles the document's state and totals without writing it.
+func (s *Session) setState(state, reason string) {
 	s.doc.State, s.doc.ExitReason, s.doc.Ended = state, reason, time.Now()
 	ran, valid, flags := 0, true, 0
 	for _, p := range s.doc.Pairs {
@@ -171,9 +173,23 @@ func (s *Session) writeDoc(state, reason string) {
 		flags += p.Flags
 	}
 	s.doc.Valid, s.doc.Flags = ran > 0 && valid, flags
+}
+
+func (s *Session) writeDoc(state, reason string) {
+	s.setState(state, reason)
 	if err := writeJSON(filepath.Join(s.Out, "session.json"), s.doc); err != nil {
 		s.logf("session.json: %v", err)
 	}
+}
+
+// finish is the end of every path that got as far as a results directory:
+// the summary (which reads the state), then session.json.
+func (s *Session) finish(state, reason string) {
+	s.setState(state, reason)
+	if err := s.summary(); err != nil {
+		s.note("summary: %v", err)
+	}
+	s.writeDoc(state, reason)
 }
 
 // run is Session(conf) of Design §5.1.
@@ -206,7 +222,6 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		canaries = append(canaries, cc)
 	}
 	var active []Branch
-	var left []string
 	if c.Branches != "" {
 		all, err := ReadBranches(c.Branches)
 		if err != nil {
@@ -215,9 +230,14 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			}
 			return ExitRefused
 		}
-		active, left = Active(all, c.BranchesMax, s.Started)
+		active, s.left = Active(all, c.BranchesMax, s.Started)
 	}
 	s.CPUSet, s.ClientCPUSet, s.ClientImage, s.CSBBin = c.CPUSetServer, c.CPUSetClient, c.ClientImage, c.CSB
+	// csb, sandbox.Home() and the work directories all go by $CSB_HOME; the
+	// conf's value is the one that counts.
+	if c.CSBHome != "" {
+		os.Setenv("CSB_HOME", absolute(c.CSBHome))
+	}
 	s.runs = runsRoot()
 	s.leaseFile = filepath.Join(s.runs, ".lease.json")
 
@@ -225,7 +245,7 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		Schema: "perf-regression-session/1", ID: s.SessionID, Kind: "session", Started: s.Started, State: "incomplete",
 		Host: hostname(), Interleave: c.Interleave, CPUSet: CPUSetPair{Server: s.CPUSet, Client: s.ClientCPUSet},
 		Pinning: s.pinning(), BudgetS: c.SessionBudgetS, Preflight: map[string]any{}, Pairs: []*SessionPair{},
-		Guard: GuardReport{Before: []string{}, Cleaned: []string{}, Left: []string{}},
+		Guard: GuardReport{Before: []string{}, Cleaned: []string{}, Left: []string{}, OtherUsers: []string{}, InContainers: []string{}},
 	}
 	s.Clock = clock{End: s.Started.Add(time.Duration(c.SessionBudgetS) * time.Second)}
 	if !deadline.IsZero() {
@@ -234,7 +254,7 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			s.Clock.End = deadline
 		}
 	}
-	for _, l := range left {
+	for _, l := range s.left {
 		s.note("registration left out: %s", l)
 	}
 
@@ -270,20 +290,28 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		s.Pairs = kept
 	}
 	s.doc.Pairs = s.Pairs
-	prev, prevID := previousPairs(s.runs, s.SessionID)
-	s.doc.Previous = prevID
 	for _, p := range s.Pairs {
 		if p.Skipped != "" {
 			continue
 		}
 		p.fingerprints()
 		if d := p.debugBuild(); d != "" {
-			fmt.Fprintf(s.Log, "testkit perf session: pair %s: %s is a Debug build; only Release builds are measured (Spec §12)\n", p.Name, d)
-			return ExitRefused
+			// Spec §12: a Debug build is not measured. A conf pair is the
+			// session's reason to exist and refuses it; a registration is
+			// one pair among others and is skipped by itself.
+			if p.branch == nil {
+				fmt.Fprintf(s.Log, "testkit perf session: pair %s: %s is a Debug build; only Release builds are measured (Spec §12)\n", p.Name, d)
+				return ExitRefused
+			}
+			p.Skipped = "debug build: " + d
+			continue
 		}
 		p.selected = selectCases(suite, p.branch, s.Only)
-		// FR-2: against the previous session's same pair.
-		if pp := prev[p.Name]; pp != nil {
+		// FR-2: against the newest earlier session that measured this pair.
+		if pp, id := previousPair(s.runs, s.SessionID, p.Name); pp != nil {
+			if s.doc.Previous == "" {
+				s.doc.Previous = id
+			}
 			var diffs []string
 			if d := fingerprintDiff(pp.Target.Fingerprint, p.Target.Fingerprint); d != "" {
 				diffs = append(diffs, "target: "+d)
@@ -293,23 +321,37 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			}
 			if len(diffs) > 0 {
 				p.FingerprintChanged = true
-				p.FingerprintNote = strings.Join(diffs, "; ")
+				p.FingerprintNote = fmt.Sprintf("since %s: %s", id, strings.Join(diffs, "; "))
 			}
 		}
 	}
-
-	// 3. The host (Design §7, §11; Spec FR-6.1, FR-6.2 stage 1).
 	if err := os.MkdirAll(s.Out, 0o755); err != nil {
 		fmt.Fprintf(s.Log, "testkit perf session: %v\n", err)
 		return ExitEnvironment
 	}
+	runnable := 0
+	for _, p := range s.Pairs {
+		if p.Skipped == "" {
+			runnable++
+		}
+	}
+	if runnable == 0 {
+		// Nothing to run is a session that ends well (L9, Design §8): the
+		// summary says why, and no host check turns it into a failure.
+		s.note("no pair can run; the session ends without a measurement")
+		s.plan(canaries)
+		s.finish("complete", "nothing to run")
+		return ExitOK
+	}
+
+	// 3. The host (Design §7, §11; Spec FR-6.1, FR-6.2 stage 1).
 	s.doc.BenchMode = benchModeState()
 	if s.doc.BenchMode.Boost != nil && *s.doc.BenchMode.Boost {
 		s.note("CPU boost is on; the session continues (FR-6.1)")
 	}
 	code := s.preflight()
 	if code != ExitOK && !s.DryRun {
-		s.writeDoc("incomplete", "preflight")
+		s.finish("incomplete", "preflight")
 		return code
 	}
 	guard, gerr := guardBefore(filepath.Join(s.Out, "guard"), !s.DryRun)
@@ -317,11 +359,17 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 	if gerr != nil {
 		s.note("guard: %v", gerr)
 		if !s.DryRun {
-			s.writeDoc("incomplete", "guard")
+			s.finish("incomplete", "guard")
 			return ExitEnvironment
 		}
 	} else if len(guard.Cleaned) > 0 {
 		s.note("guard: stopped %d server process(es) outside the clusters", len(guard.Cleaned))
+	}
+	if len(guard.OtherUsers) > 0 {
+		s.note("guard: %d server process(es) of other users on this host could not be stopped; the session continues beside them", len(guard.OtherUsers))
+	}
+	if len(guard.InContainers) > 0 {
+		s.note("guard: %d server process(es) in containers that are not pf- clusters; left alone", len(guard.InContainers))
 	}
 	if !s.DryRun {
 		s.tracking = leaseHeldBy(s.leaseFile, s.SessionID)
@@ -330,9 +378,8 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		}
 	}
 	if s.CPUSet != "" {
-		cores, err := parseCPUList(s.CPUSet)
-		if err == nil {
-			s.Guard = &hostGuard{cores: cores}
+		if cores, err := parseCPUList(s.CPUSet); err == nil {
+			s.Guard = &hostGuard{cores: cores, threshold: contaminationCores}
 		}
 	}
 
@@ -347,7 +394,8 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		s.note("cleanup of earlier pf- clusters: %v", err)
 	}
 
-	// 5. The pairs.
+	// 5. The pairs. A pair counts as run once its sidecar is on disk,
+	// whether or not the session's clock stopped it part-way (FR-5).
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	reason := "done"
@@ -367,12 +415,11 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			continue
 		}
 		attempted++
-		how := s.runPair(ctx, p, canaries)
-		switch how {
-		case "ok":
+		if why := s.runPair(ctx, p, canaries); why != "" {
+			reason = why
+		}
+		if p.written {
 			ok++
-		case "lease", "signal", "budget":
-			reason = how
 		}
 		s.writeDoc("incomplete", "")
 	}
@@ -381,14 +428,11 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 	}
 
 	// 6. What a reader gets (§5.10).
-	if err := s.summary(); err != nil {
-		s.note("summary: %v", err)
-	}
 	state := "complete"
 	if reason == "signal" || reason == "lease" {
 		state = "incomplete"
 	}
-	s.writeDoc(state, reason)
+	s.finish(state, reason)
 	switch {
 	case reason == "signal" || reason == "lease":
 		return ExitEnvironment
@@ -469,7 +513,7 @@ func (s *Session) plan(canaries []*Case) {
 			s.logf("pair %s: overlap %s (%s)", p.Name, p.Overlap.Build, short(p.Overlap.Commit))
 		}
 		if p.FingerprintChanged {
-			s.logf("pair %s: fingerprint changed since %s: %s", p.Name, s.doc.Previous, p.FingerprintNote)
+			s.logf("pair %s: fingerprint changed %s", p.Name, p.FingerprintNote)
 		}
 		order := shuffled(p.selected, seedFrom(s.SessionID+"/"+p.Name))
 		var names []string
@@ -538,11 +582,26 @@ func (ss *sides) all() []*Side {
 	return out
 }
 
+// frozen names the first side that could not be unpaused, or "".
+func (ss *sides) frozen() string {
+	for _, s := range ss.all() {
+		if s.frozen != nil {
+			return fmt.Sprintf("cluster: %s could not be unpaused: %v", s.Role, s.frozen)
+		}
+	}
+	return ""
+}
+
 // runPair is one pair of Design §5.1: the canary gate, then the cases. It
-// returns "ok", "skipped", or the reason the session must stop.
+// returns the reason the session must stop ("budget", "lease", "signal"),
+// or "" when the session goes on to the next pair -- which includes a pair
+// that could not stand its clusters up (p.Skipped says so) and a pair that
+// ran part-way (p.written says the sidecar is there).
 func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case) string {
 	start := time.Now()
 	pairDir := filepath.Join(s.Out, p.Name)
+	canaryDir := filepath.Join(pairDir, "canary")
+	overlapDir := filepath.Join(pairDir, "overlap")
 	s.logf("pair %s: start", p.Name)
 	ss := &sides{}
 	defer func() {
@@ -558,6 +617,12 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 			}
 		}
 	}()
+	ctxStop := func() string {
+		if ctx.Err() != nil {
+			return "signal"
+		}
+		return ""
+	}
 	// The cases that share a conf key share a cluster; a cluster is created
 	// with every case of its key so it serves the canaries and the cases alike.
 	byKey := map[string][]*Case{}
@@ -567,12 +632,14 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 			byKey[k] = append(byKey[k], c)
 		}
 	}
-	ensure := func(slot **Side, role, suffix, build, key string) error {
+	// ensure has a side up on the build for the conf key, recreating it when
+	// the key changed; dir is where its describe artifact and logs go.
+	ensure := func(slot **Side, role, suffix, build, key, dir string) error {
 		if *slot != nil && (*slot).confKey == key {
 			return nil
 		}
 		if *slot != nil {
-			s.keepLogs(*slot, pairDir)
+			s.keepLogs(*slot, dir)
 			if err := s.destroySide(*slot); err != nil {
 				return err
 			}
@@ -585,8 +652,8 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 				p.Clusters = append(p.Clusters, side.Name)
 			}
 			if raw, derr := side.CLI.DescribeRaw(ctx); derr == nil {
-				_ = os.MkdirAll(filepath.Join(s.Out, "clusters"), 0o755)
-				_ = os.WriteFile(filepath.Join(s.Out, "clusters", side.Name+".describe.json"), append(raw, '\n'), 0o644)
+				_ = os.MkdirAll(filepath.Join(dir, "clusters"), 0o755)
+				_ = os.WriteFile(filepath.Join(dir, "clusters", side.Name+".describe.json"), append(raw, '\n'), 0o644)
 			}
 		}
 		if err != nil {
@@ -594,48 +661,70 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		}
 		return s.buildFixtures(ctx, side, s.Suite, byKey[key])
 	}
-	fail := func(what string, err error) string {
-		s.note("pair %s: %s: %v", p.Name, what, err)
-		if ctx.Err() != nil {
-			return "signal"
-		}
-		p.Skipped = what
-		return "skipped"
-	}
 
 	// Canaries: the target's cluster stood up on the reference build, an A/A
 	// across the two clusters (FR-3, D9).
 	var canaryEntries []CaseEntry
 	canaryVerdicts := map[string]Verdict{}
+	stop := ""
 	for _, g := range confGroups(canaries) {
-		if err := ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key); err != nil {
-			return fail("cluster", err)
+		if err := ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key, pairDir); err != nil {
+			s.note("pair %s: cluster: %v", p.Name, err)
+			p.Skipped = "cluster"
+			return ctxStop()
 		}
-		if err := ensure(&ss.t, "target", "t", p.Reference.Build, g.Key); err != nil {
-			return fail("cluster", err)
+		if err := ensure(&ss.t, "target", "t", p.Reference.Build, g.Key, canaryDir); err != nil {
+			s.note("pair %s: cluster: %v", p.Name, err)
+			p.Skipped = "cluster"
+			return ctxStop()
 		}
-		res, stop := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, filepath.Join(pairDir, "canary"), true)
+		res, st := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, nil, canaryDir, true)
 		for _, cr := range res {
 			canaryEntries = append(canaryEntries, cr.entry)
 			canaryVerdicts[cr.entry.ID] = cr.verdict
 			p.Canaries = append(p.Canaries, canaryOf(cr, s.Conf.CanaryTolerance))
 		}
-		if stop != "" {
-			s.writeCanarySidecar(p, pairDir, canaryEntries, canaryVerdicts)
-			return stop
+		if st != "" {
+			stop = st
+			break
+		}
+		if why := ss.frozen(); why != "" {
+			s.note("pair %s: %s", p.Name, why)
+			p.Skipped = why
+			break
 		}
 	}
-	p.Valid = len(p.Canaries) == len(canaries)
+	p.Valid = stop == "" && p.Skipped == "" && len(p.Canaries) == len(canaries)
 	for _, cn := range p.Canaries {
 		p.Valid = p.Valid && cn.OK
 	}
-	s.writeCanarySidecar(p, pairDir, canaryEntries, canaryVerdicts)
+	s.writeCanarySidecar(p, canaryDir, canaryEntries, canaryVerdicts)
 	if ss.t != nil {
-		s.keepLogs(ss.t, pairDir)
+		s.keepLogs(ss.t, canaryDir)
 		if err := s.destroySide(ss.t); err != nil {
 			s.note("pair %s: teardown of the canary cluster: %v", p.Name, err)
 		}
 		ss.t = nil
+	}
+	if stop != "" || p.Skipped != "" {
+		// The session stopped, or the clusters failed, before a case ran:
+		// the cases are on record as skipped for that reason, the pair is
+		// not "invalid" -- nothing judged it.
+		why := stop
+		if why == "" {
+			why = p.Skipped
+		}
+		if stop != "" {
+			p.Skipped = stop
+		}
+		var entries []CaseEntry
+		for _, c := range p.selected {
+			entries = append(entries, skippedEntry(c, why))
+		}
+		p.CasesSkipped = len(entries)
+		p.entries = entries
+		s.writeSidecar(p, p.Name, pairDir, p.Reference, false, entries, map[string]Verdict{})
+		return stop
 	}
 	if !p.Valid {
 		why := "canary outside the tolerance"
@@ -653,18 +742,21 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		p.CasesSkipped = len(entries)
 		p.entries = entries
 		s.writeSidecar(p, p.Name, pairDir, p.Reference, false, entries, map[string]Verdict{})
-		return "ok"
+		p.written = true
+		return ""
 	}
 
-	// The cases, A/B, in this session's order, by conf group.
+	// The cases, A/B, in this session's order, by conf group. A group whose
+	// clusters cannot be stood up skips its cases and the ones after it;
+	// what was judged before stays on record.
 	order := shuffled(p.selected, seedFrom(s.SessionID+"/"+p.Name))
 	var entries, overlapEntries []CaseEntry
 	verdicts, overlapVerdicts := map[string]Verdict{}, map[string]Verdict{}
-	stopped := ""
+	broken := ""
 	for _, g := range confGroups(order) {
-		if stopped != "" {
+		if stop != "" || broken != "" {
 			for _, c := range g.Cases {
-				entries = append(entries, skippedEntry(c, stopped))
+				entries = append(entries, skippedEntry(c, firstNonEmptyStr(stop, broken)))
 			}
 			continue
 		}
@@ -675,32 +767,47 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 			}
 			continue
 		}
-		if err := ensure(&ss.t, "target", "t", p.Target.Build, g.Key); err != nil {
-			return fail("cluster", err)
-		}
-		if err := ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key); err != nil {
-			return fail("cluster", err)
-		}
-		if p.Overlap != nil {
-			if err := ensure(&ss.o, "overlap", "o", p.Overlap.Build, g.Key); err != nil {
-				return fail("cluster", err)
+		var err error
+		if err = ensure(&ss.t, "target", "t", p.Target.Build, g.Key, pairDir); err == nil {
+			if err = ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key, pairDir); err == nil && p.Overlap != nil {
+				err = ensure(&ss.o, "overlap", "o", p.Overlap.Build, g.Key, overlapDir)
 			}
 		}
-		res, stop := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, pairDir, false)
+		if err != nil {
+			s.note("pair %s: cluster: %v", p.Name, err)
+			if ctx.Err() != nil {
+				stop = "signal"
+			} else {
+				broken = "cluster: " + err.Error()
+			}
+			for _, c := range g.Cases {
+				entries = append(entries, skippedEntry(c, firstNonEmptyStr(stop, broken)))
+			}
+			continue
+		}
+		res, st := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, []*Side{ss.o}, pairDir, false)
 		for _, cr := range res {
 			entries = append(entries, cr.entry)
 			verdicts[cr.entry.ID] = cr.verdict
 		}
-		if stop == "" && ss.o != nil {
-			ores, ostop := s.runGroup(ctx, p, g.Cases, ss.t, ss.o, filepath.Join(pairDir, "overlap"), false)
+		if st == "" && ss.o != nil && ss.frozen() == "" {
+			// FR-29: the same target against the second reference, with the
+			// first reference idle -- its fixture servers down as well.
+			if err := s.stopOthers(ctx, ss.r, nil); err != nil {
+				s.note("pair %s: stopping the reference's servers for the overlap: %v", p.Name, err)
+			}
+			ores, ost := s.runGroup(ctx, p, g.Cases, ss.t, ss.o, []*Side{ss.r}, overlapDir, false)
 			for _, cr := range ores {
 				overlapEntries = append(overlapEntries, cr.entry)
 				overlapVerdicts[cr.entry.ID] = cr.verdict
 			}
-			stop = ostop
+			st = ost
 		}
-		if stop != "" {
-			stopped = stop
+		if st != "" {
+			stop = st
+		} else if why := ss.frozen(); why != "" {
+			s.note("pair %s: %s", p.Name, why)
+			broken = why
 		}
 	}
 	for _, e := range entries {
@@ -717,19 +824,17 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 			p.CasesSkipped++
 		}
 	}
-	p.entries = entries
+	p.entries, p.overlapEntries = entries, overlapEntries
 	s.writeSidecar(p, p.Name, pairDir, p.Reference, true, entries, verdicts)
-	if ss.o != nil {
-		s.writeSidecar(p, p.Name+"-overlap", filepath.Join(pairDir, "overlap"), *p.Overlap, true, overlapEntries, overlapVerdicts)
+	if p.Overlap != nil {
+		s.writeSidecar(p, p.Name+"+overlap", overlapDir, *p.Overlap, true, overlapEntries, overlapVerdicts)
+	}
+	p.written = true
+	if broken != "" && p.CasesRun == 0 {
+		p.Skipped = broken
 	}
 	s.logf("pair %s: done in %s: %d run, %d null, %d skipped, %d flag(s)", p.Name, time.Since(start).Round(time.Second), p.CasesRun, p.CasesNull, p.CasesSkipped, p.Flags)
-	switch stopped {
-	case "lease", "signal":
-		return stopped
-	case "budget":
-		return "budget"
-	}
-	return "ok"
+	return stop
 }
 
 // groupMemory is Design §7's check: the group's data_buffer_size on every
@@ -767,13 +872,16 @@ type caseRun struct {
 
 // runGroup is Design §5.1's runGroup: the cases in order, each with the
 // lease and the budget checked first, the fixture servers switched, the
-// case measured, re-measured when the pairs disagree (FR-20.1), judged and
-// written. It returns what it has and why it stopped, if it did.
-func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t, ref *Side, dir string, canary bool) ([]caseRun, string) {
+// case measured (the idle sides paused), re-measured when the pairs
+// disagree (FR-20.1), judged and written. It returns what it has and the
+// session-level reason it stopped, if it did; a side that could not be
+// unpaused stops the group with the rest of its cases skipped, and the
+// caller reads the sides' frozen marks.
+func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t, ref *Side, idle []*Side, dir string, canary bool) ([]caseRun, string) {
 	var out []caseRun
-	stop := ""
+	stop, broken := "", ""
 	for i, c := range cases {
-		if stop == "" {
+		if stop == "" && broken == "" {
 			switch {
 			case ctx.Err() != nil:
 				stop = "signal"
@@ -785,8 +893,8 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 				stop = "budget"
 			}
 		}
-		if stop != "" {
-			out = append(out, caseRun{entry: skippedEntry(c, stop), verdict: Verdict{Status: StatusSkipped, Flag: FlagNone}})
+		if stop != "" || broken != "" {
+			out = append(out, caseRun{entry: skippedEntry(c, firstNonEmptyStr(stop, broken)), verdict: Verdict{Status: StatusSkipped, Flag: FlagNone}})
 			continue
 		}
 		f := s.Suite.Fixtures[c.Fixture.Name]
@@ -809,13 +917,13 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 			out = append(out, caseRun{entry: skippedEntry(c, "cluster: "+switchErr.Error()), verdict: Verdict{Status: StatusSkipped, Flag: FlagNone}})
 			continue
 		}
-		cr := s.runCase(ctx, c, f, t, ref)
+		cr := s.runCase(ctx, c, f, t, ref, idle...)
 		reps := s.repeats(c)
 		v := judge(c, cr, reps)
 		if !canary && v.Status == StatusOK && v.Ratio != nil && !v.Confirmed && outsideTolerance(*v.Ratio, c.Tolerance) {
-			if s.Clock.fits(time.Now(), remeasureBound(c)) && ctx.Err() == nil {
+			if s.Clock.fits(time.Now(), remeasureBound(c)) && ctx.Err() == nil && t.frozen == nil && ref.frozen == nil {
 				s.logf("%s: ratio %.4f outside the tolerance without agreement; re-measuring %d pairs (FR-20.1)", c.ID, *v.Ratio, remeasurePairs)
-				s.measurePasses(ctx, cr, c, f, t, ref, reps+1, reps+remeasurePairs)
+				s.measurePasses(ctx, cr, c, f, t, ref, reps+1, reps+remeasurePairs, idle...)
 				reps += remeasurePairs
 				v = judge(c, cr, reps)
 			} else {
@@ -835,11 +943,24 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 		}
 		e := caseEntry(c, cr, v)
 		if canary {
+			// A canary is an A/A: its verdict is the pair's validity, read
+			// by canaryOf with canary_tolerance, never a flag on the case.
+			e.Flag, e.Tolerance = FlagNone, s.Conf.CanaryTolerance
+			if v.Flag != FlagNone && e.Reason == "" {
+				e.Reason = "A/A"
+			}
 			s.logf("canary %s: ratio %s status %s", c.ID, fmtPtr(v.Ratio), v.Status)
 		} else {
 			s.logf("%s: ratio %s flag %s status %s (%d pairs, confirmed %t)", c.ID, fmtPtr(v.Ratio), v.Flag, v.Status, len(v.Pairs), v.Confirmed)
 		}
 		out = append(out, caseRun{entry: e, verdict: v})
+		for _, side := range append([]*Side{t, ref}, idle...) {
+			if side != nil && side.frozen != nil {
+				broken = fmt.Sprintf("cluster: %s could not be unpaused: %v", side.Role, side.frozen)
+				s.note("pair %s: %s; %d case(s) not run", p.Name, broken, len(cases)-i-1)
+				break
+			}
+		}
 	}
 	return out, stop
 }
@@ -894,7 +1015,7 @@ func (s *Session) writeSidecar(p *SessionPair, pairName, dir string, reference B
 
 // writeCanarySidecar is the canaries' own sidecar: pair "canary", both
 // sides the reference build, so cbingest posts the ratio alone (§4.3).
-func (s *Session) writeCanarySidecar(p *SessionPair, pairDir string, entries []CaseEntry, verdicts map[string]Verdict) {
+func (s *Session) writeCanarySidecar(p *SessionPair, dir string, entries []CaseEntry, verdicts map[string]Verdict) {
 	if entries == nil {
 		entries = []CaseEntry{}
 	}
@@ -908,7 +1029,6 @@ func (s *Session) writeCanarySidecar(p *SessionPair, pairDir string, entries []C
 		CPUSet: s.doc.CPUSet, Pinning: s.doc.Pinning, Interleave: s.doc.Interleave, ClientImage: s.doc.ClientImage,
 		SessionValid: valid, Cases: entries,
 	}
-	dir := filepath.Join(pairDir, "canary")
 	if err := writeJSON(filepath.Join(dir, "regression-case.json"), &sc); err != nil {
 		s.note("pair %s: canary sidecar: %v", p.Name, err)
 	}

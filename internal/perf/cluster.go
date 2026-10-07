@@ -46,6 +46,9 @@ type Side struct {
 	// pause; cgroup is the server node's, for guard stage 3.
 	containers []string
 	cgroup     string
+	// frozen is set when the side could not be unpaused: every exec into
+	// it would wait for its timeout, so the pair stops (Design §11).
+	frozen error
 }
 
 // Pinning says how the server and the client were kept apart: cpuset when the
@@ -108,7 +111,13 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 
 	// A cluster of this name left by an earlier session would be resumed by
 	// create, not replaced; it goes first (Design §7).
-	if removed, err := s.CLI.DestroyPurge(ctx); err == nil && len(removed) > 0 {
+	// A purge that fails is a refusal: create would resume whatever is there,
+	// and in a session that is the canary cluster coming back as the target.
+	removed, err := s.CLI.DestroyPurge(ctx)
+	if err != nil {
+		return s, fmt.Errorf("%s: removing what was left of %s: %w", role, s.Name, err)
+	}
+	if len(removed) > 0 {
 		r.logf("%s: removed what was left of an earlier %s: %s", s.Role, s.Name, strings.Join(removed, " "))
 	}
 	set := confUnion(cases)
@@ -148,7 +157,7 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 			r.logf("%s: guard: %v (foreign CPU will count this cluster's)", s.Role, err)
 		} else {
 			s.cgroup = cg
-			r.Guard.cgroups = append(r.Guard.cgroups, cg)
+			r.Guard.add(s.Name, cg)
 		}
 	}
 	return s, nil
@@ -243,9 +252,13 @@ func (r *Runner) startFixtureServer(ctx context.Context, s *Side, f *Fixture) er
 
 // stopOthers takes down every other fixture server on the side, watcher
 // first (serverStop does that), so their daemons and data_buffer_size are
-// out of the way (§5.1, §7 memory).
+// out of the way (§5.1, §7 memory). A nil fixture stops every server: the
+// side is idle for a while (the overlap comparison runs without it).
 func (r *Runner) stopOthers(ctx context.Context, s *Side, f *Fixture) error {
-	keep := dbName(f)
+	keep := ""
+	if f != nil {
+		keep = dbName(f)
+	}
 	dbs := make([]string, 0, len(s.running))
 	for db := range s.running {
 		if db != keep {
@@ -441,6 +454,14 @@ func (r *Runner) destroySide(s *Side) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	if r.Guard != nil {
+		r.Guard.remove(s.Name)
+	}
+	// A paused container cannot be stopped; thaw first, whatever state the
+	// pass left it in.
+	if r.PauseIdle {
+		_ = r.unpauseSide(s)
+	}
 	// Purged, not just destroyed: the describe artifact is already in the
 	// results directory, and a record left behind is what the next session's
 	// "remove what is left" would otherwise have to deal with.

@@ -79,10 +79,19 @@ func readLease(path string) (*lease, error) {
 	return &l, nil
 }
 
-// leaseHeldBy says whether the lease file names this run.
+// leaseHeldBy says whether the lease file names this run. bench-hub rewrites
+// the file on every heartbeat, so a read that fails or does not parse is
+// tried again before it counts: the lease is lost when a lease that parses
+// names another run, or when the file stays unreadable.
 func leaseHeldBy(path, runID string) bool {
-	l, err := readLease(path)
-	return err == nil && l.ID == runID
+	for i := 0; i < 3; i++ {
+		l, err := readLease(path)
+		if err == nil {
+			return l.ID == runID
+		}
+		time.Sleep(time.Second)
+	}
+	return false
 }
 
 // Guard stage 1: a cub_server, postgres or mysqld on the host that is not in
@@ -93,19 +102,22 @@ func leaseHeldBy(path, runID string) bool {
 var foreignNames = map[string]bool{"cub_server": true, "postgres": true, "mysqld": true}
 
 type procInfo struct {
-	PID  int
-	Comm string
-	Args string
-	UID  int
+	PID       int
+	Comm      string
+	Args      string
+	UID       int
+	State     string // from /proc/<pid>/status: R, S, D, Z, ...
+	Container bool   // in a container cgroup (left alone; reported)
 }
 
 func (p procInfo) String() string {
 	return fmt.Sprintf("%d %s (uid %d): %s", p.PID, p.Comm, p.UID, p.Args)
 }
 
-// foreignServers scans procRoot (/proc) for the three server programs outside
-// any container cgroup.
-func foreignServers(procRoot string) []procInfo {
+// serverProcesses scans procRoot (/proc) for the three server programs,
+// saying for each whether it is inside a container cgroup. A zombie is not
+// a process and is left out.
+func serverProcesses(procRoot string) []procInfo {
 	ents, err := os.ReadDir(procRoot)
 	if err != nil {
 		return nil
@@ -125,25 +137,41 @@ func foreignServers(procRoot string) []procInfo {
 		if !foreignNames[name] {
 			continue
 		}
-		if inContainer(dir) {
-			continue
-		}
-		p := procInfo{PID: pid, Comm: name, UID: -1}
+		p := procInfo{PID: pid, Comm: name, UID: -1, Container: inContainer(dir)}
 		if b, err := os.ReadFile(filepath.Join(dir, "cmdline")); err == nil {
 			p.Args = strings.TrimSpace(strings.ReplaceAll(string(b), "\x00", " "))
 		}
 		if b, err := os.ReadFile(filepath.Join(dir, "status")); err == nil {
 			for _, line := range strings.Split(string(b), "\n") {
-				if strings.HasPrefix(line, "Uid:") {
-					if f := strings.Fields(line); len(f) > 1 {
+				if f := strings.Fields(line); len(f) > 1 {
+					switch f[0] {
+					case "Uid:":
 						p.UID, _ = strconv.Atoi(f[1])
+					case "State:":
+						p.State = f[1]
 					}
 				}
 			}
 		}
+		if p.State == "Z" {
+			continue
+		}
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].PID < out[j].PID })
+	return out
+}
+
+// foreignServers is the servers outside any container: the ones the guard
+// ends. The containers' servers (the clusters' own, Conbench's postgres, a
+// colleague's csb cluster) are reported by guardBefore and left alone.
+func foreignServers(procRoot string) []procInfo {
+	var out []procInfo
+	for _, p := range serverProcesses(procRoot) {
+		if !p.Container {
+			out = append(out, p)
+		}
+	}
 	return out
 }
 
@@ -163,16 +191,22 @@ func inContainer(procDir string) bool {
 
 // GuardReport is what session.json carries about stage 1.
 type GuardReport struct {
-	Before     []string `json:"foreign_before"`
-	Cleaned    []string `json:"cleaned"`
-	Left       []string `json:"left"`
-	PSSnapshot string   `json:"ps_snapshot,omitempty"`
+	Before       []string `json:"foreign_before"`
+	Cleaned      []string `json:"cleaned"`
+	Left         []string `json:"left"`
+	OtherUsers   []string `json:"other_users"`   // servers this user cannot signal; the session goes on and says so
+	InContainers []string `json:"in_containers"` // servers inside containers that are not pf- clusters; left alone
+	PSSnapshot   string   `json:"ps_snapshot,omitempty"`
 }
 
-// guardBefore records the host's servers, ends the foreign ones (TERM, then
-// KILL), and reports what would not go. With clean=false it only looks.
+// guardBefore records the host's servers, ends the foreign ones that are
+// this user's (TERM -- INT for postgres, whose postmaster treats TERM as a
+// smart shutdown that waits for its clients -- then KILL), and reports what
+// would not go. Servers of other users cannot be ended and are reported,
+// not refused: a refusal every week would say nothing new. With clean=false
+// it only looks.
 func guardBefore(outDir string, clean bool) (GuardReport, error) {
-	g := GuardReport{Before: []string{}, Cleaned: []string{}, Left: []string{}}
+	g := GuardReport{Before: []string{}, Cleaned: []string{}, Left: []string{}, OtherUsers: []string{}, InContainers: []string{}}
 	if err := os.MkdirAll(outDir, 0o755); err == nil {
 		if out, err := exec.Command("ps", "-eo", "pid,uid,ppid,etime,comm,args").Output(); err == nil {
 			path := filepath.Join(outDir, "ps-before.txt")
@@ -181,31 +215,56 @@ func guardBefore(outDir string, clean bool) (GuardReport, error) {
 			}
 		}
 	}
-	found := foreignServers("/proc")
-	for _, p := range found {
-		g.Before = append(g.Before, p.String())
+	me := os.Getuid()
+	perf := perfContainers()
+	var mine []procInfo
+	for _, p := range serverProcesses("/proc") {
+		switch {
+		case p.Container:
+			if !inPerfCluster(p.PID, perf) {
+				g.InContainers = append(g.InContainers, p.String())
+			}
+		case p.UID != me:
+			g.OtherUsers = append(g.OtherUsers, p.String())
+		default:
+			g.Before = append(g.Before, p.String())
+			mine = append(mine, p)
+		}
 	}
-	if !clean || len(found) == 0 {
+	if !clean || len(mine) == 0 {
 		return g, nil
 	}
-	for _, p := range found {
-		_ = syscall.Kill(p.PID, syscall.SIGTERM)
+	ownForeign := func() []procInfo {
+		var out []procInfo
+		for _, p := range foreignServers("/proc") {
+			if p.UID == me {
+				out = append(out, p)
+			}
+		}
+		return out
+	}
+	for _, p := range mine {
+		sig := syscall.SIGTERM
+		if p.Comm == "postgres" {
+			sig = syscall.SIGINT
+		}
+		_ = syscall.Kill(p.PID, sig)
 	}
 	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) && len(foreignServers("/proc")) > 0 {
+	for time.Now().Before(deadline) && len(ownForeign()) > 0 {
 		time.Sleep(time.Second)
 	}
-	for _, p := range foreignServers("/proc") {
+	for _, p := range ownForeign() {
 		_ = syscall.Kill(p.PID, syscall.SIGKILL)
 	}
 	time.Sleep(2 * time.Second)
-	left := foreignServers("/proc")
+	left := ownForeign()
 	leftPIDs := map[int]bool{}
 	for _, p := range left {
 		leftPIDs[p.PID] = true
 		g.Left = append(g.Left, p.String())
 	}
-	for _, p := range found {
+	for _, p := range mine {
 		if !leftPIDs[p.PID] {
 			g.Cleaned = append(g.Cleaned, p.String())
 		}
@@ -214,6 +273,37 @@ func guardBefore(outDir string, clean bool) (GuardReport, error) {
 		return g, fmt.Errorf("%d server process(es) outside the clusters would not stop: %s", len(left), strings.Join(g.Left, "; "))
 	}
 	return g, nil
+}
+
+// perfContainers is the runtime's id of every pf- container, by name.
+func perfContainers() map[string]string {
+	ids := map[string]string{}
+	out, err := exec.Command(runtimeBin(), "ps", "-a", "--format", "{{.ID}} {{.Names}}").Output()
+	if err != nil {
+		return ids
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && strings.HasPrefix(f[1], "pf-") {
+			ids[f[1]] = f[0]
+		}
+	}
+	return ids
+}
+
+// inPerfCluster says whether a container process belongs to a pf- cluster:
+// its cgroup path carries the container's id.
+func inPerfCluster(pid int, perf map[string]string) bool {
+	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cgroup"))
+	if err != nil {
+		return false
+	}
+	for _, id := range perf {
+		if id != "" && strings.Contains(string(b), id) {
+			return true
+		}
+	}
+	return false
 }
 
 // Previous sessions (FR-2): the newest run of the same name under the runs
@@ -235,25 +325,32 @@ func previousSessions(root, selfID string) []string {
 	return ids
 }
 
-// previousPairs reads the newest earlier session's pairs, by name.
-func previousPairs(root, selfID string) (map[string]*SessionPair, string) {
+func readSessionPairs(root, id string) []*SessionPair {
+	for _, rel := range []string{"results/session.json", "session.json"} {
+		b, err := os.ReadFile(filepath.Join(root, id, rel))
+		if err != nil {
+			continue
+		}
+		var doc struct {
+			Pairs []*SessionPair `json:"pairs"`
+		}
+		if json.Unmarshal(b, &doc) != nil {
+			return nil
+		}
+		return doc.Pairs
+	}
+	return nil
+}
+
+// previousPair finds the newest earlier session that measured a pair of
+// this name: one that was skipped, or whose fingerprint is empty, is not a
+// session to compare against and is passed over (FR-2).
+func previousPair(root, selfID, name string) (*SessionPair, string) {
 	for _, id := range previousSessions(root, selfID) {
-		for _, rel := range []string{"results/session.json", "session.json"} {
-			b, err := os.ReadFile(filepath.Join(root, id, rel))
-			if err != nil {
-				continue
+		for _, p := range readSessionPairs(root, id) {
+			if p.Name == name && p.Skipped == "" && (p.Target.Fingerprint.Compiler != "" || p.Target.Fingerprint.BuildType != "") {
+				return p, id
 			}
-			var doc struct {
-				Pairs []*SessionPair `json:"pairs"`
-			}
-			if json.Unmarshal(b, &doc) != nil {
-				continue
-			}
-			out := map[string]*SessionPair{}
-			for _, p := range doc.Pairs {
-				out[p.Name] = p
-			}
-			return out, id
 		}
 	}
 	return nil, ""
@@ -279,12 +376,7 @@ func fingerprintDiff(prev, now Fingerprint) string {
 	for k := range now.Thirdparty {
 		libs[k] = true
 	}
-	names := make([]string, 0, len(libs))
-	for k := range libs {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, k := range names {
+	for _, k := range sortedKeys(libs) {
 		if prev.Thirdparty[k] != now.Thirdparty[k] {
 			parts = append(parts, fmt.Sprintf("%s %s → %s", k, orUnknown(prev.Thirdparty[k]), orUnknown(now.Thirdparty[k])))
 		}
@@ -352,14 +444,14 @@ func diskFree(path string) (int64, error) {
 	return int64(st.Bavail) * int64(st.Bsize), nil
 }
 
-// The container runtime, for what csb has no verb for: pausing a cluster's
-// containers, and finding a container's cgroup. $CSB_BACKEND names it; else
-// whichever of podman and docker is here.
 func osExecOutput(name string, args ...string) (string, error) {
 	out, err := exec.Command(name, args...).CombinedOutput()
 	return string(out), err
 }
 
+// The container runtime, for what csb has no verb for: pausing a cluster's
+// containers, and finding a container's cgroup. $CSB_BACKEND names it; else
+// whichever of podman and docker is here.
 func runtimeBin() string {
 	if b := os.Getenv("CSB_BACKEND"); b != "" {
 		return b
@@ -382,8 +474,11 @@ func clusterContainers(cluster string) ([]string, error) {
 	return names, nil
 }
 
-// containerCgroup is the cgroup directory of a container's init process, read
-// from /proc so it is the same whichever runtime and cgroup driver made it.
+// containerCgroup is the cgroup directory of a container's scope, read from
+// /proc of its init so it is the same whichever runtime and cgroup driver
+// made it. The init's own leaf may be a child of the scope (podman puts it
+// in <scope>/container); cpu.stat at the scope covers every process the
+// runtime started in the container, exec'd ones included.
 func containerCgroup(container string) (string, error) {
 	out, err := exec.Command(runtimeBin(), "inspect", "--format", "{{.State.Pid}}", container).Output()
 	if err != nil {
@@ -395,9 +490,13 @@ func containerCgroup(container string) (string, error) {
 		return "", err
 	}
 	for _, line := range strings.Split(string(b), "\n") {
-		// cgroup v2: 0::/user.slice/.../libpod-<id>.scope
+		// cgroup v2: 0::/user.slice/.../libpod-<id>.scope[/container]
 		if strings.HasPrefix(line, "0::") {
-			return filepath.Join("/sys/fs/cgroup", strings.TrimPrefix(line, "0::")), nil
+			path := strings.TrimPrefix(line, "0::")
+			if i := strings.Index(path, ".scope/"); i >= 0 {
+				path = path[:i+len(".scope")]
+			}
+			return filepath.Join("/sys/fs/cgroup", path), nil
 		}
 	}
 	return "", fmt.Errorf("no cgroup v2 line for pid %s", pid)
@@ -409,7 +508,8 @@ func containerCgroup(container string) (string, error) {
 // hostSnapshot is the host's counters at one instant.
 type hostSnapshot struct {
 	at         time.Time
-	busyS      float64 // server cores, user+nice+system+irq+softirq+steal
+	busyS      float64 // server cores, user+nice+system+steal
+	irqS       float64 // server cores, irq+softirq -- the measured side's own network, mostly
 	clusterS   float64 // the clusters' server containers, cpu.stat usage
 	pswpin     float64
 	unreadable []string
@@ -419,6 +519,7 @@ type hostSnapshot struct {
 type hostDelta struct {
 	ElapsedS   float64  `json:"elapsed_s"`
 	ServerBusy float64  `json:"server_cores_busy_s"`
+	ServerIRQ  float64  `json:"server_cores_irq_s"`
 	ClusterCPU float64  `json:"cluster_cpu_s"`
 	ForeignCPU float64  `json:"foreign_cpu_s"`
 	Pswpin     float64  `json:"pswpin"`
@@ -426,19 +527,36 @@ type hostDelta struct {
 }
 
 // contaminationCores is the foreign CPU, averaged over the window as a number
-// of cores, above which a pass is null(contaminated): a whole core busy with
-// something else for the whole pass. Kernel writeback for the measured side
-// is counted as foreign too (it is not in the container's cgroup) and stays
-// well below one core; T1 (§14) refines this.
-const contaminationCores = 1.0
+// of cores, above which a pass is null(contaminated). Zero: the reading is
+// recorded on every measured pass and nulls nothing, because the threshold
+// is T1's to set (Spec FR-6.2): kernel writeback for the measured side is
+// outside the container's cgroup and so counts as foreign here, and a canary
+// nulled by a wrong threshold invalidates the whole pair. A swap-in during a
+// pass nulls it whatever the threshold.
+const contaminationCores = 0
 
 // clockTicks is CLK_TCK; 100 on every Linux this runs on.
 const clockTicks = 100.0
 
-// hostGuard reads the counters for a given set of server cores and cgroups.
+// hostGuard reads the counters for a given set of server cores and the
+// cgroups of the clusters currently up, by cluster name: a cluster that is
+// destroyed leaves the list, or its vanished cpu.stat would make every later
+// reading unreadable.
 type hostGuard struct {
-	cores   []int
-	cgroups []string // cpu.stat directories of the clusters' server containers
+	cores     []int
+	cgroups   map[string]string
+	threshold float64 // contaminationCores; 0 records without nulling
+}
+
+func (g *hostGuard) add(cluster, cgroup string) {
+	if g.cgroups == nil {
+		g.cgroups = map[string]string{}
+	}
+	g.cgroups[cluster] = cgroup
+}
+
+func (g *hostGuard) remove(cluster string) {
+	delete(g.cgroups, cluster)
 }
 
 func parseCPUList(s string) ([]int, error) {
@@ -465,13 +583,13 @@ func parseCPUList(s string) ([]int, error) {
 	return out, nil
 }
 
-// serverBusyFromStat sums the busy jiffies of the named cores in /proc/stat.
-func serverBusyFromStat(stat string, cores []int) (float64, error) {
+// serverBusyFromStat sums the busy jiffies of the named cores in /proc/stat:
+// user+nice+system+steal as busy, irq+softirq apart.
+func serverBusyFromStat(stat string, cores []int) (busy, irq float64, err error) {
 	want := map[string]bool{}
 	for _, c := range cores {
 		want["cpu"+strconv.Itoa(c)] = true
 	}
-	var busy float64
 	seen := 0
 	for _, line := range strings.Split(stat, "\n") {
 		fs := strings.Fields(line)
@@ -480,17 +598,21 @@ func serverBusyFromStat(stat string, cores []int) (float64, error) {
 		}
 		seen++
 		// user nice system idle iowait irq softirq steal
-		for _, i := range []int{1, 2, 3, 6, 7, 8} {
+		for _, i := range []int{1, 2, 3, 8} {
 			if i < len(fs) {
 				v, _ := strconv.ParseFloat(fs[i], 64)
 				busy += v
 			}
 		}
+		for _, i := range []int{6, 7} {
+			v, _ := strconv.ParseFloat(fs[i], 64)
+			irq += v
+		}
 	}
 	if seen != len(cores) {
-		return 0, fmt.Errorf("/proc/stat has %d of the %d server cores", seen, len(cores))
+		return 0, 0, fmt.Errorf("/proc/stat has %d of the %d server cores", seen, len(cores))
 	}
-	return busy / clockTicks, nil
+	return busy / clockTicks, irq / clockTicks, nil
 }
 
 func cgroupUsageS(dir string) (float64, error) {
@@ -524,11 +646,11 @@ func (g *hostGuard) snapshot() hostSnapshot {
 	s := hostSnapshot{at: time.Now()}
 	if b, err := os.ReadFile("/proc/stat"); err != nil {
 		s.unreadable = append(s.unreadable, "/proc/stat: "+err.Error())
-	} else if s.busyS, err = serverBusyFromStat(string(b), g.cores); err != nil {
+	} else if s.busyS, s.irqS, err = serverBusyFromStat(string(b), g.cores); err != nil {
 		s.unreadable = append(s.unreadable, err.Error())
 	}
-	for _, d := range g.cgroups {
-		u, err := cgroupUsageS(d)
+	for _, name := range sortedKeys(g.cgroups) {
+		u, err := cgroupUsageS(g.cgroups[name])
 		if err != nil {
 			s.unreadable = append(s.unreadable, err.Error())
 			continue
@@ -545,6 +667,7 @@ func (g *hostGuard) snapshot() hostSnapshot {
 func (g *hostGuard) delta(pre, post hostSnapshot) *hostDelta {
 	d := &hostDelta{ElapsedS: post.at.Sub(pre.at).Seconds()}
 	d.ServerBusy = post.busyS - pre.busyS
+	d.ServerIRQ = post.irqS - pre.irqS
 	d.ClusterCPU = post.clusterS - pre.clusterS
 	d.ForeignCPU = d.ServerBusy - d.ClusterCPU
 	if d.ForeignCPU < 0 {
@@ -556,16 +679,17 @@ func (g *hostGuard) delta(pre, post hostSnapshot) *hostDelta {
 }
 
 // contaminated says whether the delta is beyond what a measured pass may
-// carry: any swap-in, or more than contaminationCores of foreign CPU on
-// average. An unreadable counter is not contamination.
-func (d *hostDelta) contaminated() string {
+// carry: any swap-in, or more than threshold cores of foreign CPU on average
+// (a threshold of 0 means record only). An unreadable counter is not
+// contamination.
+func (d *hostDelta) contaminated(threshold float64) string {
 	if len(d.Unreadable) > 0 || d.ElapsedS <= 0 {
 		return ""
 	}
 	if d.Pswpin > 0 {
 		return fmt.Sprintf("contaminated: %.0f pages swapped in during the pass", d.Pswpin)
 	}
-	if d.ForeignCPU/d.ElapsedS > contaminationCores {
+	if threshold > 0 && d.ForeignCPU/d.ElapsedS > threshold {
 		return fmt.Sprintf("contaminated: %.1f s of CPU on the server cores outside the clusters over %.0f s", d.ForeignCPU, d.ElapsedS)
 	}
 	return ""

@@ -92,8 +92,12 @@ const (
 	remeasurePairs     = 5
 )
 
+// caseBound is one case's upper bound: every pass to its budget plus the
+// warming and the exec slack (client.go gives the node 60 s more), and the
+// fixture switch before it.
 func caseBound(c *Case) time.Duration {
-	return time.Duration(c.MaxPassS())*time.Second + fixtureSwitchBound
+	passes := (c.Warmup + c.Repeats) * 2
+	return time.Duration(passes)*(time.Duration(c.BudgetS+c.WarmS)*time.Second+60*time.Second) + fixtureSwitchBound
 }
 
 func remeasureBound(c *Case) time.Duration {

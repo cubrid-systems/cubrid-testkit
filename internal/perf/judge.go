@@ -69,7 +69,7 @@ const minPairs = 3
 // of its passes (FR-11).
 func judge(c *Case, cr *caseResult, repeats int) Verdict {
 	v := Verdict{Flag: FlagNone, Status: StatusOK, Counters: map[string]counterPair{}}
-	t, ref := cr.measured("target"), cr.measured("reference")
+	t, ref := cr.measured("target"), cr.measured(cr.refRole())
 	v.TargetMean = meanValue(t)
 	v.ReferenceMean = meanValue(ref)
 	for _, name := range c.Counters {

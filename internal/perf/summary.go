@@ -129,7 +129,7 @@ func (s *Session) summaryData() summaryData {
 		}
 		head = append(head, fmt.Sprintf("%s: %s (카나리 %d/%d 허용폭 안)", p.Name, state, okCanaries, len(p.Canaries)))
 		if p.FingerprintChanged {
-			d.Notes = append(d.Notes, fmt.Sprintf("지문 변화 (%s, 이전 세션 %s): %s", p.Name, s.doc.Previous, p.FingerprintNote))
+			d.Notes = append(d.Notes, fmt.Sprintf("지문 변화 (%s) %s", p.Name, p.FingerprintNote))
 		}
 		run += p.CasesRun
 		total += p.CasesRun + p.CasesSkipped
@@ -159,32 +159,10 @@ func (s *Session) summaryData() summaryData {
 		if p.Skipped != "" || !p.Valid {
 			continue
 		}
-		for _, e := range p.entries {
-			if e.Status != StatusOK || e.Flag == FlagNone || e.Ratio == nil {
-				continue
-			}
-			c := s.Suite.Case(e.ID)
-			grade, owner := "", p.Owner
-			if c != nil {
-				grade = c.Grade
-				if owner == "" {
-					owner = c.Owner
-				}
-			}
-			if grade == "B" {
-				continue
-			}
-			arrow := "↑"
-			if *e.Ratio < 1 {
-				arrow = "↓"
-			}
-			d.Flags = append(d.Flags, flagRow{
-				Session: s.SessionID, Pair: p.Name, ID: e.ID, Case: fmt.Sprintf("%s@v%d", e.ID, e.Version),
-				Ratio: strconv.FormatFloat(*e.Ratio, 'f', 2, 64), Arrow: arrow, Flag: e.Flag,
-				Tolerance: strconv.FormatFloat(e.Tolerance, 'g', -1, 64), Owner: owner,
-				Repro:    fmt.Sprintf("testkit perf run %s --suite %s --build %s --build %s", e.ID, s.SuiteDir, p.Target.Build, p.Reference.Build),
-				ResultID: p.Name + "/" + e.ID, Grade: grade,
-			})
+		d.Flags = append(d.Flags, s.flagRows(p, p.Name, p.Reference, p.entries)...)
+		if p.Overlap != nil {
+			// FR-29: the second reference's ratios beside the first's.
+			d.Flags = append(d.Flags, s.flagRows(p, p.Name+"+overlap", *p.Overlap, p.overlapEntries)...)
 		}
 	}
 
@@ -207,6 +185,15 @@ func (s *Session) summaryData() summaryData {
 			d.Branches = append(d.Branches, fmt.Sprintf("| %s | merge-base %s · %d 케이스 · flag %d |", p.Name, short(p.Reference.Commit), p.CasesRun, p.Flags))
 		}
 	}
+	// Spec §7.5.1: an expired registration says "만료", one beyond the cap
+	// says so; neither ran.
+	for _, l := range s.left {
+		name, why, _ := strings.Cut(l, ": ")
+		if strings.HasPrefix(why, "expired") {
+			why = "만료 " + strings.TrimPrefix(why, "expired ")
+		}
+		d.Branches = append(d.Branches, fmt.Sprintf("| %s | 제외됨 — %s |", name, why))
+	}
 	if s.Conf != nil && s.Conf.ConbenchURL != "" {
 		d.Conbench = strings.TrimRight(s.Conf.ConbenchURL, "/") + "/cubrid/e/runs/" + s.SessionID
 	}
@@ -215,6 +202,40 @@ func (s *Session) summaryData() summaryData {
 
 // labelOf is the build's label for a title: what build-info.json says, else
 // the install directory's name without its -<sha7>.
+// flagRows is the flag table's rows for one comparison: grade-A cases
+// whose flag is not none (FR-22 keeps grade B out of the table).
+func (s *Session) flagRows(p *SessionPair, pairName string, reference BuildRef, entries []CaseEntry) []flagRow {
+	var rows []flagRow
+	for _, e := range entries {
+		if e.Status != StatusOK || e.Flag == FlagNone || e.Ratio == nil {
+			continue
+		}
+		c := s.Suite.Case(e.ID)
+		grade, owner := "", p.Owner
+		if c != nil {
+			grade = c.Grade
+			if owner == "" {
+				owner = c.Owner
+			}
+		}
+		if grade == "B" {
+			continue
+		}
+		arrow := "↑"
+		if *e.Ratio < 1 {
+			arrow = "↓"
+		}
+		rows = append(rows, flagRow{
+			Session: s.SessionID, Pair: pairName, ID: e.ID, Case: fmt.Sprintf("%s@v%d", e.ID, e.Version),
+			Ratio: strconv.FormatFloat(*e.Ratio, 'f', 2, 64), Arrow: arrow, Flag: e.Flag,
+			Tolerance: strconv.FormatFloat(e.Tolerance, 'g', -1, 64), Owner: owner,
+			Repro:    fmt.Sprintf("testkit perf run %s --suite %s --build %s --build %s", e.ID, s.SuiteDir, p.Target.Build, reference.Build),
+			ResultID: pairName + "/" + e.ID, Grade: grade,
+		})
+	}
+	return rows
+}
+
 func labelOf(b BuildRef) string {
 	if b.Fingerprint.Label != "" {
 		return b.Fingerprint.Label

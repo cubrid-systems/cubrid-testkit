@@ -89,7 +89,7 @@ func metricUnit(metric string) string {
 func caseEntry(c *Case, cr *caseResult, v Verdict) CaseEntry {
 	e := CaseEntry{
 		ID: c.ID, Version: c.Version, Metric: c.Metric, Op: c.Op,
-		Target: sideValues(c, cr.measured("target")), Reference: sideValues(c, cr.measured("reference")),
+		Target: sideValues(c, cr.measured("target")), Reference: sideValues(c, cr.measured(cr.refRole())),
 		Ratio: v.Ratio, RatioOfMeans: v.RatioOfMeans, Pairs: v.Pairs, Confirmed: v.Confirmed,
 		Tolerance: c.Tolerance, Flag: v.Flag, Counters: v.Counters, Status: v.Status,
 	}

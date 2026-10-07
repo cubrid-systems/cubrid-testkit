@@ -39,19 +39,24 @@ type Case struct {
 	// Clients is how many connections the program opens at once. The broker
 	// of a cluster is pinned to the largest count among the cases it serves,
 	// so no CAS is spawned inside a measured window; a utility opens none.
-	Clients    int             `json:"clients"`
-	Client     json.RawMessage `json:"client"`
-	Op         string          `json:"op"`
-	Metric     string          `json:"metric"`
-	Cold       bool            `json:"cold"`
-	WarmS      int             `json:"warm_s"`
-	Warmup     int             `json:"warmup"`
-	Repeats    int             `json:"repeats"`
-	BudgetS    int             `json:"budget_s"`
-	Tolerance  float64         `json:"tolerance"`
-	Counters   []string        `json:"counters"`
-	Background string          `json:"background"`
-	Notes      string          `json:"notes,omitempty"`
+	Clients   int             `json:"clients"`
+	Client    json.RawMessage `json:"client"`
+	Op        string          `json:"op"`
+	Metric    string          `json:"metric"`
+	Cold      bool            `json:"cold"`
+	WarmS     int             `json:"warm_s"`
+	Warmup    int             `json:"warmup"`
+	Repeats   int             `json:"repeats"`
+	BudgetS   int             `json:"budget_s"`
+	Tolerance float64         `json:"tolerance"`
+	Counters  []string        `json:"counters"`
+	// JudgeCounters are the counters FR-21 decides on: a subset of Counters,
+	// each a count of work, shown stable on this hub (T1). Every counter is
+	// recorded and shown; only these can raise workload_change. Empty means
+	// none can.
+	JudgeCounters []string `json:"judge_counters"`
+	Background    string   `json:"background"`
+	Notes         string   `json:"notes,omitempty"`
 
 	// Conf is the cubrid.conf overrides as the file will carry them: a JSON
 	// string, number or true/false, each written out as text.
@@ -95,16 +100,10 @@ type CDCClient struct {
 }
 
 // MaxPassS is the longest a case can take on one pair when every pass runs to
-// its budget, for an interleave mode: in case mode warmup and measured passes
-// on both builds; in round mode every round is one warmup and one measured
-// pass, repeats times, on both (Design §5.9). The session compares it with
-// what is left of the weekend before starting the case.
-func (c *Case) MaxPassS(interleave string) int {
-	if interleave == "round" {
-		return (1 + 1) * c.Repeats * 2 * c.BudgetS
-	}
-	return (c.Warmup + c.Repeats) * 2 * c.BudgetS
-}
+// its budget: warmup and measured passes on both builds (Design §5.9). The
+// session compares it with what is left of the weekend before starting the
+// case.
+func (c *Case) MaxPassS() int { return (c.Warmup + c.Repeats) * 2 * c.BudgetS }
 
 // Fixture is one fixture.json: a database the cases assume, built once per
 // build at session start and reset before every pass.
@@ -203,7 +202,7 @@ func (p *Problems) err() error {
 
 var caseKeys = []string{"id", "version", "owner", "grade", "module", "topology", "conf", "fixture", "driver",
 	"clients", "client", "op", "metric", "cold", "warm_s", "warmup", "repeats", "budget_s", "tolerance", "counters",
-	"background"}
+	"judge_counters", "background"}
 
 // ReadCase reads cases/<module>/<name>/case.json and applies every rule the
 // Spec lists for validate. The fixture it names is looked up in the suite the
@@ -287,6 +286,14 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 	for _, name := range c.Counters {
 		if !KnownCounter(name) {
 			p.add("counter %q is not on the collect layer's list", name)
+		}
+	}
+	for _, name := range c.JudgeCounters {
+		switch {
+		case !contains(c.Counters, name):
+			p.add("judge_counters has %q, which is not in counters", name)
+		case !deterministic(name):
+			p.add("judge_counters has %q, which is not a count of work (a time, a ratio, a gauge or a syscall count)", name)
 		}
 	}
 	oneOf(p, "background", c.Background, Backgrounds)
@@ -599,6 +606,15 @@ func strict(raw []byte, v any) error {
 		return err
 	}
 	return nil
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 func oneOf(p *Problems, key, got string, allowed []string) {

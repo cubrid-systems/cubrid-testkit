@@ -78,8 +78,11 @@ func TestSuiteReadsEveryCaseAndFixture(t *testing.T) {
 	if c.JDBC == nil || c.JDBC.Main != "CommitSingle" || len(c.JDBC.Args) != 2 {
 		t.Errorf("jdbc client = %+v", c.JDBC)
 	}
-	if c.MaxPassS("case") != (1+5)*2*120 || c.MaxPassS("round") != (1+1)*5*2*120 {
-		t.Errorf("MaxPassS = %d / %d", c.MaxPassS("case"), c.MaxPassS("round"))
+	if c.MaxPassS() != (1+5)*2*120 {
+		t.Errorf("MaxPassS = %d", c.MaxPassS())
+	}
+	if strings.Join(c.JudgeCounters, ",") != "Num_log_page_iowrites,Num_file_iosynches,dev_flushes" {
+		t.Errorf("judge counters = %v", c.JudgeCounters)
 	}
 	if c.Conf["data_buffer_size"] != "4G" || !filepath.IsAbs(c.Dir) {
 		t.Errorf("conf=%v dir=%q", c.Conf, c.Dir)
@@ -133,6 +136,12 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 		{"no clients", "txn.commit_single", func(m map[string]any) { delete(m, "clients") }, "missing clients"},
 		{"zero clients on a jdbc case", "txn.commit_single", func(m map[string]any) { m["clients"] = 0 }, "clients must be 1 or more for a jdbc client"},
 		{"clients on a utility", "lib.backupdb", func(m map[string]any) { m["clients"] = 2 }, "clients must be 0 for a utility"},
+		{"a judge counter the case does not collect", "txn.commit_single", func(m map[string]any) { m["judge_counters"] = []string{"Num_tran_commits"} }, `judge_counters has "Num_tran_commits", which is not in counters`},
+		{"a judge counter that is not a count", "txn.commit_single", func(m map[string]any) {
+			m["counters"] = []string{"Num_file_iosynches", "cas.rw_syscalls"}
+			m["judge_counters"] = []string{"cas.rw_syscalls"}
+		}, `judge_counters has "cas.rw_syscalls", which is not a count of work`},
+		{"no judge_counters key", "txn.commit_single", func(m map[string]any) { delete(m, "judge_counters") }, "missing judge_counters"},
 		{"a topology off the list", "txn.commit_single", func(m map[string]any) { m["topology"] = "ha" }, `topology "ha" is not one of single`},
 		{"an op off the list", "txn.commit_single", func(m map[string]any) { m["op"] = "txn" }, `op "txn" is not one of`},
 		{"a metric off the list", "txn.commit_single", func(m map[string]any) { m["metric"] = "p99" }, `metric "p99" is not one of`},

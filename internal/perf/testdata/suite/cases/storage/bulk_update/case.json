@@ -9,6 +9,7 @@
   "op": "row", "metric": "elapsed_s",
   "cold": true, "warm_s": 5, "warmup": 1, "repeats": 3, "budget_s": 300, "tolerance": 0.05,
   "counters": [],
+  "judge_counters": [],
   "background": "keep",
   "notes": "restores the snapshot before every pass"
 }

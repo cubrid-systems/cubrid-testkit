@@ -47,10 +47,53 @@ func TestJudgeTurnsTheRatioTheRightWay(t *testing.T) {
 	}
 }
 
-// FR-21: inside the tolerance, a deterministic counter that moved by more
-// than 1% per op is a workload change; a non-deterministic one is not.
+// FR-20 as revised: an estimate outside the tolerance is a flag only when
+// the pairs agree -- at least three, all on the median's side of 1.
+func TestJudgeFlagsOnlyWhenThePairsAgree(t *testing.T) {
+	cs := &Case{ID: "x.y", Metric: "elapsed_s", Tolerance: 0.05, Repeats: 5}
+	// Four pairs slower by 10 %, one pair faster: the median says 1.10, the
+	// pairs do not agree, and the verdict says why.
+	cr := &caseResult{Case: cs}
+	for k, tv := range []float64{11, 11, 11, 11, 9} {
+		cr.Passes = append(cr.Passes, measuredPass("target", k+1, tv, nil), measuredPass("reference", k+1, 10, nil))
+	}
+	v := judge(cs, cr, 5)
+	if v.Ratio == nil || abs(*v.Ratio-1.1) > 1e-9 || v.Flag != FlagNone || v.Confirmed || !strings.Contains(v.Why, "4 of 5 pairs agree") {
+		t.Errorf("disagreeing pairs: ratio=%v flag=%s confirmed=%v why=%q", v.Ratio, v.Flag, v.Confirmed, v.Why)
+	}
+	// Two pairs, both slower: too few to confirm.
+	cr = &caseResult{Case: cs}
+	for k := 1; k <= 2; k++ {
+		cr.Passes = append(cr.Passes, measuredPass("target", k, 11, nil), measuredPass("reference", k, 10, nil))
+	}
+	if v := judge(cs, cr, 2); v.Flag != FlagNone || v.Confirmed || !strings.Contains(v.Why, "2 of 2 pairs agree (3 needed") {
+		t.Errorf("two pairs: flag=%s why=%q", v.Flag, v.Why)
+	}
+	// The median ignores the one pass a checkpoint landed on, where the
+	// mean would have been pulled by it.
+	cr = &caseResult{Case: cs}
+	for k, tv := range []float64{10, 10, 10, 10, 30} {
+		cr.Passes = append(cr.Passes, measuredPass("target", k+1, tv, nil), measuredPass("reference", k+1, 10, nil))
+	}
+	v = judge(cs, cr, 5)
+	if v.Ratio == nil || *v.Ratio != 1 || v.RatioOfMeans == nil || *v.RatioOfMeans != 1.4 || v.Flag != FlagNone || len(v.Pairs) != 5 {
+		t.Errorf("outlier: ratio=%v of means=%v flag=%s pairs=%v", v.Ratio, v.RatioOfMeans, v.Flag, v.Pairs)
+	}
+	// Three agreeing pairs flag.
+	cr = &caseResult{Case: cs}
+	for k := 1; k <= 3; k++ {
+		cr.Passes = append(cr.Passes, measuredPass("target", k, 11, nil), measuredPass("reference", k, 10, nil))
+	}
+	if v := judge(cs, cr, 3); v.Flag != FlagRegression || !v.Confirmed {
+		t.Errorf("three agreeing pairs: flag=%s confirmed=%v", v.Flag, v.Confirmed)
+	}
+}
+
+// FR-21: inside the tolerance, a counter the case lists for judging that
+// moved by more than 1% per op is a workload change; one it does not list,
+// or one that is not a count, is not.
 func TestJudgeFlagsAWorkloadChangeFromTheCounters(t *testing.T) {
-	cs := &Case{ID: "x.y", Metric: "latency_s", Tolerance: 0.05, Repeats: 3, Counters: []string{"Num_file_iosynches", "server.cpu_user"}}
+	cs := &Case{ID: "x.y", Metric: "latency_s", Tolerance: 0.05, Repeats: 3, Counters: []string{"Num_file_iosynches", "server.cpu_user"}, JudgeCounters: []string{"Num_file_iosynches"}}
 	cr := &caseResult{Case: cs}
 	for k := 1; k <= 3; k++ {
 		cr.Passes = append(cr.Passes,
@@ -61,10 +104,15 @@ func TestJudgeFlagsAWorkloadChangeFromTheCounters(t *testing.T) {
 	if v.Flag != FlagWorkloadChange || v.Why != "Num_file_iosynches" {
 		t.Errorf("flag=%s why=%s", v.Flag, v.Why)
 	}
-	// cpu_user doubling alone is diagnostic, not a flag.
-	cs.Counters = []string{"server.cpu_user"}
+	// cpu_user doubling alone is diagnostic, not a flag; and a counter the
+	// case collects but does not list for judging is recorded, not judged.
+	cs.JudgeCounters = []string{"server.cpu_user"}
 	if v := judge(cs, cr, 3); v.Flag != FlagNone {
 		t.Errorf("a non-deterministic counter flagged: %s", v.Flag)
+	}
+	cs.JudgeCounters = nil
+	if v := judge(cs, cr, 3); v.Flag != FlagNone || v.Counters["Num_file_iosynches"].Target == nil {
+		t.Errorf("an unlisted counter flagged, or was not recorded: %s %v", v.Flag, v.Counters)
 	}
 }
 

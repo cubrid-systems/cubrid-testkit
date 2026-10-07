@@ -83,16 +83,11 @@ func TestListPrintsTheCasesAndTheBound(t *testing.T) {
 		if code != ExitOK || errs != "" {
 			t.Fatalf("%v: code=%d err=%q", args, code, errs)
 		}
-		for _, want := range []string{"MAX_S(case)", "txn.commit_single", "narrow_1m@1", "1440", "lib.backupdb", "utility", "cdc.extract_rate", "4 case(s), 2 fixture(s)"} {
+		for _, want := range []string{"MAX_S", "txn.commit_single", "narrow_1m@1", "1440", "lib.backupdb", "utility", "cdc.extract_rate", "4 case(s), 2 fixture(s)"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%v: output lacks %q:\n%s", args, want, out)
 			}
 		}
-	}
-	// The bound follows the conf's interleave mode.
-	code, out, _ := run("list", "-c", writeConf(t, suite, "interleave = round"))
-	if code != ExitOK || !strings.Contains(out, "MAX_S(round)") || !strings.Contains(out, "2400") {
-		t.Errorf("round: code=%d out=%s", code, out)
 	}
 	// A broken case does not hide the others: the table has what read, the
 	// problem is on stderr, and the exit says so.

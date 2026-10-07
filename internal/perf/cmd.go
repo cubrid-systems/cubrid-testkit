@@ -179,7 +179,6 @@ func list(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, usage)
 		return ExitRefused
 	}
-	mode := "case"
 	if confPath != "" {
 		c, err := ReadConf(confPath)
 		if err != nil {
@@ -188,21 +187,21 @@ func list(args []string, stdout, stderr io.Writer) int {
 			}
 			return ExitRefused
 		}
-		suite, mode = c.Suite, c.Interleave
+		suite = c.Suite
 	}
 	s, err := LoadSuite(suite)
 	if s != nil {
 		tw := tabwriter.NewWriter(stdout, 0, 8, 2, ' ', 0)
-		fmt.Fprintf(tw, "ID\tVER\tGRADE\tOWNER\tDRIVER\tFIXTURE\tPASS_S\tMAX_S(%s)\n", mode)
+		fmt.Fprintln(tw, "ID\tVER\tGRADE\tOWNER\tDRIVER\tFIXTURE\tPASS_S\tMAX_S")
 		total := 0
 		for _, c := range s.Cases {
 			fmt.Fprintf(tw, "%s\t%d\t%s\t%s\t%s\t%s@%d\t%d\t%d\n",
-				c.ID, c.Version, c.Grade, c.Owner, c.Driver, c.Fixture.Name, c.Fixture.Version, c.BudgetS, c.MaxPassS(mode))
-			total += c.MaxPassS(mode)
+				c.ID, c.Version, c.Grade, c.Owner, c.Driver, c.Fixture.Name, c.Fixture.Version, c.BudgetS, c.MaxPassS())
+			total += c.MaxPassS()
 		}
 		tw.Flush()
-		fmt.Fprintf(stdout, "\n%d case(s), %d fixture(s); one pair is at most %s in %s mode when every pass runs to its budget\n",
-			len(s.Cases), len(s.Fixtures), (time.Duration(total) * time.Second).String(), mode)
+		fmt.Fprintf(stdout, "\n%d case(s), %d fixture(s); one pair is at most %s when every pass runs to its budget\n",
+			len(s.Cases), len(s.Fixtures), (time.Duration(total) * time.Second).String())
 	}
 	if err != nil {
 		for _, line := range problemLines(err) {

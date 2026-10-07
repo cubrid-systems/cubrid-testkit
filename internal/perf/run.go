@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -205,6 +206,7 @@ func (r *Runner) runOne(ctx context.Context, c *Case, f *Fixture) (int, string) 
 		Schema: "perf-regression-session/1", ID: r.SessionID, Kind: "run", Started: r.Started, State: "incomplete",
 		Host: hostname(), Interleave: "case", CPUSet: CPUSetPair{Server: r.CPUSet, Client: r.ClientCPUSet},
 		Pinning: r.pinning(), Pair: pair, Cases: []string{c.ID},
+		ClientImage: ClientImage{Name: r.ClientImage, Digest: imageDigest(r.ClientImage)},
 	}
 	session.Target = BuildRef{Build: r.Builds[0], Fingerprint: readFingerprint(r.Builds[0])}
 	session.Reference = BuildRef{Build: r.Builds[1], Fingerprint: readFingerprint(r.Builds[1])}
@@ -287,7 +289,7 @@ func (r *Runner) runOne(ctx context.Context, c *Case, f *Fixture) (int, string) 
 	sidecar := Sidecar{
 		Schema: "perf-regression/1", Session: r.SessionID, Pair: pair,
 		Target: session.Target, Reference: session.Reference, Machine: session.Host,
-		CPUSet: session.CPUSet, Pinning: session.Pinning, Interleave: "case", SessionValid: true,
+		CPUSet: session.CPUSet, Pinning: session.Pinning, Interleave: "case", ClientImage: session.ClientImage, SessionValid: true,
 		Cases: []CaseEntry{entry},
 	}
 	if err := writeJSON(filepath.Join(pairDir, "regression-case.json"), &sidecar); err != nil {
@@ -313,6 +315,22 @@ func (r *Runner) runOne(ctx context.Context, c *Case, f *Fixture) (int, string) 
 		return ExitEnvironment, lastLine(c, v, entry)
 	}
 	return ExitOK, lastLine(c, v, entry)
+}
+
+// imageDigest is the runtime's id for an image, best effort: the backend csb
+// will use ($CSB_BACKEND, else whichever of docker and podman answers).
+func imageDigest(image string) string {
+	backends := []string{os.Getenv("CSB_BACKEND")}
+	if backends[0] == "" {
+		backends = []string{"podman", "docker"}
+	}
+	for _, b := range backends {
+		out, err := exec.Command(b, "image", "inspect", "--format", "{{.Id}}", image).Output()
+		if err == nil {
+			return strings.TrimSpace(string(out))
+		}
+	}
+	return ""
 }
 
 func hostname() string {

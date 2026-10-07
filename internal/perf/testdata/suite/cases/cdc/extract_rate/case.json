@@ -9,5 +9,6 @@
   "op": "item", "metric": "ops_per_s",
   "cold": false, "warm_s": 0, "warmup": 1, "repeats": 3, "budget_s": 180, "tolerance": 0.05,
   "counters": ["Num_log_append_records", "net_packets", "DWB_flush_block"],
+  "judge_counters": ["Num_log_append_records", "net_packets"],
   "background": "keep"
 }

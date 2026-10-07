@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -21,9 +22,18 @@ type Branch struct {
 	Line  int
 }
 
-// DefaultRepo is where a branch lives when the registration does not say:
-// team branches are usually on a personal fork, and that is what repo= is for.
+// DefaultRepo is where a branch lives when the registration does not say.
 const DefaultRepo = "CUBRID/cubrid"
+
+// AllowedRepos are the repositories a registered branch may live in: the
+// organisation's, where push access is the team's (decision of 2026-10-07).
+// A personal fork is refused -- its branch would run its code on the hub as
+// the shared account, and nothing on the hub isolates a build yet.
+var AllowedRepos = []string{"CUBRID/cubrid", "cubrid-systems/cubrid"}
+
+// branchNameRe is a name git check-ref-format would take, narrowed: no
+// leading dash (an option to fetch), no "..", no control characters.
+var branchNameRe = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._/=+@-]*$`)
 
 // Expired says whether the registration's until day has passed -- the whole
 // day, in this machine's zone, because the session starts at 02:00 local and
@@ -73,6 +83,10 @@ func ReadBranches(file string) ([]Branch, error) {
 		}
 		fields := strings.Fields(line)
 		b := Branch{Name: fields[0], Repo: DefaultRepo, Line: n}
+		if !branchNameRe.MatchString(b.Name) || strings.Contains(b.Name, "..") || strings.HasSuffix(b.Name, "/") || strings.HasSuffix(b.Name, ".lock") {
+			p.add("line %d: %q is not a branch name git fetch would take", n, b.Name)
+			continue
+		}
 		if prev, dup := seen[b.Name]; dup {
 			p.add("line %d: %s is already registered on line %d", n, b.Name, prev)
 			continue
@@ -86,9 +100,8 @@ func ReadBranches(file string) ([]Branch, error) {
 			}
 			switch k {
 			case "repo":
-				owner, repo, ok := strings.Cut(v, "/")
-				if !ok || owner == "" || repo == "" || strings.Contains(repo, "/") {
-					p.add("line %d: repo=%q is not owner/repo", n, v)
+				if !allowedRepo(v) {
+					p.add("line %d: repo=%q is not one of %s; a branch to measure lives in the organisation's repository", n, v, strings.Join(AllowedRepos, ", "))
 				}
 				b.Repo = v
 			case "owner":
@@ -119,6 +132,15 @@ func ReadBranches(file string) ([]Branch, error) {
 		p.add("%v", err)
 	}
 	return out, p.err()
+}
+
+func allowedRepo(repo string) bool {
+	for _, a := range AllowedRepos {
+		if strings.EqualFold(a, repo) {
+			return true
+		}
+	}
+	return false
 }
 
 func uncomment(line string) string {

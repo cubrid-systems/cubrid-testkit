@@ -62,7 +62,7 @@ func TestRestoreReplacesContentsAndKeepsTheDirectory(t *testing.T) {
 }
 
 func TestJudgeCountsACounterThatAppearedAsAChange(t *testing.T) {
-	cs := &Case{ID: "x.y", Metric: "latency_s", Tolerance: 0.05, Repeats: 3, Counters: []string{"Num_log_archives", "client.rw_syscalls"}}
+	cs := &Case{ID: "x.y", Metric: "latency_s", Tolerance: 0.05, Repeats: 3, Counters: []string{"Num_log_archives", "client.rw_syscalls"}, JudgeCounters: []string{"Num_log_archives", "client.rw_syscalls"}}
 	cr := &caseResult{Case: cs}
 	for k := 1; k <= 3; k++ {
 		cr.Passes = append(cr.Passes,
@@ -74,7 +74,7 @@ func TestJudgeCountsACounterThatAppearedAsAChange(t *testing.T) {
 		t.Errorf("a counter that went from 0 to something: flag=%s why=%s", v.Flag, v.Why)
 	}
 	// Syscall counts never decide: a JVM's socket I/O is invisible to them.
-	cs.Counters = []string{"client.rw_syscalls"}
+	cs.Counters, cs.JudgeCounters = []string{"client.rw_syscalls"}, []string{"client.rw_syscalls"}
 	if v := judge(cs, cr, 3); v.Flag != FlagNone {
 		t.Errorf("rw_syscalls flagged: %s", v.Flag)
 	}
@@ -120,7 +120,7 @@ func TestLastLineCarriesEveryValue(t *testing.T) {
 		measuredPass("reference", 1, 10, nil), measuredPass("reference", 2, 10, nil), measuredPass("reference", 3, 10, nil))
 	v := judge(cs, cr, 3)
 	line := lastLine(cs, v, caseEntry(cs, cr, v))
-	for _, want := range []string{"x.y ratio=1.1000", "target_mean=11", "reference_mean=10", "unit=s", "flag=regression", "status=ok", "target=[10,null,12]", "reference=[10,10,10]"} {
+	for _, want := range []string{"x.y ratio=1.0954", "pairs=[1,1.2]", "confirmed=false", "target_mean=11", "reference_mean=10", "unit=s", "flag=none", "status=ok", "target=[10,null,12]", "reference=[10,10,10]"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("line lacks %q: %s", want, line)
 		}

@@ -57,7 +57,9 @@ type Conf struct {
 }
 
 var (
-	Interleaves = []string{"case", "round"}
+	// Interleaves is case alone: the idle cluster is paused during a pass
+	// instead of being torn down between rounds (decision of 2026-10-07).
+	Interleaves = []string{"case"}
 	ReportModes = []string{"dry", "team"}
 
 	// A perf.conf key is one of these, or pair.<name> / overlap.<name>.

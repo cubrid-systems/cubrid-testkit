@@ -9,5 +9,6 @@
   "op": "commit", "metric": "latency_s",
   "cold": false, "warm_s": 10, "warmup": 1, "repeats": 5, "budget_s": 120, "tolerance": 0.05,
   "counters": ["Num_log_page_iowrites", "Num_file_iosynches", "dev_flushes", "cas.rw_syscalls"],
+  "judge_counters": ["Num_log_page_iowrites", "Num_file_iosynches", "dev_flushes"],
   "background": "defer"
 }

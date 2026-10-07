@@ -26,7 +26,7 @@ func TestBranchesReadTheRegistrations(t *testing.T) {
 		t.Fatalf("registrations = %+v", all)
 	}
 	kim := all[0]
-	if kim.Name != "CBRD-27238_escalation" || kim.Repo != "kim/cubrid" || kim.Owner != "kim" || len(kim.Cases) != 2 || !kim.Until.IsZero() {
+	if kim.Name != "CBRD-27238_escalation" || kim.Repo != "cubrid-systems/cubrid" || kim.Owner != "kim" || len(kim.Cases) != 2 || !kim.Until.IsZero() {
 		t.Errorf("first = %+v", kim)
 	}
 	if !kim.Selects("txn.commit_single") || kim.Selects("lib.backupdb") || !kim.Selects("storage.heap_scan") {
@@ -46,7 +46,12 @@ func TestBranchRefusalsNameTheLine(t *testing.T) {
 	cases := []struct{ name, text, want string }{
 		{"an unknown key", "b1 owner=x untill=2026-01-01\n", "line 1: unknown key untill"},
 		{"no owner", "b1 repo=x/y\n", "line 1: b1 has no owner="},
-		{"a repo that is not owner/repo", "b1 owner=x repo=cubrid\n", `repo="cubrid" is not owner/repo`},
+		{"a repo that is not owner/repo", "b1 owner=x repo=cubrid\n", `repo="cubrid" is not one of CUBRID/cubrid, cubrid-systems/cubrid`},
+		// A personal fork: its branch would run its code on the hub as the
+		// shared account, and nothing isolates a build yet (decision §1).
+		{"a personal fork", "b1 owner=kim repo=kim/cubrid\n", `repo="kim/cubrid" is not one of CUBRID/cubrid, cubrid-systems/cubrid`},
+		{"a branch name that is an option", "--upload-pack=x owner=x\n", "is not a branch name git fetch would take"},
+		{"a branch name with ..", "a..b owner=x\n", "is not a branch name git fetch would take"},
 		{"a date that is not a date", "b1 owner=x until=2026-13-01\n", `until="2026-13-01" is not YYYY-MM-DD`},
 		{"the same branch twice", "b1 owner=x\n\nb1 owner=y\n", "line 3: b1 is already registered on line 1"},
 		{"a glob that cannot match", "b1 owner=x cases=txn.[\n", "does not match anything"},
@@ -68,11 +73,11 @@ func TestBranchRefusalsNameTheLine(t *testing.T) {
 
 // A comment after a space is a comment, and a branch name may hold '='.
 func TestBranchesTakeCommentsAndOddNames(t *testing.T) {
-	all, err := ReadBranches(writeBranches(t, "fix/a=b owner=x   # until the release\n#whole line\n  b2 owner=y\n"))
+	all, err := ReadBranches(writeBranches(t, "fix/a=b owner=x   # until the release\n#whole line\n  b2 owner=y repo=cubrid/cubrid\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 2 || all[0].Name != "fix/a=b" || all[0].Owner != "x" || all[1].Name != "b2" {
+	if len(all) != 2 || all[0].Name != "fix/a=b" || all[0].Owner != "x" || all[1].Name != "b2" || all[1].Repo != "cubrid/cubrid" {
 		t.Errorf("registrations = %+v", all)
 	}
 }

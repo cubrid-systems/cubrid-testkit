@@ -9,5 +9,6 @@
   "op": "run", "metric": "elapsed_s",
   "cold": false, "warm_s": 0, "warmup": 1, "repeats": 3, "budget_s": 300, "tolerance": 0.05,
   "counters": ["server.io_read_bytes"],
+  "judge_counters": [],
   "background": "keep"
 }

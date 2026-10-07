@@ -138,7 +138,7 @@ func TestConfRefusalsNameTheKey(t *testing.T) {
 		{"no pair", []string{"pair.develop", "overlap.develop"}, "no pair.<name>"},
 		{"a pair with no reference", []string{"pair.develop = develop-HEAD"}, `pair.develop wants "<target> ; <reference>"`},
 		{"an overlap with no pair", []string{"overlap.feature = /x"}, "overlap.feature has no pair.feature"},
-		{"an interleave off the list", []string{"interleave = pair"}, `interleave "pair" is not one of case, round`},
+		{"an interleave off the list", []string{"interleave = round"}, `interleave "round" is not one of case`},
 		{"a report mode off the list", []string{"report.mode = loud"}, `report.mode "loud" is not one of dry, team`},
 		{"a cpuset that is not a list", []string{"cpuset.server = 0-7, 16"}, "cpuset.server wants a CPU list"},
 		{"a tolerance of zero", []string{"canary_tolerance = 0"}, "canary_tolerance must be a number above 0"},

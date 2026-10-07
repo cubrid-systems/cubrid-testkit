@@ -185,15 +185,10 @@ func ReadConf(file string) (*Conf, error) {
 	if c.ReportMode != "" {
 		oneOf(p, "report.mode", c.ReportMode, ReportModes)
 	}
-	// FR-25: team mode sends the mail and posts to the channel, so both have
-	// to be there before the session that would send them.
-	if c.ReportMode == "team" {
-		for _, kv := range []struct{ key, v string }{{"report.mail", c.ReportMail}, {"report.webhook", c.ReportWebhook}} {
-			if kv.v == "" {
-				p.add("report.mode is team and %s is not set", kv.key)
-			}
-		}
-	}
+	// FR-25 (2026-10-06): delivery is the hub's dashboard, which everyone can
+	// reach; mail and messenger pushes are a later phase. report.mail and
+	// report.webhook are accepted so a conf written for that phase validates
+	// now, and are not read.
 	if c.MemoryCap != "" && !memoryCapRe.MatchString(c.MemoryCap) {
 		p.add("memory_cap wants a size like 24G, got %q", c.MemoryCap)
 	}

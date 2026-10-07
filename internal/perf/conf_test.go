@@ -112,19 +112,18 @@ func TestOverlapBindsInAnyOrder(t *testing.T) {
 	}
 }
 
-// FR-25: team mode sends the mail and posts to the channel, so both have to
-// be there; dry mode needs neither.
-func TestTeamModeNeedsSomewhereToSend(t *testing.T) {
+// FR-25 (2026-10-06): delivery is the hub's dashboard, so neither mode needs
+// a mail address or a webhook; the keys are accepted for the later phase.
+func TestNeitherModeNeedsSomewhereToSend(t *testing.T) {
 	suite := copySuite(t)
-	if _, err := ReadConf(writeConf(t, suite, "report.mode = team")); err != nil {
-		t.Errorf("team mode with mail and webhook was refused: %v", err)
-	}
-	_, err := ReadConf(writeConf(t, suite, "report.mode = team", "report.mail"))
-	if err == nil || !strings.Contains(err.Error(), "report.mode is team and report.mail is not set") {
-		t.Errorf("err = %v", err)
-	}
-	if _, err := ReadConf(writeConf(t, suite, "report.mail", "report.webhook", "report.webhook_format", "branches.max = 0")); err != nil {
-		t.Errorf("dry mode without a destination, and branches.max = 0, was refused: %v", err)
+	for _, edits := range [][]string{
+		{"report.mode = team"},
+		{"report.mode = team", "report.mail", "report.webhook", "report.webhook_format"},
+		{"report.mail", "report.webhook", "report.webhook_format", "branches.max = 0"},
+	} {
+		if _, err := ReadConf(writeConf(t, suite, edits...)); err != nil {
+			t.Errorf("%v: refused: %v", edits, err)
+		}
 	}
 }
 

@@ -52,13 +52,17 @@ type SessionDoc struct {
 	Pinning     string         `json:"pinning"`
 	ClientImage ClientImage    `json:"client_image"`
 	Pairs       []*SessionPair `json:"pairs"`
-	BudgetS     int            `json:"budget_s"`
-	Deadline    *time.Time     `json:"deadline,omitempty"`
-	ExitReason  string         `json:"exit_reason"`
-	Guard       GuardReport    `json:"guard"`
-	Preflight   map[string]any `json:"preflight"`
-	Previous    string         `json:"previous_session,omitempty"`
-	Notes       []string       `json:"notes,omitempty"`
+	// Valid says whether every pair that ran passed its canaries; Flags is
+	// their flag count. Both are what the hub's dashboard reads first.
+	Valid      bool           `json:"valid"`
+	Flags      int            `json:"flags"`
+	BudgetS    int            `json:"budget_s"`
+	Deadline   *time.Time     `json:"deadline,omitempty"`
+	ExitReason string         `json:"exit_reason"`
+	Guard      GuardReport    `json:"guard"`
+	Preflight  map[string]any `json:"preflight"`
+	Previous   string         `json:"previous_session,omitempty"`
+	Notes      []string       `json:"notes,omitempty"`
 }
 
 const sessionUsage = `usage: testkit perf session -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>]
@@ -157,6 +161,16 @@ func (s *Session) note(format string, args ...any) {
 
 func (s *Session) writeDoc(state, reason string) {
 	s.doc.State, s.doc.ExitReason, s.doc.Ended = state, reason, time.Now()
+	ran, valid, flags := 0, true, 0
+	for _, p := range s.doc.Pairs {
+		if p.Skipped != "" {
+			continue
+		}
+		ran++
+		valid = valid && p.Valid
+		flags += p.Flags
+	}
+	s.doc.Valid, s.doc.Flags = ran > 0 && valid, flags
 	if err := writeJSON(filepath.Join(s.Out, "session.json"), s.doc); err != nil {
 		s.logf("session.json: %v", err)
 	}

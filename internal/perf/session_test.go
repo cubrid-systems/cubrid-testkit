@@ -152,7 +152,7 @@ func TestBudgetBoundsAndTheClock(t *testing.T) {
 	if got := caseBound(c); got != 6*2*(120+10+60)*time.Second+fixtureSwitchBound {
 		t.Errorf("caseBound = %s", got)
 	}
-	if got := remeasureBound(c); got != 5*2*130*time.Second {
+	if got := remeasureBound(c); got != 5*2*(130+60)*time.Second {
 		t.Errorf("remeasureBound = %s", got)
 	}
 	now := time.Now()
@@ -497,5 +497,37 @@ func TestSessionWithNothingToRunEndsWell(t *testing.T) {
 	md, _ := os.ReadFile(filepath.Join(out, "summary.md"))
 	if !strings.Contains(string(md), "develop: 건너뜀 (builds stale)") || strings.Contains(string(md), "incomplete") {
 		t.Errorf("summary.md:\n%s", md)
+	}
+}
+
+// Spec §7.1 and Design §5.1: the exit code and the state from how the
+// session ended and how many pairs ran.
+func TestSessionExitCodes(t *testing.T) {
+	cases := []struct {
+		reason         string
+		attempted, ran int
+		wantState      string
+		wantCode       int
+	}{
+		{"done", 2, 2, "complete", ExitOK},
+		{"done", 1, 0, "complete", ExitEnvironment}, // the one pair never stood up
+		{"done", 0, 0, "complete", ExitOK},          // nothing attempted: every pair skipped
+		{"budget", 1, 1, "complete", ExitOK},
+		{"budget", 1, 0, "complete", ExitOK}, // the clock stopped it during the canaries
+		{"signal", 2, 1, "incomplete", ExitEnvironment},
+		{"lease", 1, 1, "incomplete", ExitEnvironment},
+	}
+	for _, c := range cases {
+		state, code := sessionExit(c.reason, c.attempted, c.ran)
+		if state != c.wantState || code != c.wantCode {
+			t.Errorf("%s attempted=%d ran=%d: %s/%d, want %s/%d", c.reason, c.attempted, c.ran, state, code, c.wantState, c.wantCode)
+		}
+	}
+	// A pair whose target cluster never stood up has a sidecar (its cases
+	// skipped) and a reason of its own: it did not run.
+	broken := &SessionPair{written: true, Skipped: "cluster: create failed"}
+	fine := &SessionPair{written: true}
+	if pairRan(broken) || !pairRan(fine) {
+		t.Error("pairRan reads written and Skipped together")
 	}
 }

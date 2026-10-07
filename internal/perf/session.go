@@ -399,7 +399,7 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	reason := "done"
-	attempted, ok := 0, 0
+	attempted, ran := 0, 0
 	for _, p := range s.Pairs {
 		if p.Skipped != "" {
 			s.logf("pair %s: skipped (%s)", p.Name, p.Skipped)
@@ -418,8 +418,8 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		if why := s.runPair(ctx, p, canaries); why != "" {
 			reason = why
 		}
-		if p.written {
-			ok++
+		if pairRan(p) {
+			ran++
 		}
 		s.writeDoc("incomplete", "")
 	}
@@ -428,18 +428,29 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 	}
 
 	// 6. What a reader gets (§5.10).
-	state := "complete"
-	if reason == "signal" || reason == "lease" {
-		state = "incomplete"
-	}
+	state, code := sessionExit(reason, attempted, ran)
 	s.finish(state, reason)
+	return code
+}
+
+// pairRan says whether a pair counts as run: its sidecar is on disk and it
+// was not skipped for a reason of its own (a cluster that never stood up).
+func pairRan(p *SessionPair) bool {
+	return p.written && p.Skipped == ""
+}
+
+// sessionExit is Spec §7.1's exit code: 0 when the session ended, invalid
+// pairs and a budget stop included (FR-5); 3 when a signal or the lost
+// lease ended it (FR-6), or when every pair that was tried failed to stand
+// up (Design §5.1).
+func sessionExit(reason string, attempted, ran int) (state string, code int) {
 	switch {
 	case reason == "signal" || reason == "lease":
-		return ExitEnvironment
-	case attempted > 0 && ok == 0:
-		return ExitEnvironment
+		return "incomplete", ExitEnvironment
+	case reason != "budget" && attempted > 0 && ran == 0:
+		return "complete", ExitEnvironment
 	}
-	return ExitOK
+	return "complete", ExitOK
 }
 
 // preflight is Design §11's checks that stop a session before a cluster:
@@ -668,15 +679,16 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 	canaryVerdicts := map[string]Verdict{}
 	stop := ""
 	for _, g := range confGroups(canaries) {
-		if err := ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key, pairDir); err != nil {
-			s.note("pair %s: cluster: %v", p.Name, err)
-			p.Skipped = "cluster"
-			return ctxStop()
+		err := ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key, pairDir)
+		if err == nil {
+			err = ensure(&ss.t, "target", "t", p.Reference.Build, g.Key, canaryDir)
 		}
-		if err := ensure(&ss.t, "target", "t", p.Reference.Build, g.Key, canaryDir); err != nil {
+		if err != nil {
 			s.note("pair %s: cluster: %v", p.Name, err)
-			p.Skipped = "cluster"
-			return ctxStop()
+			if stop = ctxStop(); stop == "" {
+				p.Skipped = "cluster: " + err.Error()
+			}
+			break
 		}
 		res, st := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, nil, canaryDir, true)
 		for _, cr := range res {
@@ -753,18 +765,22 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 	var entries, overlapEntries []CaseEntry
 	verdicts, overlapVerdicts := map[string]Verdict{}, map[string]Verdict{}
 	broken := ""
+	skipGroup := func(g confGroup, why string) {
+		for _, c := range g.Cases {
+			entries = append(entries, skippedEntry(c, why))
+			if p.Overlap != nil {
+				overlapEntries = append(overlapEntries, skippedEntry(c, why))
+			}
+		}
+	}
 	for _, g := range confGroups(order) {
 		if stop != "" || broken != "" {
-			for _, c := range g.Cases {
-				entries = append(entries, skippedEntry(c, firstNonEmptyStr(stop, broken)))
-			}
+			skipGroup(g, firstNonEmptyStr(stop, broken))
 			continue
 		}
 		if why := s.groupMemory(g, p.Overlap != nil); why != "" {
 			s.note("pair %s: conf group %q: %s", p.Name, g.Key, why)
-			for _, c := range g.Cases {
-				entries = append(entries, skippedEntry(c, why))
-			}
+			skipGroup(g, why)
 			continue
 		}
 		var err error
@@ -780,15 +796,18 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 			} else {
 				broken = "cluster: " + err.Error()
 			}
-			for _, c := range g.Cases {
-				entries = append(entries, skippedEntry(c, firstNonEmptyStr(stop, broken)))
-			}
+			skipGroup(g, firstNonEmptyStr(stop, broken))
 			continue
 		}
 		res, st := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, []*Side{ss.o}, pairDir, false)
 		for _, cr := range res {
 			entries = append(entries, cr.entry)
 			verdicts[cr.entry.ID] = cr.verdict
+		}
+		if ss.o != nil && (st != "" || ss.frozen() != "") {
+			for _, c := range g.Cases {
+				overlapEntries = append(overlapEntries, skippedEntry(c, firstNonEmptyStr(st, ss.frozen())))
+			}
 		}
 		if st == "" && ss.o != nil && ss.frozen() == "" {
 			// FR-29: the same target against the second reference, with the

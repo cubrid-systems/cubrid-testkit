@@ -110,6 +110,7 @@ func (r *Runner) passOn(ctx context.Context, s *Side, idle []*Side, c *Case, f *
 			return (&pass{Rep: k, Side: s.Role, Phase: phase, WarmS: c.WarmS, Missing: map[string]string{}}).null("pause: " + err.Error())
 		}
 	}
+	s.frozen = nil // it thawed; whatever failed before is over
 	var notes []string
 	for _, o := range idle {
 		if o == nil || o == s {

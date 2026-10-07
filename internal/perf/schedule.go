@@ -101,7 +101,7 @@ func caseBound(c *Case) time.Duration {
 }
 
 func remeasureBound(c *Case) time.Duration {
-	return time.Duration(remeasurePairs*2*(c.BudgetS+c.WarmS)) * time.Second
+	return time.Duration(remeasurePairs*2) * (time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second)
 }
 
 // pairBound is one pair's upper bound: the clusters it stands up (r, tc, t,

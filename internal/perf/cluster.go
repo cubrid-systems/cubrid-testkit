@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	osexec "os/exec"
+
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
@@ -33,6 +35,17 @@ type Side struct {
 	// restarted watcher with the same -o path would overwrite the series.
 	watchers map[string]int
 	startN   map[string]int
+	// running is the databases whose server is up; built the fixtures made
+	// on this side. The session keeps one fixture server up per side (§5.1).
+	running map[string]bool
+	built   map[string]bool
+	// confKey is the conf group the cluster was created for; a group with
+	// another key needs another cluster.
+	confKey string
+	// containers is what the runtime calls this cluster's containers, for
+	// pause; cgroup is the server node's, for guard stage 3.
+	containers []string
+	cgroup     string
 }
 
 // Pinning says how the server and the client were kept apart: cpuset when the
@@ -85,7 +98,8 @@ func brokerCAS(cases []*Case) int {
 func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cases []*Case) (*Side, error) {
 	s := &Side{
 		Role: role, Name: ClusterName(r.SessionID, r.Started, suffix), Build: build,
-		watchers: map[string]int{}, startN: map[string]int{},
+		watchers: map[string]int{}, startN: map[string]int{}, running: map[string]bool{}, built: map[string]bool{},
+		confKey: groupKey(cases),
 	}
 	s.CLI = &sandbox.CLI{Bin: r.CSBBin, Cluster: s.Name}
 	s.N1 = sandbox.NewNode(s.CLI, "n1")
@@ -129,7 +143,122 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 	if err := r.compileClients(ctx, s, cases); err != nil {
 		return s, err
 	}
+	if r.Guard != nil {
+		if cg, err := containerCgroup(s.Name + "-n1"); err != nil {
+			r.logf("%s: guard: %v (foreign CPU will count this cluster's)", s.Role, err)
+		} else {
+			s.cgroup = cg
+			r.Guard.cgroups = append(r.Guard.cgroups, cg)
+		}
+	}
 	return s, nil
+}
+
+// groupKey is confKey over a set of cases that share a cluster.
+func groupKey(cases []*Case) string {
+	if len(cases) == 0 {
+		return ""
+	}
+	return confKey(cases[0])
+}
+
+// pauseSide freezes every container of a cluster (Design §5.1): the runtime's
+// pause, by the cluster label, because csb has no verb for it (§13 11).
+func (r *Runner) pauseSide(s *Side) error {
+	return r.runtimeOnCluster(s, "pause")
+}
+
+// unpauseSide thaws them. A container that is not paused is not an error:
+// the runtime says so and the state is the one wanted.
+func (r *Runner) unpauseSide(s *Side) error {
+	return r.runtimeOnCluster(s, "unpause")
+}
+
+func (r *Runner) runtimeOnCluster(s *Side, verb string) error {
+	if len(s.containers) == 0 {
+		names, err := clusterContainers(s.Name)
+		if err != nil {
+			return err
+		}
+		if len(names) == 0 {
+			return fmt.Errorf("%s: no container carries csb.cluster=%s", s.Role, s.Name)
+		}
+		s.containers = names
+	}
+	var failed []string
+	for _, name := range s.containers {
+		out, err := osexec.Command(runtimeBin(), verb, name).CombinedOutput()
+		if err != nil {
+			msg := strings.TrimSpace(string(out))
+			if verb == "unpause" && strings.Contains(msg, "not paused") {
+				continue
+			}
+			if verb == "pause" && strings.Contains(msg, "already paused") {
+				continue
+			}
+			failed = append(failed, name+": "+tail(msg, 160))
+		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%s %s: %s", runtimeBin(), verb, strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+// buildFixtures makes every fixture the cases need that this side does not
+// have yet, and leaves their servers down: the session keeps up only the
+// server of the case it is running (§5.1).
+func (r *Runner) buildFixtures(ctx context.Context, s *Side, suite *Suite, cases []*Case) error {
+	for _, name := range fixturesOf(cases) {
+		if s.built[name] {
+			continue
+		}
+		f := suite.Fixtures[name]
+		if f == nil {
+			return fmt.Errorf("%s: fixture %s is not in the suite", s.Role, name)
+		}
+		if err := r.buildFixture(ctx, s, f); err != nil {
+			return err
+		}
+		s.built[name] = true
+		if err := r.serverStop(ctx, s, dbName(f)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// startFixtureServer brings the case's fixture server up with its watcher
+// when it is not up already.
+func (r *Runner) startFixtureServer(ctx context.Context, s *Side, f *Fixture) error {
+	db := dbName(f)
+	if s.running[db] {
+		return nil
+	}
+	if err := r.serverStart(ctx, s, db); err != nil {
+		return err
+	}
+	return r.watcherStart(ctx, s, db)
+}
+
+// stopOthers takes down every other fixture server on the side, watcher
+// first (serverStop does that), so their daemons and data_buffer_size are
+// out of the way (§5.1, §7 memory).
+func (r *Runner) stopOthers(ctx context.Context, s *Side, f *Fixture) error {
+	keep := dbName(f)
+	dbs := make([]string, 0, len(s.running))
+	for db := range s.running {
+		if db != keep {
+			dbs = append(dbs, db)
+		}
+	}
+	sort.Strings(dbs)
+	for _, db := range dbs {
+		if err := r.serverStop(ctx, s, db); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // confUnion is every case's cubrid.conf override, key=value, sorted; the
@@ -266,6 +395,7 @@ func (r *Runner) serverStart(ctx context.Context, s *Side, db string) error {
 	if res.ExitCode != 0 {
 		return fmt.Errorf("%s: cubrid server start %s: exit %d: %s", s.Role, db, res.ExitCode, tail(res.Stdout, 300))
 	}
+	s.running[db] = true
 	return nil
 }
 
@@ -288,6 +418,7 @@ func (r *Runner) serverStop(ctx context.Context, s *Side, db string) error {
 	if res.ExitCode != 0 {
 		return fmt.Errorf("%s: cubrid server stop %s: exit %d: %s", s.Role, db, res.ExitCode, tail(res.Stderr, 300))
 	}
+	delete(s.running, db)
 	return nil
 }
 

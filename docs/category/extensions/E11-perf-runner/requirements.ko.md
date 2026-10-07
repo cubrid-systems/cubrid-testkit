@@ -5,7 +5,7 @@
 **Source:** cubrid_cv `plan/perf_regression/` — PROPOSAL, Spec v0.1.3, Design v0.1.3 (인터페이스와
 알고리즘은 거기에 있다. 이 항목은 그중 무엇이 testkit 에 들어오는지, 왜 여기인지를 적는다)
 **Status:** incubating — **진행 중** (ADR-EXT-011 초안 2026-10-02. `perf validate`·`perf list` 가 트리에
-있고(M1), `perf run` 은 #16 으로 머지됐다(M2, 2026-10-03). `session` 은 M3)
+있고(M1), `perf run` 은 #16 으로 머지됐다(M2, 2026-10-03). `session` 은 M3(2026-10-07))
 **축 매핑:** 여덟 축 어디도 아니다 — *측정* 역량이지 오라클이 아니다. 가장 가까운 이웃은
 E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 **Companion docs:** cubrid_cv 의 Spec 과 Design. `io-contract` 는 Spec §7
@@ -71,8 +71,27 @@ suite 에 없거나 버전이 다른 픽스처. `branches.conf` 는 모르는 �
 (`regression-case.json`, `cases.csv`, `counters.json`, describe 아티팩트, `session.json`). 표준 출력 마지막
 줄이 비율이다. publish 는 하지 않는다. cpuset 둘은 CPU 목록 자체에 쉼표가 있어 플래그 둘로 받는다.
 
+`testkit perf session -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>] [--out <dir>]
+[--deadline <RFC3339>] [--id <run-id>] [--keep]` 은 주간 세션이다(Design §5.1, M3). conf·suite·등록을 한꺼번에
+읽어 문제가 있으면 종료 코드 2 로 거부하고, 빌드는 `builds.manifest` 에서 가져온다(`builds.go` — 파일에 없거나
+설치 트리가 없는 쌍은 `skipped: build missing`, 24시간보다 오래된 파일은 모든 쌍을 `builds stale` 로). 지문을
+읽어 `$BENCH_RUNS` 아래 직전 `*_perf-weekly` run 과 비교하고(FR-2), Debug 빌드는 거부한다. 호스트를 확인하고
+(`hub.go`: csb, 클라이언트 이미지, 디스크, `MemAvailable`, 페이지 캐시 sudo 줄, bench-mode·부스트 상태 기록,
+컨테이너 밖의 `cub_server`·`postgres`·`mysqld` 는 끝내되 끝나지 않으면 종료 코드 3 — 외부 부하 가드 1단),
+남은 `pf-` 클러스터를 지운 뒤 쌍마다: 기준 빌드로 세운 두 클러스터 사이의 카나리 A/A, 하나라도
+`canary_tolerance` 밖이면 그 쌍은 무효이고 케이스는 `skipped`, 그 다음 세션마다 섞은 순서의 케이스를
+`cubrid.conf` 오버라이드별 묶음으로(묶음마다 클러스터 하나, `schedule.go`) 돌린다. 패스 동안 상대 클러스터의
+컨테이너는 pause 되고 각 쪽에는 현재 픽스처의 서버만 떠 있으며(`cluster.go`), 측정 패스마다 서버 코어의 외부
+CPU 와 `pswpin` 을 읽어(가드 3단, 코어 하나를 넘거나 swap-in 이 있으면 `null(contaminated)`), 추정치가
+허용폭 밖인데 합의가 없으면 ABBA 5쌍을 더 돌리고(FR-20.1), 케이스 경계마다 임대(`$BENCH_RUNS/.lease.json`)를
+확인하며(L7), 예산과 `$PERF_DEADLINE` 중 먼저 오는 쪽에서 쌍·케이스 경계에 멈춘다(`skipped: budget`, 종료
+코드 0). 파일은 쌍마다 sidecar(그리고 `canary/`·`overlap/`), 케이스마다 `counters.json`, `summary.md`,
+`ledger_rows.md`, `session.json` 이다(`summary.go`). `--dry-run` 은 계획과 `session.json` 만 쓰고 아무것도
+세우지 않는다(Spec §13 A1). 결과 디렉터리는 bench-client 가 준 `$REPORTS_DIR` 이고 run id 는 그 이름이다.
+
 ## 5. 다음
 
-- **M3** — `session`: `perf.conf` 의 쌍 전부, 두 클러스터 사이의 카나리, 빌드 단계의 `builds.json`,
-  `summary.md`·`ledger_rows.md`, 허브의 timer·sudoers, cbingest 분기 (Design §12).
-- engine-suite 쪽: 빌드 단계의 `build_fingerprint.sh`, 나머지 1차 케이스.
+- 허브: `perf-weekly` 래퍼와 unit, 빌드 단계의 `builds.json`, `hub.json` 과 대시보드 페이지(`bench-hub`),
+  T3 드릴(Design §6.5.1 L11).
+- conbench: `regression-case.json` ingest 분기. engine-suite: `build_fingerprint.sh`.
+- 이후: 카나리 재설계(Design §13 13), 빌드 격리(§13 12), 오염 가드 임계와 최소 절대 변화(T1).

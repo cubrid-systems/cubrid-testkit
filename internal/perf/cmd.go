@@ -23,10 +23,12 @@ const (
 const usage = `usage: testkit perf validate <case-dir|fixture-dir|suite-dir|branches.conf|perf.conf>
        testkit perf list     -c <perf.conf> | --suite <dir>
        testkit perf run      <case-id> --suite <dir> --build <target> --build <reference> [flags]
+       testkit perf session  -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>] [flags]
 
 validate reads a manifest, a registration file or a session configuration and
 names every problem; exit 2 when there is one. list prints the suite's cases.
-run measures one case on two builds (run --help for its flags). session is M3.`
+run measures one case on two builds (run --help for its flags). session runs
+the weekly session the conf describes (session --help for its flags).`
 
 // Main is the perf entry point: testkit perf <verb> ..., routed before
 // containment because none of this is a run. Measurements and tables go to
@@ -44,8 +46,7 @@ func Main(args []string, stdout, stderr io.Writer) int {
 	case "run":
 		return runCmd(args[1:], stdout, stderr)
 	case "session":
-		fmt.Fprintf(stderr, "testkit perf session: not in this build yet; validate, list and run are\n")
-		return ExitRefused
+		return sessionCmd(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "testkit perf: %q is not a verb\n%s\n", args[0], usage)
 		return ExitRefused

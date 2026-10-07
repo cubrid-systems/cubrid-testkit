@@ -26,6 +26,8 @@ type pass struct {
 	NullReason string              `json:"null_reason,omitempty"`
 	Notes      []string            `json:"notes,omitempty"`
 	WarmS      int                 `json:"warm_included_s"`
+	// Host is guard stage 3's reading across a measured pass (session only).
+	Host *hostDelta `json:"host,omitempty"`
 }
 
 // caseResult is both sides' passes for one case.
@@ -51,24 +53,54 @@ func (cr *caseResult) measured(side string) []*pass {
 func (r *Runner) runCase(ctx context.Context, c *Case, f *Fixture, t, ref *Side) *caseResult {
 	cr := &caseResult{Case: c}
 	for k := 1; k <= c.Warmup; k++ {
-		for _, s := range []*Side{t, ref} {
-			cr.Passes = append(cr.Passes, r.pass(ctx, s, c, f, "warmup", k))
-		}
+		cr.Passes = append(cr.Passes, r.passOn(ctx, t, ref, c, f, "warmup", k), r.passOn(ctx, ref, t, c, f, "warmup", k))
 	}
-	for k := 1; k <= r.repeats(c); k++ {
-		order := []*Side{t, ref}
+	r.measurePasses(ctx, cr, c, f, t, ref, 1, r.repeats(c))
+	return cr
+}
+
+// measurePasses runs repetitions from..to in the ABBA order: the pair of a
+// repetition is the two passes next to each other in time. The session's
+// re-measurement (FR-20.1) continues the sequence from repeats+1.
+func (r *Runner) measurePasses(ctx context.Context, cr *caseResult, c *Case, f *Fixture, t, ref *Side, from, to int) {
+	for k := from; k <= to; k++ {
+		order := [][2]*Side{{t, ref}, {ref, t}}
 		if k%2 == 0 {
-			order = []*Side{ref, t}
+			order = [][2]*Side{{ref, t}, {t, ref}}
 		}
-		for _, s := range order {
+		for _, o := range order {
+			s, other := o[0], o[1]
 			if ctx.Err() != nil {
 				cr.Passes = append(cr.Passes, &pass{Rep: k, Side: s.Role, Phase: "measure", NullReason: "signal"})
 				continue
 			}
-			cr.Passes = append(cr.Passes, r.pass(ctx, s, c, f, "measure", k))
+			cr.Passes = append(cr.Passes, r.passOn(ctx, s, other, c, f, "measure", k))
 		}
 	}
-	return cr
+}
+
+// passOn is a pass with the other side paused for its duration (Design §5.1,
+// decision §2 of 2026-10-07): the idle cluster's daemons, vacuum and flushes
+// stay out of the measured window. A local run does not pause. A pause that
+// fails is a note on the pass; an unpause that fails twice makes the pass
+// null(pause), because the next pass on that side would hang.
+func (r *Runner) passOn(ctx context.Context, s, other *Side, c *Case, f *Fixture, phase string, k int) *pass {
+	if !r.PauseIdle || other == nil {
+		return r.pass(ctx, s, c, f, phase, k)
+	}
+	var notes []string
+	if err := r.pauseSide(other); err != nil {
+		notes = append(notes, "idle side not paused: "+err.Error())
+	}
+	p := r.pass(ctx, s, c, f, phase, k)
+	if err := r.unpauseSide(other); err != nil {
+		time.Sleep(2 * time.Second)
+		if err = r.unpauseSide(other); err != nil {
+			p.null("pause: " + err.Error())
+		}
+	}
+	p.Notes = append(p.Notes, notes...)
+	return p
 }
 
 // pass is Design §5.5's pass(): reset, the cold sequence when asked, a
@@ -125,7 +157,14 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 			}
 		}
 	}
+	var hostPre hostSnapshot
+	if phase == "measure" && r.Guard != nil {
+		hostPre = r.Guard.snapshot()
+	}
 	rec, rc, reason, err := r.runClient(ctx, s, c, f, phase, k)
+	if phase == "measure" && r.Guard != nil {
+		p.Host = r.Guard.delta(hostPre, r.Guard.snapshot())
+	}
 	if err != nil {
 		return p.null("client: " + err.Error())
 	}
@@ -146,6 +185,14 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	if reason != "" {
 		p.NullReason = reason
 		r.logf("%s %s rep %d: null (%s, rc %d)", c.ID, s.Role, k, reason, rc)
+	}
+	// Guard stage 3 (FR-6.2): a window something else ran in is not a
+	// measurement, however the client fared.
+	if p.Host != nil && p.NullReason == "" {
+		if why := p.Host.contaminated(); why != "" {
+			p.NullReason = why
+			r.logf("%s %s rep %d: null (%s)", c.ID, s.Role, k, why)
+		}
 	}
 	if rec != nil {
 		p.Ops, p.WarmOps, p.ElapsedNs, p.P50Ns, p.P99Ns = &rec.Ops, rec.WarmOps, &rec.ElapsedNs, rec.P50Ns, rec.P99Ns

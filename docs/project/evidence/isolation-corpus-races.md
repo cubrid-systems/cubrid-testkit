@@ -201,7 +201,12 @@ patches, the way shell's and sql's corpus problems already were, and ADR-018 con
 one deletes its patch — the run then refuses the case, which is how this repository finds out (ADR-013's rule,
 applied here).
 
-Six are carried today. Each is an ordering statement, or an answer the corpus already has and never finished, and
+Six were carried on 2026-09-19, and **the arithmetic here is not `28 - 6`.** The gate is failed by 27 paths, not 28:
+the 25 runner differences in the table above plus the two found at eight and fourteen slots. Five of the six patches
+are on one of those 27; the sixth, `db_index_04`, is the same kind but passes when run alone. So 27 - 5 = 22 were
+unwritten. **Ten more were written on 2026-09-28** (below), so it is now 27 - 15 = **12**.
+
+Each of the first six is an ordering statement, or an answer the corpus already has and never finished, and
 **none of them changes what the case prints** — which is why they could be written from the case's own text:
 
 | case | the change |
@@ -213,16 +218,123 @@ Six are carried today. Each is an ordering statement, or an answer the corpus al
 | `_06_features/cbrd_22705_online_index_parallel/…/groupby/delete_select_06` | the same line, the same fix |
 | `_04_RepeatableRead_ReadCommitted/…/unique_with_key/update_insert_01_1_complex` | `.answer1` gets `public.` in front of its two class names |
 
-**The other twenty-two are not written, and the reason is the same for twenty-one of them.** Kind 3's fix is for
-the client to take its snapshot in a statement of its own, and a statement of its own prints — so the answer
-changes and has to be re-recorded from a run. A `.ctl` patched without its answer fails the case for a new reason,
-which is worse than leaving it. The twenty-second is `trigger_update_11`, whose two moved lines belong to clients
-that are blocked on each other: which the engine releases first is not settled by the case's text.
+**Twenty-two were not written.** This section used to say the reason was the same for twenty-one of them —
+kind 3's fix is for the client to take its snapshot in a statement of its own, a statement of its own prints, so the
+answer changes and has to be re-recorded from a run; and that `trigger_update_11` was the exception, its two moved
+lines belonging to clients blocked on each other.
 
-`TESTKIT_ISOLATION_CTL` therefore stays off, but for a different reason than before — not until upstream moves,
-until the remaining answers are re-recorded and ADR-019's gate has been run on the patched corpus. The controller
-was never wrong about these cases: it sends the second statement when the script says to send it, which is
-immediately.
+**Measured on 2026-09-28, that is three groups and not two**, and the split is decided by the controller rather than
+by the cases: five want only a wait and no new answer, five are the kind 3 described above, and twelve cannot be
+expressed at all with the wait states `qactl` has. The next section has the measurement, the case list and why, and
+the ten that could be written now are.
+
+
+### The 22 that were not written, by name — and what each one's patch needed
+
+**Run 2026-09-28**, engine `11.5.0.2513-5f3a30d`, one slot, `testcase_retry_num=0`, three attempts, testkit's
+controller throughout. The case list was generated from the tables above minus the patch directory as it stood before
+this run. It is text, and does not move when either of them does; the last column says what became of each.
+
+They are not one kind, and the controller is what splits them. `qactl`'s own `WAIT_USAGE_FORMAT` gives four states:
+
+```
+command := wait until c<client ID> { blocked | unblocked | ready | finished };
+```
+
+Every one of them is about a client being **idle, lock-blocked, or done**. **There is no state meaning "has begun
+executing"**, and `rendezvous with` does not fill the gap because the client has to issue it, which a client inside a
+long statement cannot. That decides where "take the snapshot in a statement of its own" is expressible:
+
+- **REPEATABLE READ** — it is. The snapshot is the transaction's, so an earlier statement takes it and
+  `MC: wait until Cn ready;` pins it. The extra statement prints, so the answer has to be re-recorded from a run.
+- **READ COMMITTED** — it is not. The snapshot is the *statement's*, re-taken each time, and what has to be ordered is
+  the moment a statement starts. Nothing in the vocabulary says that. Re-recording the answer does not help: it would
+  only move which way the race has to fall.
+- **No sleeping statement at all** — these looked like the first kind, two statements with nothing between them, and
+  this list said a wait would order them with **the answer unchanged**. Writing them showed that holds for three of the
+  five, not all of them (see *What writing the ten found*).
+
+So of the 22: **10 could be written as a case change** and now are, and **12 are not a corpus fix at all** — they need
+a way to say "this statement has started", which is a change to `qactl`, not to a case.
+
+| case | the snapshot | three attempts, unpatched | patch |
+|---|---|---|---|
+| **a missing wait** | | | |
+| `_01_ReadCommitted/primary_key_column/basic_sql/update_select_04` | — | NOK NOK NOK | written |
+| `_02_RepeatableRead/trigger/basic_sql/trigger_update_11` | — | NOK NOK NOK | written |
+| `_04_RepeatableRead_ReadCommitted/no_index_column/basic_sql/update_select_04` | — | NOK NOK NOK | written |
+| `_04_RepeatableRead_ReadCommitted/partition_table/range/without_index/update_delete_07` | — | NOK NOK NOK | written |
+| `_05_ReadCommitted_RepeatableRead/partition_table/range/with_index/primary_key/delete_delete_01` | — | NOK NOK NOK | written |
+| **REPEATABLE READ snapshot** | | | |
+| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_01_5` | C4,C5,C6 | NOK NOK NOK | written |
+| `_02_RepeatableRead/index_column/common_index/aggregate/delete_select_02` | C4,C5,C6 | NOK NOK NOK | written |
+| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | C1 | NOK NOK NOK | written |
+| `_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | C1 | NOK NOK NOK | written |
+| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | C1 | NOK NOK NOK | written |
+| **READ COMMITTED snapshot** | | | |
+| `_01_ReadCommitted/index_column/common_index/basic_sql/delete_insert_10` | C1 | NOK NOK NOK | **not expressible** |
+| `_01_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | C1 | NOK OK NOK | **not expressible** |
+| `_01_ReadCommitted/index_column/function_index/insert_select_07` | C1 | NOK NOK NOK | **not expressible** |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05` | C4,C5,C6 | NOK NOK NOK | **not expressible** |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_1` | C4,C5,C6 | NOK NOK NOK | **not expressible** |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_3` | C4,C5,C6 | NOK NOK NOK | **not expressible** |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_05_5` | C5,C6 | NOK NOK NOK | **not expressible** |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_06_5` | C4,C5,C6 | OK NOK NOK | **not expressible** |
+| `_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | C2 | NOK NOK NOK | **not expressible** |
+| `_04_RepeatableRead_ReadCommitted/primary_key_column/basic_sql/update_select_13` | C2 | NOK NOK NOK | **not expressible** |
+| `_04_RepeatableRead_ReadCommitted/primary_key_column/multiple_pk/select_delete_01` | C2 | NOK NOK NOK | **not expressible** |
+| `_06_features/cbrd_22705_online_index_parallel/_04_RepeatableRead_ReadCommitted/index_column/composite_index/basic_sql/update_delete_09_3` | C2 | NOK NOK NOK | **not expressible** |
+
+**Two of the 22 did not fail three times out of three**, so under ADR-018 rule 3 they are not runner differences on
+this measurement:
+
+| case | attempts |
+|---|---|
+| `_01_ReadCommitted/index_column/common_index/basic_sql/insert_insert_20` | NOK **OK** NOK |
+| `_01_ReadCommitted/primary_key_column/aggregate/insert_select_06_5` | **OK** NOK NOK |
+
+This is **not** presented as a correction to the table above. That table was measured on a different engine, and this
+run could not use the same one: `~/.bash_profile` fixes `$CUBRID` for every script CTP sends, so the build under test
+here is `11.5.0.2513-5f3a30d` and not the isolation tree's `11.5.0.2574-f1ae86f`
+([configuration](../../category/isolation/04-configuration.md#two-ways-the-environment-is-wrong-without-saying-so)).
+Two cases moving between builds is exactly what ADR-018 rule 3 exists to catch, and settling which it is means running
+both builds, which has not been done.
+
+### What writing the ten found
+
+Each patch was validated five times under testkit's controller and five under `qactl`, against a fresh copy of the
+corpus with the patch applied through `case_patch_dir` — the mechanism a run uses, not a hand-edited tree. The copy
+came back byte-identical after every run, including for the one patch that creates a file. The patches, and a row for
+each, are in `cubrid-testkit-patches/isolation`.
+
+- **The list above pointed at the right kind, and once at the wrong pair.** It finds a missing wait by looking for two
+  adjacent printing statements from two clients. In `_01…/update_select_04` those were C1's and C2's selects, but the
+  failure was C2's select against C1's *commit* — the wait between them names C1 only. What showed it was the diff:
+  `6` became `7`, a value and not an order.
+- **Three were the `db_index_key_04` mistake again** — a wait naming a client that has been ready since the line above
+  it, where the client with something outstanding is the other: `update_delete_07` `:48`, `delete_delete_01` `:31`,
+  and both commit blocks of the `_04` `update_select_04`. In each the case's own comment says what was meant
+  (*"expect (1,'abc'),(12,'abc')"*, *"expect 5000"*).
+- **"The answer does not change" held for three of the five.** `delete_delete_01`'s answer moves one line: once C2 is
+  waited for, its `5000 rows affected` is collected where it runs. And `trigger_update_11` is not a missing wait at
+  all. It is a deadlock whose victim is the same under both controllers (`on statement number: 4` in both), with the
+  victim's error and the survivor's `1 row affected` released together — the fourth kind, answered the way
+  `update_insert_01_1_complex` is, with a second answer.
+- **Two places held two races each, and the first patch fixed one.** `_04…/update_select_04` waited for C2 before the
+  commit and not for the commit before C2 selected again; it failed one attempt in six under testkit's controller.
+  `_01…/update_select_04` waited for C2 before the commit and left the two selects unordered; it passed seven of eight
+  and then failed under `qactl` with every row right and the two result blocks swapped. Both now order everything the
+  case's text implies, and passed ten of ten and twenty of twenty.
+- **For REPEATABLE READ, not one recorded line moved.** Each of the five gained exactly its new statement's result —
+  `4` for `t`, `9997` for `tb1` — and every other line of the corpus's answer came out as recorded, three runs of
+  three. That is the difference between restoring an answer and inventing one, and it is why these five could be
+  re-recorded at all.
+
+`TESTKIT_ISOLATION_CTL` therefore stays off. This used to say *until the remaining answers are re-recorded*, and
+for twelve of them that is not a thing that can happen: re-recording only moves which way the race has to fall. It
+stays off until those twelve have a way to be ordered — a wait state for "has started", in `qactl` and in this
+controller alike — and ADR-019's gate has been run on the patched corpus. The controller was never wrong about these
+cases: it sends the second statement when the script says to send it, which is immediately.
 
 ## Why this is worth fixing upstream rather than working around
 

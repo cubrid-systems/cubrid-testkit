@@ -111,8 +111,8 @@ is immediately. Twenty-seven cases are like this, each one failing alone, every 
 The tell is a failure whose diff holds **the same lines in another order**, or a `wait until C<n> blocked` that ends
 `ERROR! Client <n> is ready.` and dumps the lock table.
 
-Five of the twenty-seven are carried as patches, and so is `_01_ReadCommitted/catalog/db_index_04`, which is the
-same kind and passes when it is run alone. Point `case_patch_dir` at them and each case runs with the ordering
+Fifteen of the twenty-seven are carried as patches, and so is `_01_ReadCommitted/catalog/db_index_04`, which is
+the same kind and passes when it is run alone. Point `case_patch_dir` at them and each case runs with the ordering
 statement it was missing:
 
 ```
@@ -122,9 +122,14 @@ case_patch_dir=/path/to/cubrid-testkit-patches/isolation
 The run then says so — on standard output before the first case, on the page's finished table, and in `patched.txt`
 in the result directory. A verdict from a patched case is a claim about the patched case, not about the corpus.
 
-The other twenty-two are not written yet. Twenty-one need their answers re-recorded, because the fix is a client
-taking its snapshot in a statement of its own and such a statement prints; the twenty-second turns on which of two
-clients the engine releases first. Why each one fails, and the line it turns on, is in
+Seven of them change an answer as well, each by exactly what the fix prints or reorders. A client that now takes its
+snapshot in a statement of its own prints that statement's result, and nothing else in the answer moves.
+
+**The other twelve cannot be written as a case change.** Each has a READ COMMITTED client whose statement sleeps to
+hold a snapshot, and statements that must not be visible to it sent to other clients with nothing waiting. Under READ
+COMMITTED the snapshot is taken when the statement starts, and `qactl`'s wait states — `blocked`, `unblocked`, `ready`,
+`finished` — have nothing for "has started". Re-recording the answer only moves which way the race has to fall. Why
+each one fails, and which are which, is in
 [`project/evidence/isolation-corpus-races.md`](../../project/evidence/isolation-corpus-races.md).
 
 ## Running one case again

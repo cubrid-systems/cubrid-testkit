@@ -66,3 +66,26 @@ conf 는 CTP 의 평평한 `isolation.conf` 다: `key=value`, `#` 주석, `${VAR
 | `TESTKIT_SLOT_ROOT` | 슬롯의 쓰기가 떨어지는 곳. 없으면 `/var/tmp/testkit-slots`. 가장 빠른 디스크에 두라 |
 | `TESTKIT_SLOT_VOLATILE=1` | 슬롯 오버레이를 volatile 로 마운트한다: 그것에 대한 sync 가 즉시 돌아온다. 어차피 그 층들은 끝에 버려진다 |
 | `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` | CTP 에서와 같다. `CUBRID_DATABASES` 는 `$CUBRID` 아래에 두라. 거기를 슬롯의 설치본 오버레이가 덮는다 |
+
+### 환경이 말없이 잘못되는 두 경우
+
+2026-09-28 측정. 둘 다 런 하나씩을 먹었다.
+
+**프로필을 건너 살아남는 것은 `CTP_HOME` 뿐이다.** 모든 스크립트는 `. ~/.bash_profile` 뒤에서 돈다
+([`exec.Profile`](../../../internal/exec/exec.go)). 그것은 `CTP_HOME` 을 저장했다가 호출자의 값으로 되돌리는데,
+**오직 `CTP_HOME` 만** 그렇게 한다. 그래서 프로필이 `CUBRID` 를 export 하면 당신이 export 한 값이 지고,
+testkit 자신은 **자기가 받은** `$CUBRID` 를 오버레이한다. 둘이 다르면 슬롯은 한쪽 설치본을 들고 케이스는 다른 쪽에
+대고 돌며, 런은 이렇게 말한다.
+
+```
+ERROR! attempting to restart the database:
+ <ctlpath>/qablocked ctldb did not connect
+```
+
+데이터베이스 문제처럼 읽히지만 아니다. 프로필이 export 하는 `CUBRID` 를 그대로 export 하거나, 프로필을 고쳐라.
+
+**`ha_mode=on` 인 설치본으로는 isolation 을 돌릴 수 없다.** `prepare.sh` 가 `The server was configured for HA.` 를
+찍고 `ctldb` 는 끝내 올라오지 않는다 — 원인은 다른데 같은 `did not connect` 줄이 나온다. HA 를 돌려본 머신에는
+그런 설치본이 있고 보통 그것이 `$HOME/CUBRID` 이기 때문에 알아둘 값어치가 있다. 설치본을 고칠 필요는 없다.
+conf 의 `default.cubrid.ha_mode=off` 가 DEPLOY 때 **슬롯의** 복사본에 쓰이고, 디스크 위의 설치본은 그대로다.
+

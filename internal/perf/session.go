@@ -715,9 +715,11 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 	// Both canary clusters go, the reference's too: the canaries wrote to
 	// the fixtures, and a reference cluster kept for the cases carried that
 	// into them on its side only (storage.backupdb read 0.57 in the A/A
-	// pair). A cluster with its fixtures takes under a minute.
+	// pair). On the hub a cluster with narrow_1m and wide_2m took 43 s.
+	// With --keep and no cases to follow (the pair is not valid), the
+	// deferred teardown keeps them.
 	for _, slot := range []**Side{&ss.t, &ss.r} {
-		if *slot == nil {
+		if *slot == nil || (s.Keep && !p.Valid) {
 			continue
 		}
 		s.keepLogs(*slot, canaryDir)

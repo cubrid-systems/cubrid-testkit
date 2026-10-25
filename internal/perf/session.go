@@ -635,7 +635,8 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		return ""
 	}
 	// The cases that share a conf key share a cluster; a cluster is created
-	// with every case of its key so it serves the canaries and the cases alike.
+	// with every case of its key, so the canaries' clusters are made the way
+	// the cases' clusters are.
 	byKey := map[string][]*Case{}
 	for _, c := range append(append([]*Case{}, canaries...), p.selected...) {
 		k := confKey(c)
@@ -673,13 +674,13 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		return s.buildFixtures(ctx, side, s.Suite, byKey[key])
 	}
 
-	// Canaries: the target's cluster stood up on the reference build, an A/A
-	// across the two clusters (FR-3, D9).
+	// Canaries: both clusters stood up on the reference build, an A/A across
+	// the two (FR-3, D9).
 	var canaryEntries []CaseEntry
 	canaryVerdicts := map[string]Verdict{}
 	stop := ""
 	for _, g := range confGroups(canaries) {
-		err := ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key, pairDir)
+		err := ensure(&ss.r, "reference", "r", p.Reference.Build, g.Key, canaryDir)
 		if err == nil {
 			err = ensure(&ss.t, "target", "t", p.Reference.Build, g.Key, canaryDir)
 		}
@@ -711,12 +712,19 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		p.Valid = p.Valid && cn.OK
 	}
 	s.writeCanarySidecar(p, canaryDir, canaryEntries, canaryVerdicts)
-	if ss.t != nil {
-		s.keepLogs(ss.t, canaryDir)
-		if err := s.destroySide(ss.t); err != nil {
-			s.note("pair %s: teardown of the canary cluster: %v", p.Name, err)
+	// Both canary clusters go, the reference's too: the canaries wrote to
+	// the fixtures, and a reference cluster kept for the cases carried that
+	// into them on its side only (storage.backupdb read 0.57 in the A/A
+	// pair). A cluster with its fixtures takes under a minute.
+	for _, slot := range []**Side{&ss.t, &ss.r} {
+		if *slot == nil {
+			continue
 		}
-		ss.t = nil
+		s.keepLogs(*slot, canaryDir)
+		if err := s.destroySide(*slot); err != nil {
+			s.note("pair %s: teardown of a canary cluster: %v", p.Name, err)
+		}
+		*slot = nil
 	}
 	if stop != "" || p.Skipped != "" {
 		// The session stopped, or the clusters failed, before a case ran:

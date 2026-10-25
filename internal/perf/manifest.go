@@ -144,6 +144,10 @@ var (
 // its working set before measuring -- warm_s = 0 is refused for it.
 const ResetRestoreSnapshot = "restore_snapshot"
 
+// maxDatabaseName is the longest database name createdb takes (MAXLOGNAME
+// in the engine's log_storage.hpp, less its terminator).
+const maxDatabaseName = 17
+
 // The closed counter list is the collect layer's (notes/collect_layer.md): a
 // statdump statistic by the engine's own name (statdump_names.go), the disk
 // and network counters, and the per-process L0 counters qualified by the
@@ -452,6 +456,13 @@ func ReadFixture(dir string) (*Fixture, error) {
 	}
 	if !plainNameRe.MatchString(f.Name) {
 		p.add("name %q must be lowercase letters, digits and underscores: perf_%s is a database name", f.Name, f.Name)
+	}
+	// The database name is also the log prefix, and the engine keeps that in
+	// MAXLOGNAME (18) bytes with its terminator: createdb of a longer one
+	// stops in logpb_initialize_log_names (a fixture named narrow_1m_backup
+	// did, on the hub).
+	if db := dbName(&f); len(db) > maxDatabaseName {
+		p.add("name %q makes the database %s, %d characters; the engine takes at most %d", f.Name, db, len(db), maxDatabaseName)
 	}
 	if f.Version < 1 {
 		p.add("version must be 1 or more, got %d", f.Version)

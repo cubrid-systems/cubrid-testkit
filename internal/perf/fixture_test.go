@@ -139,6 +139,25 @@ func TestNamesThatBecomeDatabaseNamesAreChecked(t *testing.T) {
 	if _, err := ReadFixture(bad); err == nil || !strings.Contains(err.Error(), "must be lowercase letters, digits and underscores") {
 		t.Errorf("a dashed fixture name was accepted: %v", err)
 	}
+	// One whose database name is over 17 characters: createdb stops in
+	// logpb_initialize_log_names (the hub, 2026-10-25).
+	long := filepath.Join(root, "fixtures", "narrow_1m_backup")
+	if err := os.Rename(bad, long); err != nil {
+		t.Fatal(err)
+	}
+	rewrite(t, filepath.Join(long, "fixture.json"), func(m map[string]any) { m["name"] = "narrow_1m_backup" })
+	if _, err := ReadFixture(long); err == nil || !strings.Contains(err.Error(), "makes the database perf_narrow_1m_backup, 21 characters; the engine takes at most 17") {
+		t.Errorf("a fixture name too long for a database was accepted: %v", err)
+	}
+	// Twelve characters make seventeen, which the engine takes.
+	edge := filepath.Join(root, "fixtures", "narrow_1m_bk")
+	if err := os.Rename(long, edge); err != nil {
+		t.Fatal(err)
+	}
+	rewrite(t, filepath.Join(edge, "fixture.json"), func(m map[string]any) { m["name"] = "narrow_1m_bk" })
+	if _, err := ReadFixture(edge); err != nil {
+		t.Errorf("a fixture whose database name is 17 characters was refused: %v", err)
+	}
 	dir := caseDir(root, "txn.commit_single")
 	rewrite(t, filepath.Join(dir, "case.json"), func(m map[string]any) {
 		m["client"] = map[string]any{"main": "Outer$Inner; rm -rf /", "args": []string{}}

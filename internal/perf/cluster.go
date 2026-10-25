@@ -112,7 +112,7 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 	// A cluster of this name left by an earlier session would be resumed by
 	// create, not replaced; it goes first (Design §7).
 	// A purge that fails is a refusal: create would resume whatever is there,
-	// and in a session that is the canary cluster coming back as the target.
+	// and in a session that is a canary cluster coming back for the cases.
 	removed, err := s.CLI.DestroyPurge(ctx)
 	if err != nil {
 		return s, fmt.Errorf("%s: removing what was left of %s: %w", role, s.Name, err)

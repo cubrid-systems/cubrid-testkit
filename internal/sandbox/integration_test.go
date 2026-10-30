@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -225,6 +227,132 @@ func TestLiveWaitForReplicationCostsAboutASecond(t *testing.T) {
 	if took > 30*time.Second {
 		t.Errorf("the wait took %s, which is not a wait", took)
 	}
+}
+
+// The wait returns only after everything committed ahead of the marker has been
+// applied, and that is not something a parallel applier gives for free.
+//
+// With ha_apply_worker_count above one (CBRD-27508), the slave keeps conflict
+// order and nothing else: a marker that shares no key with the transaction
+// before it can be applied first. Measured on four workers, a marker that was
+// only an INSERT showed up ahead of a 20,000-row transaction in 18 rounds of 20;
+// the CREATE TABLE this wait uses did so in 0 of 20, because a replicated
+// statement is applied in commit order and every later transaction waits for it
+// (evidence/ha/parallel-apply-and-the-marker.md). This test is what notices if
+// the marker loses its CREATE.
+//
+// It first checks that the pair can tell: an INSERT-only marker, read on the
+// slave in the same SELECT as the bulk transaction's row count, has to arrive
+// ahead of that transaction at least once. A serial applier never lets it, and
+// on such a pair a passing wait proves nothing, so the test skips and says so.
+//
+// The bulk write is 60,000 rows because this test can only read after the wait
+// has returned, and the wait drops its marker before it does. At 20,000 rows
+// the slave used that gap to finish: with the marker made INSERT-only the test
+// failed in one run of three. At 60,000 it failed in three of three.
+func TestLiveTheWaitCoversWhatWasCommittedAheadOfTheMarker(t *testing.T) {
+	cli := liveCluster(t)
+	p, err := Describe(context.Background(), cli, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := p.MasterChannel()
+	slave, err := p.SlaveChannel(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A secondary index and a padded row, so the transaction takes the slave
+	// long enough to apply that a marker beside it would finish first.
+	if res, rerr := master.Run(context.Background(),
+		"csql -u dba -c \"DROP TABLE IF EXISTS tk_ahead; DROP TABLE IF EXISTS tk_ahead_mk; "+
+			"CREATE TABLE tk_ahead(i INT PRIMARY KEY, r INT, pad VARCHAR(2000)); "+
+			"CREATE INDEX tk_ahead_r ON tk_ahead(r); CREATE TABLE tk_ahead_mk(i INT PRIMARY KEY);\" "+
+			p.DB); rerr != nil || res.ExitCode != 0 {
+		t.Fatalf("setup: %v %s", rerr, res.Stderr)
+	}
+	t.Cleanup(func() {
+		master.Run(context.Background(), "csql -u dba -c 'DROP TABLE tk_ahead; DROP TABLE tk_ahead_mk;' "+p.DB)
+	})
+	if _, werr := p.WaitForReplication(context.Background(), 60*time.Second); werr != nil {
+		t.Fatal(werr)
+	}
+
+	const bulk = 60000
+	write := func(tag int) {
+		t.Helper()
+		sql := fmt.Sprintf("csql -u dba -c \"INSERT INTO tk_ahead SELECT %d + ROWNUM, %d, REPEAT('x', 500) "+
+			"FROM db_root CONNECT BY LEVEL <= %d;\" %s", (tag+5)*bulk, tag, bulk, p.DB)
+		if res, rerr := master.Run(context.Background(), sql); rerr != nil || res.ExitCode != 0 {
+			t.Fatalf("tag %d: the bulk write failed: %v %s", tag, rerr, res.Stderr)
+		}
+	}
+	read := func(query string) string {
+		t.Helper()
+		res, rerr := slave.Run(context.Background(),
+			fmt.Sprintf("csql -u dba -t -c \"%s\" %s 2>/dev/null", query, p.DB))
+		if rerr != nil {
+			t.Fatal(rerr)
+		}
+		return lastNumber(res.Stdout)
+	}
+
+	// The control: negative tags, so its rows are never counted below.
+	overtook := 0
+	for round := 1; round <= 5 && overtook == 0; round++ {
+		write(-round)
+		if res, rerr := master.Run(context.Background(), fmt.Sprintf(
+			"csql -u dba -c \"INSERT INTO tk_ahead_mk VALUES(%d);\" %s", round, p.DB)); rerr != nil || res.ExitCode != 0 {
+			t.Fatalf("control %d: the master would not take the marker: %v %s", round, rerr, res.Stderr)
+		}
+		look := fmt.Sprintf("SELECT (SELECT COUNT(*) FROM tk_ahead WHERE r = %d) FROM tk_ahead_mk WHERE i = %d", -round, round)
+		deadline := time.Now().Add(60 * time.Second)
+		got := read(look)
+		for got == "" && time.Now().Before(deadline) {
+			got = read(look)
+		}
+		switch got {
+		case "":
+			t.Fatalf("control %d: the marker never reached %s", round, p.Slaves[0])
+		case "0":
+			overtook = round
+		}
+	}
+	if overtook == 0 {
+		t.Skipf("%s applied an INSERT-only marker behind the transaction before it in 5 rounds of 5, "+
+			"so it cannot tell a wait that holds from one that does not: run this on a pair with "+
+			"ha_apply_worker_count above one", p.Slaves[0])
+	}
+	t.Logf("control: an INSERT-only marker overtook the bulk transaction in round %d", overtook)
+
+	for round := 1; round <= 5; round++ {
+		write(round)
+		if _, werr := p.WaitForReplication(context.Background(), 120*time.Second); werr != nil {
+			t.Fatal(werr)
+		}
+		// Read once and at once: a second look would give the applier the time
+		// this test exists to deny it.
+		got := read(fmt.Sprintf("SELECT COUNT(*) FROM tk_ahead WHERE r = %d", round))
+		switch got {
+		case "":
+			t.Fatalf("round %d: the row count could not be read on %s", round, p.Slaves[0])
+		case strconv.Itoa(bulk):
+		default:
+			t.Fatalf("round %d: the wait returned with %s of the %d rows committed ahead of its marker on %s",
+				round, got, bulk, p.Slaves[0])
+		}
+	}
+}
+
+// lastNumber is the last line of csql -t output that is only a number, which
+// skips the connection notification csql prints with a pid and a port in it.
+func lastNumber(out string) string {
+	n := ""
+	for _, line := range strings.Split(out, "\n") {
+		if t := strings.TrimSpace(line); t != "" && strings.Trim(t, "0123456789") == "" {
+			n = t
+		}
+	}
+	return n
 }
 
 // The oracle both HA suites arrived at independently: the pair disagreeing with

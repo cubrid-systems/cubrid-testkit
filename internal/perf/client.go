@@ -51,6 +51,29 @@ const (
 // by the pid the client wrote, and comes back as null with the reason
 // (Design §5.5.2). rc is the program's exit code; reason is empty when the
 // record is usable.
+// clientEnv is the PERF_* environment of a pass's client (and of a utility
+// case's prepare), docs/design/10-regression.md §3.
+func clientEnv(s *Side, c *Case, f *Fixture, phase string, k int, outInNode string) string {
+	return fmt.Sprintf("PERF_PHASE=%s PERF_DB=%s PERF_HOST=%s-n1 PERF_PORT=33000 PERF_OUT=%s PERF_REPEAT=%d PERF_WARM_S=%d PERF_OPS=%d",
+		phase, dbName(f), s.Name, outInNode, k, c.WarmS, utilityOps(c))
+}
+
+// prepareUtility runs a utility case's client.prepare in the database node,
+// untimed, with the client's environment; its output goes to the node's
+// log directory, and its tail is the error when it fails.
+func (r *Runner) prepareUtility(ctx context.Context, s *Side, c *Case, f *Fixture, phase string, k int) error {
+	if c.Utility == nil || len(c.Utility.Prepare) == 0 {
+		return nil
+	}
+	out := r.passOut(s, c, phase, k)
+	if err := os.MkdirAll(out.Host, 0o755); err != nil {
+		return err
+	}
+	log := fmt.Sprintf("%s/log/prepare-%s-%s%d.log", workPerf, c.ID, phase, k)
+	script := fmt.Sprintf("cd %s && env %s %s", workPerf, clientEnv(s, c, f, phase, k, out.InNode), shellJoin(c.Utility.Prepare))
+	return r.mustExecLog(ctx, s, "prepare", log, script, time.Duration(c.BudgetS)*time.Second)
+}
+
 func (r *Runner) runClient(ctx context.Context, s *Side, c *Case, f *Fixture, phase string, k int) (rec *clientRecord, rc int, reason string, err error) {
 	out := r.passOut(s, c, phase, k)
 	if err := os.MkdirAll(out.Host, 0o755); err != nil {
@@ -59,8 +82,7 @@ func (r *Runner) runClient(ctx context.Context, s *Side, c *Case, f *Fixture, ph
 	for _, stale := range []string{"client.out", "client.err", "rc", "pid"} {
 		_ = os.Remove(filepath.Join(out.Host, stale))
 	}
-	env := fmt.Sprintf("PERF_PHASE=%s PERF_DB=%s PERF_HOST=%s-n1 PERF_PORT=33000 PERF_OUT=%s PERF_REPEAT=%d PERF_WARM_S=%d PERF_OPS=%d",
-		phase, dbName(f), s.Name, out.InNode, k, c.WarmS, utilityOps(c))
+	env := clientEnv(s, c, f, phase, k, out.InNode)
 	var node *sandbox.Node
 	var cmd string
 	switch c.Driver {

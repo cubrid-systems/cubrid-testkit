@@ -133,6 +133,12 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 		{"a utility with no ops", "lib.backupdb", func(m map[string]any) {
 			m["client"] = map[string]any{"argv": []string{"cubrid", "backupdb"}, "ops": 0}
 		}, "client.ops must be 1 or more"},
+		{"an empty prepare on a utility", "lib.backupdb", func(m map[string]any) {
+			m["client"] = map[string]any{"argv": []string{"cubrid", "backupdb"}, "ops": 1, "prepare": []string{}}
+		}, "client.prepare is empty"},
+		{"a prepare on a jdbc case", "txn.commit_single", func(m map[string]any) {
+			m["client"] = map[string]any{"main": "CommitSingle", "args": []string{}, "prepare": []string{"bash", "x.sh"}}
+		}, "unknown key client.prepare"},
 		{"no clients", "txn.commit_single", func(m map[string]any) { delete(m, "clients") }, "missing clients"},
 		{"zero clients on a jdbc case", "txn.commit_single", func(m map[string]any) { m["clients"] = 0 }, "clients must be 1 or more for a jdbc client"},
 		{"clients on a utility", "lib.backupdb", func(m map[string]any) { m["clients"] = 2 }, "clients must be 0 for a utility"},
@@ -309,5 +315,28 @@ func TestKnownCounters(t *testing.T) {
 		if KnownCounter(bad) {
 			t.Errorf("%q is not on the list and was accepted", bad)
 		}
+	}
+}
+
+// A utility case may name a prepare argv; it is read, and a case without
+// one has none.
+func TestUtilityPrepareIsOptional(t *testing.T) {
+	root := copySuite(t)
+	dir := caseDir(root, "lib.backupdb")
+	c, err := ReadCase(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Utility == nil || c.Utility.Prepare != nil {
+		t.Fatalf("no prepare in the manifest, but Prepare is %v", c.Utility)
+	}
+	rewrite(t, filepath.Join(dir, "case.json"), func(m map[string]any) {
+		m["client"] = map[string]any{"argv": []string{"bash", "restart.sh"}, "ops": 1, "prepare": []string{"bash", "crash.sh", "perf_x"}}
+	})
+	if c, err = ReadCase(dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(c.Utility.Prepare, " "); got != "bash crash.sh perf_x" {
+		t.Errorf("prepare read as %q", got)
 	}
 }

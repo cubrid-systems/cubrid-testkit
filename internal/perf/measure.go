@@ -183,6 +183,13 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		} else if note != "" {
 			p.Notes = append(p.Notes, note)
 		}
+		// A utility case's prepare leaves the server in the state the client
+		// is timed from: after the vacuum wait, which its work would keep
+		// waiting (an open transaction holds vacuum back), and before the
+		// snapshots, so what it does is outside the window.
+		if err := r.prepareUtility(ctx, s, c, f, phase, k); err != nil {
+			return p.null("prepare: " + err.Error())
+		}
 		var err error
 		if l0pre, err = r.l0Collect(ctx, s, db, out.InNode, out.Host, "l0-pre.json"); err != nil {
 			p.Missing["l0"] = "pre: " + err.Error()
@@ -191,6 +198,11 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 			if sdpre, err = r.statdumpSnapshot(ctx, s, db, out.InNode, out.Host, "statdump-pre.txt"); err != nil {
 				p.Missing["statdump"] = "pre: " + err.Error()
 			}
+		}
+	}
+	if phase != "measure" {
+		if err := r.prepareUtility(ctx, s, c, f, phase, k); err != nil {
+			return p.null("prepare: " + err.Error())
 		}
 	}
 	var hostPre hostSnapshot

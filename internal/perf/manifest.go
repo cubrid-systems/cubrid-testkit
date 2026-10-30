@@ -86,10 +86,15 @@ type JDBCClient struct {
 }
 
 // UtilityClient runs inside the database node: a wrapper times argv and
-// reports ops as the number of units one run means.
+// reports ops as the number of units one run means. Prepare, when there is
+// one, runs in the node too before every pass, untimed: after the runner's
+// vacuum wait and before its snapshots of the server, so it can leave the
+// server in the state argv is timed from (txn.restart_recovery: an open
+// transaction to undo).
 type UtilityClient struct {
-	Argv []string `json:"argv"`
-	Ops  int      `json:"ops"`
+	Argv    []string `json:"argv"`
+	Ops     int      `json:"ops"`
+	Prepare []string `json:"prepare,omitempty"`
 }
 
 // CDCClient runs in the client container: a program linked to libcubridcs,
@@ -390,7 +395,7 @@ func readClient(p *Problems, c *Case) {
 		}
 		c.JDBC = &j
 	case "utility":
-		if !presence(p, c.Client, "client.", []string{"argv", "ops"}, nil) {
+		if !presence(p, c.Client, "client.", []string{"argv", "ops"}, []string{"prepare"}) {
 			return
 		}
 		var u UtilityClient
@@ -403,6 +408,9 @@ func readClient(p *Problems, c *Case) {
 		}
 		if u.Ops < 1 {
 			p.add("client.ops must be 1 or more, got %d", u.Ops)
+		}
+		if u.Prepare != nil && len(u.Prepare) == 0 {
+			p.add("client.prepare is empty; leave it out when there is nothing to prepare")
 		}
 		c.Utility = &u
 	case "cdc-api":

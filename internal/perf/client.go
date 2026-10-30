@@ -46,11 +46,6 @@ const (
 	exitKilled   = 137
 )
 
-// runClient runs the case's program for one pass and returns what it
-// reported. A pass that ran past its budget is killed from inside the node
-// by the pid the client wrote, and comes back as null with the reason
-// (Design §5.5.2). rc is the program's exit code; reason is empty when the
-// record is usable.
 // clientEnv is the PERF_* environment of a pass's client (and of a utility
 // case's prepare), docs/design/10-regression.md §3.
 func clientEnv(s *Side, c *Case, f *Fixture, phase string, k int, outInNode string) string {
@@ -59,8 +54,9 @@ func clientEnv(s *Side, c *Case, f *Fixture, phase string, k int, outInNode stri
 }
 
 // prepareUtility runs a utility case's client.prepare in the database node,
-// untimed, with the client's environment; its output goes to the node's
-// log directory, and its tail is the error when it fails.
+// untimed, with the client's environment and the case's budget_s as its
+// limit; its output goes to the node's log directory, and its tail is the
+// error when it fails.
 func (r *Runner) prepareUtility(ctx context.Context, s *Side, c *Case, f *Fixture, phase string, k int) error {
 	if c.Utility == nil || len(c.Utility.Prepare) == 0 {
 		return nil
@@ -71,9 +67,14 @@ func (r *Runner) prepareUtility(ctx context.Context, s *Side, c *Case, f *Fixtur
 	}
 	log := fmt.Sprintf("%s/log/prepare-%s-%s%d.log", workPerf, c.ID, phase, k)
 	script := fmt.Sprintf("cd %s && env %s %s", workPerf, clientEnv(s, c, f, phase, k, out.InNode), shellJoin(c.Utility.Prepare))
-	return r.mustExecLog(ctx, s, "prepare", log, script, time.Duration(c.BudgetS)*time.Second)
+	return r.mustExecLog(ctx, s, "client.prepare", log, script, time.Duration(c.BudgetS)*time.Second)
 }
 
+// runClient runs the case's program for one pass and returns what it
+// reported. A pass that ran past its budget is killed from inside the node
+// by the pid the client wrote, and comes back as null with the reason
+// (Design §5.5.2). rc is the program's exit code; reason is empty when the
+// record is usable.
 func (r *Runner) runClient(ctx context.Context, s *Side, c *Case, f *Fixture, phase string, k int) (rec *clientRecord, rc int, reason string, err error) {
 	out := r.passOut(s, c, phase, k)
 	if err := os.MkdirAll(out.Host, 0o755); err != nil {

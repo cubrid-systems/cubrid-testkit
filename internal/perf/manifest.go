@@ -87,10 +87,11 @@ type JDBCClient struct {
 
 // UtilityClient runs inside the database node: a wrapper times argv and
 // reports ops as the number of units one run means. Prepare, when there is
-// one, runs in the node too before every pass, untimed: after the runner's
-// vacuum wait and before its snapshots of the server, so it can leave the
-// server in the state argv is timed from (txn.restart_recovery: an open
-// transaction to undo).
+// one, runs in the node too before every pass, untimed; in a measured pass
+// after the runner's vacuum wait and before its snapshots of the server, so
+// it can leave the server in the state argv is timed from
+// (txn.restart_recovery: an open transaction to undo, which the vacuum wait
+// would otherwise wait on).
 type UtilityClient struct {
 	Argv    []string `json:"argv"`
 	Ops     int      `json:"ops"`

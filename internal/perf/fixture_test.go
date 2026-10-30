@@ -1,6 +1,7 @@
 package perf
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,5 +165,42 @@ func TestNamesThatBecomeDatabaseNamesAreChecked(t *testing.T) {
 	})
 	if _, err := ReadCase(dir); err == nil || !strings.Contains(err.Error(), "is not a Java class name") {
 		t.Errorf("a client.main with shell in it was accepted: %v", err)
+	}
+}
+
+// The vacuum statistics are accumulators counted only while a watcher is
+// registered: idle is the difference at or below 0, twice, with vacuumed not
+// moving. The caught-up and behind values are from statdump on the hub around
+// a txn.log_append_bulk pass (11.4.6, 2026-10-27), where to_vacuum alone never
+// read 0.
+func TestVacuumIdleReadsTheAccumulatorsTwice(t *testing.T) {
+	read := func(to, done int64) vacuumCounts {
+		return parseVacuumCounts(fmt.Sprintf("Num_vacuum_log_pages_vacuumed = %14d\nNum_vacuum_log_pages_to_vacuum = %14d\n", done, to))
+	}
+	caughtUp, behind := read(13795, 13795), read(27528, 17856)
+	if !caughtUp.ok || caughtUp.backlog() != 0 || behind.backlog() != 9672 {
+		t.Fatalf("parse: %+v %+v", caughtUp, behind)
+	}
+	if !vacuumIdle(caughtUp, caughtUp) {
+		t.Error("caught up and still: not idle")
+	}
+	if vacuumIdle(behind, behind) {
+		t.Error("9672 pages behind: idle")
+	}
+	// Blocks handed over before a restart and finished after it leave
+	// vacuumed above to_vacuum for the server's life: idle once it stops.
+	afterRestart := read(400, 431)
+	if !vacuumIdle(afterRestart, afterRestart) {
+		t.Error("negative difference, vacuumed still: not idle")
+	}
+	if vacuumIdle(afterRestart, read(400, 462)) {
+		t.Error("negative difference but vacuumed moving: idle")
+	}
+	// A fresh server, no block handed over yet.
+	if !vacuumIdle(read(0, 0), read(0, 0)) {
+		t.Error("fresh server: not idle")
+	}
+	if missing := parseVacuumCounts("Num_vacuum_log_pages_to_vacuum = 5\n"); missing.ok || vacuumIdle(missing, missing) {
+		t.Error("one statistic missing: ok or idle")
 	}
 }

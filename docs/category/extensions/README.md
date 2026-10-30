@@ -26,6 +26,7 @@ a lot of room for new decisions.
 | E9 | 5 extended × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | conditional | **E5 first**, plus in-process SERVER_MODE startup and **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.md) |
 | E10 | supporting | Producing and keeping XASL fixtures, version identification included | candidate now | — (no engine change) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.md) |
 | E11 | measurement | Weekly performance-regression runner (`testkit perf`) | **in progress** | cluster-sandbox #8–#12 (open), the hub | [E11-perf-runner/](E11-perf-runner/requirements.md) · [ADR-EXT-011](../../project/adr/ADR-EXT-011-perf-runner.md) · Spec and Design in cubrid_cv `plan/perf_regression/` |
+| E12 | oracle | Apply-order checks for a parallel HA applier (`testkit ha-apply`) | **in progress** | — (cluster-sandbox's `--set-hidden`) | [E12-ha-apply/](E12-ha-apply/requirements.md) · [ADR-EXT-012](../../project/adr/ADR-EXT-012-ha-apply.md) |
 
 **A note on the numbering.** `E8` is **reserved** for axis 8, *Hybrid CI integration*, as a meta
 entry. E9 skipping over E8 is that reservation, not a gap.
@@ -34,7 +35,7 @@ entry. E9 skipping over E8 is that reservation, not a gap.
 
 ## The one that has no E number — `extensions/cluster-sandbox`
 
-It is a submodule under `extensions/`, and it is **not a catalogue entry.** E1–E11 are all *testing
+It is a submodule under `extensions/`, and it is **not a catalogue entry.** E1–E12 are all *testing
 capabilities* — a new oracle, a new case format, a new generator — and `cubrid-cluster-sandbox` is
 an **environment provider.** It changes where a test runs, not what is verified.
 

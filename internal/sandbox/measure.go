@@ -25,7 +25,9 @@ import (
 // those is a flag cluster-sandbox gained for it (its PRs #8–#12). Folding them
 // into Create would make the HA call site carry fields it must never set.
 // So this is a second entry point with its own options, and the HA path is
-// untouched.
+// untouched. The parallel-applier runner (ADR-EXT-012) uses it too, for an HA
+// pair with a client node and hidden parameters (SetHidden), which ha_repl's
+// Create must not carry either.
 
 // CreateOptions is what `csb cluster create` takes for a measurement cluster.
 // Zero values are csb's defaults; the name is the CLI's cluster.
@@ -39,6 +41,7 @@ type CreateOptions struct {
 	CPUSet       string
 	ClientCPUSet string
 	Set          []string // key=value for cubrid.conf / cubrid_ha.conf
+	SetHidden    []string // key=value csb writes without validating, e.g. ha_apply_worker_count
 	BrokerSet    []string // KEY=VALUE for the broker section
 	Labels       map[string]string
 	// Timeout bounds the call and is also passed to csb as --timeout, so the
@@ -69,6 +72,9 @@ func (c *CLI) CreateWith(ctx context.Context, o CreateOptions) error {
 	}
 	for _, kv := range o.Set {
 		args = append(args, "--set", kv)
+	}
+	for _, kv := range o.SetHidden {
+		args = append(args, "--set-hidden", kv)
 	}
 	for _, kv := range o.BrokerSet {
 		args = append(args, "--broker-set", kv)

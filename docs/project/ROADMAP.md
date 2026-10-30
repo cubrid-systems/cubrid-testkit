@@ -33,7 +33,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 │   │   └── inventory/     jdbc/sql_by_cci/ha_repl/cdc_repl/cci_compat (0/5 미착수)
 │   ├── concept/           Phase 1 — north-star / 동결 명세 / non-goals / 마이그레이션 제외
 │   ├── design/            Phase 2 — 아키텍처/모듈 설계 (미착수)
-│   ├── extensions/        §6a 확장 E1~E11 (E8 은 Hybrid CI 메타 자리로 예약)
+│   ├── extensions/        §6a 확장 E1~E12 (E8 은 Hybrid CI 메타 자리로 예약)
 │   └── survey/            DBMS 테스팅 생태계 조사
 ├── extensions/
 │   └── cubrid-sqlancer/   submodule — §6a-E3 SQLancer provider (별도 private 저장소)
@@ -45,7 +45,7 @@ cubrid-testkit/            (신규, 이번 작업의 결과물)
 > **이 트리는 계획이지 현황이 아니다 (2026-09-23 주석).** Phase 0 에 세운 배치이며, 기록으로
 > 남긴다. 실제로 갈라진 곳은 넷이다 — `docs/` 밑이 `docs/project/` 와 `docs/category/` 로
 > 갈라져 `adr/` `analysis/` `concept/` `design/` `survey/` 는 `docs/project/` 아래에 있고,
-> `extensions/E1~E11` 문서는 `docs/category/extensions/` 에 있다. `extensions/` 서브모듈은
+> `extensions/E1~E12` 문서는 `docs/category/extensions/` 에 있다. `extensions/` 서브모듈은
 > `cubrid-sqlancer` 하나가 아니라 `cluster-sandbox` 가 함께 있다. `design/ (미착수)` 와
 > `inventory/ (0/5 미착수)` 는 더 이상 맞지 않다 — Phase 2 는 완료됐고, `ha_repl` 은
 > `design/module-ha.md` · [ADR-022](adr/ADR-022-topology-provider.md) ·
@@ -582,6 +582,7 @@ engine-suite `feat/spatial-probes` 브랜치)에 귀속되며, 그 트랙이 재
 | E9 | 조건부 | **E5 선행** + SERVER_MODE in-process 기동(확인됨) + **E10** | extensions/E9-storage-fuzzing/ |
 | E10 | 즉시 후보 | — (엔진 변경 없음) | extensions/E10-xasl-fixtures/ |
 | E11 | 진행 중 — `run` M2 완료(2026-10-03), `session` M3 | cluster-sandbox #8~#12, 허브(M0) — 완료 | extensions/E11-perf-runner/ |
+| E12 | 진행 중 — ADR-EXT-012 제안(2026-10-30), M1 `pairs`·`list` | — | extensions/E12-ha-apply/ |
 
 근거: `survey/dbms-testing-ecosystem.md` (8축 분류, §11 카탈로그 확장 후보).
 

@@ -26,6 +26,15 @@ is next, and the traps that cost a day each.
   stress script's comparison read through the primary key and missed the row; it now counts the heap
   too.
 
+- [ha-apply-gives-the-prototypes-verdicts](ha-apply-gives-the-prototypes-verdicts.md) —
+  **2026-10-30.** `testkit ha-apply pairs` (ADR-EXT-012) gives the shell prototype's verdicts. On
+  #8052's old head the six patterns of keys the index holds equal were missed, with no writeset
+  conflict counted in any of their rounds; on the new head no pattern but the control let T2 ahead,
+  with the control ahead in 14 to 20 rounds of 20. Three late witnesses in 660 rounds made three
+  pattern verdicts inconclusive (`fk_ci` on both heads, `pk_move`); the writeset had counted the
+  conflict in each, and 50 rounds of the two on the new head held with none late. The cause of the
+  late rounds is not established.
+
 - [concurrent-cascade-leaves-orphans](concurrent-cascade-leaves-orphans.md) — **2026-10-29.**
   **CBRD-27464 across a pair.** When a parent DELETE with `ON DELETE CASCADE` waits on an open
   child insert, the master keeps the new child as an orphan (the issue's case A) — and the slave

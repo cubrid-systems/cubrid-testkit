@@ -163,3 +163,32 @@ func TestPutAndGetSayWhatWouldHaveToExist(t *testing.T) {
 		}
 	}
 }
+
+// A hidden parameter goes as --set-hidden, which csb writes without validating;
+// --set would refuse ha_apply_worker_count, which is not in its list. The
+// parallel-applier runner (ADR-EXT-012) stands its pairs up this way.
+func TestCreateWithPassesHiddenParametersAsSetHidden(t *testing.T) {
+	bin, log := fakeCSB(t, `echo '{"schema":"csb/v1","ok":true,"data":{}}'`)
+	c := &CLI{Bin: bin, Cluster: "hap"}
+	err := c.CreateWith(context.Background(), CreateOptions{
+		Preset: "ha", Build: "/b", Clients: 1,
+		SetHidden: []string{"ha_apply_worker_count=4", "ha_writeset_history_size=50000"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := argv(t, log)
+	var hidden []string
+	for i, a := range got {
+		if a == "--set-hidden" && i+1 < len(got) {
+			hidden = append(hidden, got[i+1])
+		}
+		if a == "--set" {
+			t.Errorf("a hidden parameter went as --set: %v", got)
+		}
+	}
+	want := []string{"ha_apply_worker_count=4", "ha_writeset_history_size=50000"}
+	if strings.Join(hidden, " ") != strings.Join(want, " ") {
+		t.Errorf("--set-hidden values = %v, want %v (argv %v)", hidden, want, got)
+	}
+}

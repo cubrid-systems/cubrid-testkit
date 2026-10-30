@@ -23,6 +23,7 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 | E9 | 5 확장 × 8 | Storage-engine **concurrency** fuzzing (schedule × interleaving) | 조건부 | **E5 선행** + SERVER_MODE in-process 기동 + **E10** | [E9-storage-fuzzing/](E9-storage-fuzzing/requirements.ko.md) |
 | E10 | 보조 설비 | XASL fixture 생산·보관 (버전 식별 포함) | 즉시 후보 | — (엔진 변경 없음) | [E10-xasl-fixtures/](E10-xasl-fixtures/requirements.ko.md) |
 | E11 | 측정 | 주간 성능 회귀 러너 (`testkit perf`) | **진행 중** | cluster-sandbox #8~#12 (열림), 허브 | [E11-perf-runner/](E11-perf-runner/requirements.ko.md) · [ADR-EXT-011](../../project/adr/ADR-EXT-011-perf-runner.md) · Spec·Design 은 cubrid_cv `plan/perf_regression/` |
+| E12 | 오라클 | 병렬 HA applier 의 적용 순서 검사 (`testkit ha-apply`) | **진행 중** | — (cluster-sandbox 의 `--set-hidden`) | [E12-ha-apply/](E12-ha-apply/requirements.ko.md) · [ADR-EXT-012](../../project/adr/ADR-EXT-012-ha-apply.md) |
 
 **번호 공간 주의.** `E8` 은 축 8 *Hybrid CI 통합* 메타 자리로 예약되어 있다. E9 가 E8 을 건너뛴 것은 결번이 아니라 이 예약 때문이다.
 
@@ -30,7 +31,7 @@ ROADMAP §6a "확장 영역" 의 functional requirements 모음. 각 항목은 *
 
 ## E-번호가 아닌 것 — `extensions/cluster-sandbox`
 
-`extensions/` 아래 submodule 이지만 **카탈로그의 항목이 아니다.** E1~E11 은 전부
+`extensions/` 아래 submodule 이지만 **카탈로그의 항목이 아니다.** E1~E12 는 전부
 *테스트 능력* — 새 오라클, 새 케이스 포맷, 새 생성기 — 이고, `cubrid-cluster-sandbox`
 는 **환경 제공자**다. 무엇을 검증하는지가 아니라 어디서 도는지를 바꾼다.
 

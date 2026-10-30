@@ -169,15 +169,17 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	var sdpre map[string]float64
 	wantStatdump := hasStatdump(c)
 	if phase == "measure" {
+		// The watcher first: the vacuum statistics the wait reads count only
+		// while one is registered.
+		if note, err := r.watcherEnsure(ctx, s, db); err != nil {
+			p.Notes = append(p.Notes, "watcher: "+err.Error())
+		} else if note != "" {
+			p.Notes = append(p.Notes, note)
+		}
 		// Vacuum left by the reset or the previous pass must not run inside
 		// the window; wait for it, within a bound, and say when the bound hit.
 		if note, err := r.waitVacuum(ctx, s, db, time.Minute); err != nil {
 			p.Notes = append(p.Notes, "vacuum wait: "+err.Error())
-		} else if note != "" {
-			p.Notes = append(p.Notes, note)
-		}
-		if note, err := r.watcherEnsure(ctx, s, db); err != nil {
-			p.Notes = append(p.Notes, "watcher: "+err.Error())
 		} else if note != "" {
 			p.Notes = append(p.Notes, note)
 		}

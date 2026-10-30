@@ -214,8 +214,10 @@ func (r *Runner) watcherStart(ctx context.Context, s *Side, db string) error {
 	return r.mustExec(ctx, s, "statdump watcher", script, time.Minute)
 }
 
-// watcherEnsure re-arms the watcher when it died (a server restart ends it)
-// and says so.
+// watcherEnsure re-arms the watcher when it is gone and says so. It cannot
+// tell a watcher whose server was killed: that one sleeps on until its next
+// request, alive to `status`, so whatever kills a server stops its watcher
+// first (statdump_window.sh).
 func (r *Runner) watcherEnsure(ctx context.Context, s *Side, db string) (note string, err error) {
 	res, err := r.exec(ctx, s.N1, fmt.Sprintf("bash %s/scripts/statdump_window.sh status %s", workPerf, db), time.Minute)
 	if err != nil {

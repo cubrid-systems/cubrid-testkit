@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -182,19 +183,26 @@ func reflinkCopy(src []string, dstDir string) error {
 	return exec.Command("sync").Run()
 }
 
-// waitVacuum waits until the database has no log pages left to vacuum, or
-// the bound passes. The gauge is read from statdump without a watcher. The
-// note says when the bound hit; the caller decides what that means.
+// waitVacuum waits until vacuum has caught up with the log, or the bound
+// passes. Num_vacuum_log_pages_to_vacuum and Num_vacuum_log_pages_vacuumed
+// are both accumulators -- pages of the log blocks handed to vacuum since the
+// server started, and of those it has finished -- so the backlog is their
+// difference; it must read 0 twice in a row. (Reading to_vacuum alone waited
+// for 0 on a counter that only grows, so every pass on a server that had
+// vacuumed anything ran out the bound.) Records in the log block still being
+// filled are in neither until the block is handed over. Read from statdump
+// without a watcher. The note says when the bound hit; the caller decides
+// what that means.
 func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.Duration) (note string, err error) {
 	deadline := time.Now().Add(bound)
 	zeros := 0
 	for {
-		res, err := r.exec(ctx, s.N1, fmt.Sprintf("cubrid statdump %s 2>/dev/null | awk -F= '/^Num_vacuum_log_pages_to_vacuum/ {gsub(/ /, \"\", $2); print $2}'", db), time.Minute)
+		res, err := r.exec(ctx, s.N1, fmt.Sprintf("cubrid statdump %s 2>/dev/null | grep -E '^Num_vacuum_log_pages_(to_vacuum|vacuumed) '", db), time.Minute)
 		if err != nil {
 			return "", err
 		}
-		v := strings.TrimSpace(res.Stdout)
-		if v == "0" {
+		backlog, ok := vacuumBacklog(res.Stdout)
+		if ok && backlog == 0 {
 			zeros++
 			if zeros >= 2 {
 				return "", nil
@@ -203,7 +211,11 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 			zeros = 0
 		}
 		if time.Now().After(deadline) {
-			return fmt.Sprintf("vacuum still had %s log pages to do after %s", firstNonEmptyStr(v, "?"), bound), nil
+			left := "?"
+			if ok {
+				left = strconv.FormatInt(backlog, 10)
+			}
+			return fmt.Sprintf("vacuum still had %s log pages to do after %s", left, bound), nil
 		}
 		select {
 		case <-ctx.Done():
@@ -211,6 +223,31 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// vacuumBacklog is Num_vacuum_log_pages_to_vacuum minus
+// Num_vacuum_log_pages_vacuumed from statdump lines; false unless both are
+// there.
+func vacuumBacklog(statdump string) (int64, bool) {
+	var to, done int64
+	var haveTo, haveDone bool
+	for _, line := range strings.Split(statdump, "\n") {
+		k, v, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil {
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "Num_vacuum_log_pages_to_vacuum":
+			to, haveTo = n, true
+		case "Num_vacuum_log_pages_vacuumed":
+			done, haveDone = n, true
+		}
+	}
+	return to - done, haveTo && haveDone
 }
 
 func firstNonEmptyStr(a, b string) string {

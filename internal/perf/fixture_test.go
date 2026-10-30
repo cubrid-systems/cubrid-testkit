@@ -166,3 +166,23 @@ func TestNamesThatBecomeDatabaseNamesAreChecked(t *testing.T) {
 		t.Errorf("a client.main with shell in it was accepted: %v", err)
 	}
 }
+
+// Both vacuum statistics are accumulators: the backlog is their difference.
+// The numbers are from statdump on the hub around a txn.log_append_bulk pass
+// (11.4.6, 2026-10-27), where to_vacuum alone never read 0.
+func TestVacuumBacklogIsTheDifferenceOfTheAccumulators(t *testing.T) {
+	caughtUp := "Num_vacuum_log_pages_vacuumed =      13795\nNum_vacuum_log_pages_to_vacuum =      13795\n"
+	if n, ok := vacuumBacklog(caughtUp); !ok || n != 0 {
+		t.Errorf("caught up: backlog %d, ok %v; want 0, true", n, ok)
+	}
+	behind := "Num_vacuum_log_pages_vacuumed =      17856\nNum_vacuum_log_pages_to_vacuum =      27528\n"
+	if n, ok := vacuumBacklog(behind); !ok || n != 9672 {
+		t.Errorf("behind: backlog %d, ok %v; want 9672, true", n, ok)
+	}
+	if _, ok := vacuumBacklog("Num_vacuum_log_pages_to_vacuum =      27528\n"); ok {
+		t.Error("one statistic missing: ok, want not")
+	}
+	if _, ok := vacuumBacklog(""); ok {
+		t.Error("no output: ok, want not")
+	}
+}

@@ -188,31 +188,50 @@ func reflinkCopy(src []string, dstDir string) error {
 	return exec.Command("sync").Run()
 }
 
-// waitVacuum waits until vacuum is idle with nothing left, or the bound
-// passes. Num_vacuum_log_pages_to_vacuum and Num_vacuum_log_pages_vacuumed
-// are accumulators -- pages of the log blocks handed to vacuum, and of those
-// it has finished -- and the engine adds to them only while a statdump
-// watcher is registered, so the caller keeps one running. Their difference
-// is the backlog, give or take what was counted while no watcher was
-// (blocks handed over before a restart and finished after it make it
-// negative), so idle is two reads in a row with the difference at or below 0
-// and vacuumed not moving (vacuumIdle). Records in the log block still being
-// filled are in neither until the block is handed over. The note says when
+// waitVacuum waits until vacuum is idle, or the bound passes.
+// Num_vacuum_log_pages_to_vacuum and Num_vacuum_log_pages_vacuumed are
+// accumulators -- pages of the log blocks handed to vacuum, and of those it
+// has finished -- and the engine adds to them only while a statdump watcher
+// is registered, so each read also checks that the watcher is up and re-arms
+// it when it is not (a dead watcher freezes both, and a frozen 0/0 reads as
+// idle). Their difference is the backlog, give or take what was counted while
+// no watcher was: blocks handed over before a restart and finished after it
+// make it negative, and a negative offset can hide new backlog, so idle is
+// the difference at or below 0 with vacuumed not moving over one interval
+// when the difference is 0, two when it is below (vacuumIdle). Records in the
+// log block still being filled are in neither until the block is handed over,
+// so up to one block can still be vacuumed after the wait. The note says when
 // the bound hit; the caller decides what that means.
 func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.Duration) (note string, err error) {
 	deadline := time.Now().Add(bound)
-	var prev vacuumCounts
-	for first := true; ; first = false {
-		res, err := r.exec(ctx, s.N1, fmt.Sprintf("cubrid statdump %s 2>/dev/null | grep -E '^Num_vacuum_log_pages_(to_vacuum|vacuumed) '", db), time.Minute)
+	var reads []vacuumCounts
+	rearmed := false
+	for {
+		res, err := r.exec(ctx, s.N1, fmt.Sprintf("bash %s/scripts/statdump_window.sh status %s >/dev/null 2>&1 && echo watcher=up; "+
+			"cubrid statdump %s 2>/dev/null | grep -E '^Num_vacuum_log_pages_(to_vacuum|vacuumed) '", workPerf, db, db), time.Minute)
 		if err != nil {
 			return "", err
 		}
-		cur := parseVacuumCounts(res.Stdout)
-		if !first && vacuumIdle(prev, cur) {
-			return "", nil
+		if !strings.Contains(res.Stdout, "watcher=up") {
+			if err := r.watcherStart(ctx, s, db); err != nil {
+				return "", err
+			}
+			// What was counted before is not comparable with what comes now.
+			reads, rearmed = nil, true
+		} else {
+			reads = append(reads, parseVacuumCounts(res.Stdout))
+			if vacuumIdle(reads) {
+				if rearmed {
+					return "statdump watcher was down during the vacuum wait and was re-armed", nil
+				}
+				return "", nil
+			}
 		}
-		prev = cur
 		if time.Now().After(deadline) {
+			var cur vacuumCounts
+			if len(reads) > 0 {
+				cur = reads[len(reads)-1]
+			}
 			switch {
 			case !cur.ok:
 				return fmt.Sprintf("vacuum statistics unreadable after %s", bound), nil
@@ -263,10 +282,29 @@ func parseVacuumCounts(statdump string) vacuumCounts {
 	return v
 }
 
-// vacuumIdle says two reads in a row show vacuum caught up and not working:
-// both readable, the backlog at or below 0 in both, vacuumed the same.
-func vacuumIdle(prev, cur vacuumCounts) bool {
-	return prev.ok && cur.ok && prev.backlog() <= 0 && cur.backlog() <= 0 && prev.vacuumed == cur.vacuumed
+// vacuumIdle says the last reads, oldest first, show vacuum caught up and
+// not working: every one readable with the backlog at or below 0 and the same
+// vacuumed, over two reads when the backlog reads 0 and three when it reads
+// below 0 (an offset from before a restart, which can hide new blocks).
+func vacuumIdle(reads []vacuumCounts) bool {
+	n := len(reads)
+	if n < 2 {
+		return false
+	}
+	need := 2
+	if reads[n-1].backlog() < 0 {
+		need = 3
+	}
+	if n < need {
+		return false
+	}
+	last := reads[n-1]
+	for _, r := range reads[n-need:] {
+		if !r.ok || r.backlog() > 0 || r.vacuumed != last.vacuumed {
+			return false
+		}
+	}
+	return true
 }
 
 func firstNonEmptyStr(a, b string) string {

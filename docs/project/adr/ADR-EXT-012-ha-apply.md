@@ -4,8 +4,9 @@
 - **구현 상태:** M1(`pairs`, `list`)이 구현됐고 §4 의 완료 조건을 충족했다 (2026-10-30,
   `docs/project/evidence/ha/ha-apply-gives-the-prototypes-verdicts.md`). 새 head 의 한 실행에서는
   21 개가 held 이고 `fk_ci`·`pk_move` 가 inconclusive 였다. 두 패턴은 50 라운드에서 held 였고,
-  missed 는 없었다. `stress` 는 M2. 셸 프로토타입은 `docs/project/evidence/ha/parallel-apply-*.sh`
-  에 남는다
+  missed 는 없었다. M2(`stress`)도 구현됐고 §4 의 완료 조건을 충족했다 (2026-10-30,
+  `docs/project/evidence/ha/ha-apply-stress-and-the-heap-only-row.md`). 셸 프로토타입은
+  `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
 - **Date:** 2026-10-30
 - **Trigger:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), 구현 CBRD-27508 / CUBRID/cubrid #8052 —
   슬레이브가 트랜잭션을 여러 worker 로 적용하면서 **충돌하는 것끼리의 순서만** 지킨다. 그 순서가
@@ -58,7 +59,10 @@ writeset 이 의존성 하나를 놓치면, 슬레이브는 뒤의 트랜잭션�
 
 - `pairs` — 충돌 쌍의 적용 순서. 패턴마다 R 라운드, 대조군 `ctl` 을 같은 실행에 포함한다.
 - `stress` — N 개 클라이언트의 결정적 작업 부하, 끝에서 두 노드를 비교한다(PK 로 읽은 행, heap 행
-  수, 고아 행, `fail_counter`).
+  수, 고아 행, `fail_counter`). 같은 seed 는 셸 프로토타입과 같은 SQL 을 만든다(같은 Park–Miller
+  수열). 끼어드는 순서는 실행마다 다르고 seed 가 재현하지 않는다. `--compare-only` 는 작업 부하 없이
+  쌍에 남은 표를 비교만 한다. 손상을 남긴 쌍, 멈춘 실행, checkdb 뒤의 표를 지우지 않고 다시 볼 때
+  쓴다.
 - `list` — 패턴 목록과 각 패턴이 공유하는 키.
 
 마커 대기 검사는 동사로 두지 않는다. live 테스트가 이미 그것을 고정한다(F6).
@@ -79,6 +83,19 @@ writeset 이 의존성 하나를 놓치면, 슬레이브는 뒤의 트랜잭션�
 - **같은 실행에서 대조군이 한 번도 앞서지 않았으면 모든 held 는 inconclusive 가 된다.** 그 쌍은
   순서를 바꾸지 않는 쌍이고(worker 하나, 또는 ballast 가 너무 작음), held 는 아무것도 증명하지
   않는다. live 테스트의 skip 과 같은 규칙이다.
+- `stress` 의 판정은 실행마다 하나다. **damaged**(한 노드에서 heap 으로 센 행 수가 PK 로 읽은 행
+  수와 다름: 인덱스 항목 없이 heap 에만 있는 행이 그 노드에 있다. 슬레이브가 stalled 이면 마스터만
+  본다. 적용 중인 슬레이브는 두 번의 읽기가 서로 다른 상태를 볼 수 있다), **stalled**(슬레이브가 끝의
+  마커를 5 분 안에 보이지 못함. 비교는 하지만 뒤처진 슬레이브는 그것만으로 다르다. 마스터가 마커를
+  받지 않은 것은 실행의 실패다), **diverged**(PK
+  로 읽은 표, heap 행 수, ballast, 고아 행 수가 두 노드에서 다름, 또는 `fail_counter` 가 움직임),
+  **hung**(클라이언트가 `--timeout` 안에 끝나지 않아 끊었음), **same**. 여럿에 해당하면 이 순서에서
+  앞의 것이고, 원장의 칸은 모두 남는다. 클라이언트를 끊은 실행도 끝에서 비교한다. 슬레이브를 읽지
+  못해 비교하지 못하면 실행의 실패다. 마스터가 거부한 문장은 판정에 들지 않는다. 마스터가 최종적으로
+  가진 것이 답이고, 묻는 것은 슬레이브도 그것을 가졌는가다. 다만 트랜잭션을 하나도 끝내지 못한
+  클라이언트가 있으면(접속 실패 등) 실행의 실패다. 쓰이지 않은 쌍도 같게 읽히기 때문이다.
+- `--compare-only` 의 비교는 실행 끝의 비교와 같되 `fail_counter` 는 보지 않는다(전과 후가 없다).
+  슬레이브를 기다리는 마커 표 하나를 마스터에 만들고 지운다.
 - 종료 코드는 실행이 끝났는지만 말한다(`ha_repl` 과 같다). 판정은 원장에 있다. 슬레이브가 멈추면
   그 패턴의 행을 쓴 뒤 실행을 끝낸다(뒤의 패턴이 남았으면 종료 코드 1). 뒤의 패턴은 모두 그 슬레이브를
   기다리는 것으로 시작한다.
@@ -102,7 +119,9 @@ PK·UNIQUE·REVERSE UNIQUE·FK(단일·복합·CASCADE)·savepoint·DDL·파티�
 - `internal/sandbox` 는 `CreateOptions` 에 hidden 파라미터(`SetHidden`)만 얻는다. 클라이언트 노드는
   `perf` 처럼 `sandbox.NewNode(cli, "c1")` 로 얻고, writeset 카운터를 읽는 일은 클라이언트에서
   마스터로 보내는 조회이므로 이 명령의 패키지에 둔다. **HA `Create` 와 `harepl` 경로는 바뀌지
-  않는다.**
+  않는다.** M2 에서 `WaitForReplication` 의 오류가 "슬레이브가 마커를 보이지 못함"일 때
+  `errors.Is(err, sandbox.ErrNotReplicated)` 가 참이 된다. 오류 문구는 그대로다. `stress` 가 멈춘
+  슬레이브와 마커를 받지 않은 마스터를 가르는 데 쓴다.
 
 ### 3-6. 결과
 
@@ -113,6 +132,17 @@ PK·UNIQUE·REVERSE UNIQUE·FK(단일·복합·CASCADE)·savepoint·DDL·파티�
   `ha_apply_worker_count` 와 `ha_writeset_history_size`, 라운드 수, ballast 행 수를 적는다.
 - 행은 패턴이 끝날 때마다 쓴다. 대조군이 먼저 돌므로 이미 쓴 판정은 바뀌지 않는다.
 - 표준 출력에는 패턴마다 한 줄과 요약 한 줄을 쓴다.
+- `stress` 의 원장은 실행 하나에 한 행이다: seed, 마스터 오류 수, writeset 카운터, `fail_counter`
+  변화, 실행 중 마스터에서 고아 행을 본 횟수와 최대값, 클라이언트를 끊었는지, 표마다 PK 로 읽은
+  비교와 행 수(heap 으로 센 마스터/슬레이브, PK 로 읽은 마스터/슬레이브), ballast, 끝의 고아
+  행(마스터/슬레이브), 슬레이브가 따라왔는지, 판정. 첫 줄은 `pairs` 의 것에 `mode`, 그리고 실행이면
+  클라이언트 수, 트랜잭션 수, 키 수, 연산, ballast, seed, timeout 을 더한다. `--compare-only` 에서는
+  실행에만 있는 칸이 `-` 다.
+- seed 는 SQL 을 재현하지만 끼어든 순서는 재현하지 않으므로 실행의 증거는 원장 옆에 남긴다: 원장
+  이름에서 `.tsv` 를 뺀 것에 `.d` 를 붙인 디렉터리에 클라이언트의 스크립트와 로그, 그리고 두 노드에서
+  다르게 읽힌 표의 양쪽 읽기. 쌍을 직접 세운 실행은 쌍과 함께 작업 디렉터리를 지우기 때문이다. 그
+  디렉터리에 이미 파일이 있으면 쌍을 건드리기 전에 거부한다. 다른 실행의 것을 이번 실행의 것으로
+  읽게 되고, 지울 권한도 이 실행에 없다.
 
 ### 3-7. Go 만
 
@@ -124,8 +154,11 @@ PK·UNIQUE·REVERSE UNIQUE·FK(단일·복합·CASCADE)·savepoint·DDL·파티�
 - 카탈로그에 E12 가 생긴다. 축은 오라클(적용 순서)이다.
 - 이정표: **M1** — sandbox 확장과 `pairs`, `list`. 완료 조건은 #8052 의 옛 head `bf560620e` 에서
   동치 키 여섯 패턴이 missed, 새 head `61ee0944a` 에서 24 개가 held(대조군 앞섬 포함)로, 셸
-  프로토타입과 같은 판정이 나오는 것이다. **M2** — `stress`. 완료 조건은 heap 검사가 #8198 의 손상
-  상태를 잡는 것과, 같은 seed 가 같은 SQL 을 만드는 것이다.
+  프로토타입과 같은 판정이 나오는 것이다. **M2** — `stress`. 완료 조건은 셋이다. 같은 seed 가 셸
+  프로토타입과 바이트 단위로 같은 SQL 을 만든다(golden 테스트). #8198 `6ce1c05d2` 의 쌍 ws98b 에 남은
+  손상 상태(마스터 `s_child` 가 heap 9 행, PK 7 행)에서 `--compare-only` 가 damaged 를 낸다. #8052 새
+  head 의 쌍에서 FK 를 뺀 연산(0–4, 9)의 실행이 same 이다. FK 연산은 #8026 이 없는 트리에서
+  CBRD-27464 의 불일치를 낼 수 있으므로 이 조건에서 뺀다.
 
 ## 5. 기각한 대안
 

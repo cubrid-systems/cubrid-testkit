@@ -25,10 +25,12 @@ type Runner struct {
 	// StallFor is how long the slave's count of a round's ballast may stand
 	// still, short of the round, before the slave counts as stopped.
 	// NoReadFor is how long catch-up may go without reading the slave at all
-	// before it calls the run broken rather than the slave.
+	// before it calls the run broken rather than the slave. BarrierFor bounds
+	// the wait for the slave to apply a marker.
 	WitnessWait time.Duration
 	StallFor    time.Duration
 	NoReadFor   time.Duration
+	BarrierFor  time.Duration
 }
 
 const txTimeout = 10 * time.Minute
@@ -135,7 +137,7 @@ func (r *Runner) failCounter(ctx context.Context) (int, error) {
 }
 
 func (r *Runner) barrier(ctx context.Context) error {
-	_, err := r.Pair.WaitForReplication(ctx, 5*time.Minute)
+	_, err := r.Pair.WaitForReplication(ctx, r.BarrierFor)
 	return err
 }
 

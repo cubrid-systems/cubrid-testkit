@@ -73,17 +73,37 @@ func fakeCSB(args []string, dir string) int {
 // pairCSQL is csql for a pair on one host. A write goes to $STATE/txlog
 // ($CRASH in it: the csql dies without a word); the slave's reads answer from
 // $STATE: count (ERR: no connection), look (absent: no witness yet), and fail,
-// which the first fail_counter read does not see.
+// which the first fail_counter read does not see. A client's script (-i)
+// prints $STATE/clientlog, or waits for good under $HANG. The stress tables'
+// counts answer per node from heap.<table>.<host>, pk.<table>.<host> and
+// orphans.<host>, 0 when absent; the table $DIFFER names reads differently
+// on each node, under $STALL the slave never sees a marker, and under
+// $NOMARKER the master refuses to make one.
 const pairCSQL = `#!/bin/sh
-sql=""; tx=0
+sql=""; tx=0; script=""; host=""
 for a in "$@"; do
-  case "$a" in --no-auto-commit) tx=1 ;; *SELECT*|*INSERT*|*DELETE*|*UPDATE*|*CREATE*|*DROP*|*SHOW*) sql="$a" ;; esac
+  case "$a" in --no-auto-commit) tx=1 ;; *SELECT*|*INSERT*|*DELETE*|*UPDATE*|*CREATE*|*DROP*|*SHOW*) sql="$a" ;; *@*) host=${a#*@} ;; esac
 done
+prev=""
+for a in "$@"; do [ "$prev" = "-i" ] && script=$a; prev=$a; done
+if [ -n "$script" ]; then
+  [ -n "$HANG" ] && exec sleep 300
+  [ -f "$STATE/clientlog" ] && cat "$STATE/clientlog"
+  exit 0
+fi
 if [ $tx = 1 ]; then
   echo "$sql" >> "$STATE/txlog"
   if [ -n "$CRASH" ]; then case "$sql" in *"$CRASH"*) exit 137 ;; esac; fi
   echo "1 row affected."; exit 0
 fi
+per() { [ -f "$STATE/$1" ] && cat "$STATE/$1" || echo 0; }
+case "$sql" in
+  "SELECT COUNT(*) FROM s_child c WHERE NOT EXISTS"*) printf '\n     %s\n' "$(per orphans.$host)"; exit 0 ;;
+  "SELECT COUNT(*) FROM s_"*"NVL"*) t=$(echo "$sql" | awk '{ print $4 }'); printf '\n     %s\n' "$(per heap.$t.$host)"; exit 0 ;;
+  "SELECT id FROM s_"*|"SELECT p FROM s_"*|"SELECT c FROM s_"*)
+    t=$(echo "$sql" | awk '{ print $4 }'); n=$(per pk.$t.$host); i=1
+    while [ $i -le $n ]; do printf '     %s\n' $i; i=$((i + 1)); done; exit 0 ;;
+esac
 case "$sql" in
   "SELECT COUNT(*) FROM ballast_"*)
     c=$(cat "$STATE/count")
@@ -93,8 +113,11 @@ case "$sql" in
   "SELECT fail_counter"*)
     if [ -f "$STATE/failread" ]; then v=$(cat "$STATE/fail"); else v=0; touch "$STATE/failread"; fi
     printf '\n     %s\n' "$v" ;;
-  "SELECT i FROM tkrepl_"*) echo "1 row selected." ;;
-  "SELECT * FROM "*) printf '=== <Result of SELECT Command in Line 1> ===\n\n  1\n\n1 row selected.\n' ;;
+  "SELECT i FROM tkrepl_"*) [ -z "$STALL" ] && echo "1 row selected." ;;
+  "CREATE TABLE tkrepl_"*) [ -n "$NOMARKER" ] && { echo "ERROR: A server would not take a write."; exit 1; } ;;
+  "SELECT * FROM "*|"SELECT c, COUNT(*)"*)
+    printf '=== <Result of SELECT Command in Line 1> ===\n\n  1\n\n1 row selected.\n'
+    if [ -n "$DIFFER" ]; then case "$sql" in *" $DIFFER "*) echo "$host" ;; esac; fi ;;
 esac
 exit 0
 `
@@ -119,7 +142,7 @@ func fakePair(t *testing.T, count string) (*Runner, string, *bytes.Buffer) {
 	}
 	var log bytes.Buffer
 	r := &Runner{Pair: pair, Client: sandbox.NewNode(cli, "c1"), Rounds: 3, Rows: 100, Log: &log,
-		WitnessWait: time.Second, StallFor: 3 * time.Second, NoReadFor: 2 * time.Second}
+		WitnessWait: time.Second, StallFor: 3 * time.Second, NoReadFor: 2 * time.Second, BarrierFor: 2 * time.Second}
 	return r, state, &log
 }
 

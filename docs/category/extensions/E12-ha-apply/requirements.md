@@ -64,12 +64,28 @@ superclass). An unknown name is refused.
 The exit code says whether the run finished. The verdicts are in the ledger. A slave that stopped
 ends the run after that pattern's row, since every later pattern starts by waiting on it.
 
+A `stress` run has one verdict: **damaged** (a node's heap holds rows its primary key does not;
+only the master's counts, when the slave is stalled and its two reads may see two states),
+**stalled** (the slave did not show the final marker within five minutes; compared, but a slave
+behind differs for that alone; a master that would not take the marker fails the run), **diverged** (a table read through its primary key, a heap count,
+the ballast or the orphan count differs across the pair, or `fail_counter` moved), **hung** (the
+clients did not finish within `--timeout` and were stopped), or **same**, the first that applies in
+that order. A statement the master refused is not a finding: whatever the master ends up holding is
+the answer, and the question is whether the slave holds it too. A client that ended no transaction
+fails the run, since a pair nobody wrote to reads the same. `--compare-only` makes the same
+comparison on the tables a pair already has, with no workload and without `fail_counter`, which has
+no before; it creates and drops one marker table on the master to wait for the slave. A run keeps
+its clients' scripts and logs, and both reads of any table that differs, beside its ledger, and
+refuses to start where an earlier run's files already are.
+
 ## 5. Acceptance
 
 - **M1** (`pairs`, `list`): on #8052 `bf560620e` the six equality patterns that the prototype caught
   are **missed**; on `61ee0944a` all 24 patterns are **held**, with the control going first.
-- **M2** (`stress`): one seed names one workload; the heap check catches a row the primary key does
-  not have (the damaged pair of `fk-index-insert-loses-the-victims-error`).
+- **M2** (`stress`): one seed names the shell prototype's SQL byte for byte; `--compare-only` calls
+  the damaged pair of `fk-index-insert-loses-the-victims-error` (#8198 `6ce1c05d2`, the master's
+  `s_child` 9 rows by its heap and 7 through its primary key) **damaged**; a run without foreign-key
+  operations on #8052's new head is **same**.
 
 ## 6. Not in scope
 

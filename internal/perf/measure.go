@@ -137,9 +137,9 @@ func (r *Runner) passOn(ctx context.Context, s *Side, idle []*Side, c *Case, f *
 	return p
 }
 
-// pass is Design §5.5's pass(): reset, the cold sequence when asked, a
-// checkpoint pushed out of the window when asked, then the snapshots around
-// the client. A step that fails before the client runs makes the pass null
+// pass is Design §5.5's pass(): reset, the cold sequence when asked, the
+// vacuum wait, a checkpoint taken to its end when asked, then the snapshots
+// around the client. A step that fails before the client runs makes the pass null
 // with that step's name; the collect layer failing does not (FR-16).
 func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase string, k int) *pass {
 	p := &pass{Rep: k, Side: s.Role, Phase: phase, WarmS: c.WarmS, Missing: map[string]string{}}
@@ -151,14 +151,6 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	if c.Cold {
 		if err := r.coldStart(ctx, s, db); err != nil {
 			return p.null(err.Error())
-		}
-	}
-	if c.Background == "defer" {
-		// csql's ;checkpoint session command: only a --sysadm csql may run
-		// it, and only from its input, not -c (which is SQL). There is no
-		// checkpoint utility in 11.x.
-		if err := r.mustExec(ctx, s, "checkpoint", fmt.Sprintf("printf ';checkpoint\\n' | csql --sysadm -u dba %s > %s/log/checkpoint-%s.log 2>&1", db, workPerf, db), 5*time.Minute); err != nil {
-			p.Notes = append(p.Notes, "checkpoint before the window failed: "+err.Error())
 		}
 	}
 	out := r.passOut(s, c, phase, k)
@@ -183,6 +175,26 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		} else if note != "" {
 			p.Notes = append(p.Notes, note)
 		}
+	}
+	if c.Background == "defer" {
+		// After the vacuum wait, so the pages vacuum dirtied are written by
+		// it too, and waited to its end: a checkpoint still running when
+		// the window opens is the background the case asked to keep out.
+		// A warm-up pass has no watcher ensured above.
+		if phase != "measure" {
+			if note, err := r.watcherEnsure(ctx, s, db); err != nil {
+				p.Notes = append(p.Notes, "watcher: "+err.Error())
+			} else if note != "" {
+				p.Notes = append(p.Notes, note)
+			}
+		}
+		if note, err := r.checkpoint(ctx, s, db, 10*time.Minute); err != nil {
+			p.Notes = append(p.Notes, "checkpoint before the window failed: "+err.Error())
+		} else if note != "" {
+			p.Notes = append(p.Notes, note)
+		}
+	}
+	if phase == "measure" {
 		// A utility case's prepare leaves the server in the state the client
 		// is timed from: after the vacuum wait, which its work would keep
 		// waiting (an open transaction holds vacuum back), and before the

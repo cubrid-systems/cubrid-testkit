@@ -249,6 +249,102 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 	}
 }
 
+// checkpoint takes a checkpoint and waits until it has ended, or the bound
+// passes: csql's ;checkpoint only wakes the checkpoint daemon and returns,
+// and a checkpoint left running ended inside the window that followed
+// (txn.commit_group_64 on 19 passes in 20, 2026-10-30). Done is a checkpoint
+// started after the request and every started one ended
+// (checkpointDone). A request while one is running is dropped, so with
+// none running and none started since, it asks again. The counters count
+// only while a statdump watcher is registered; the caller ensures one.
+func (r *Runner) checkpoint(ctx context.Context, s *Side, db string, bound time.Duration) (note string, err error) {
+	read := func() (checkpointCounts, error) {
+		res, err := r.exec(ctx, s.N1, fmt.Sprintf("cubrid statdump %s 2>/dev/null | grep -E '^Num_log_(start|end)_checkpoints '", db), time.Minute)
+		if err != nil {
+			return checkpointCounts{}, err
+		}
+		return parseCheckpointCounts(res.Stdout), nil
+	}
+	ask := func() error {
+		// csql's ;checkpoint session command: only a --sysadm csql may run
+		// it, and only from its input, not -c (which is SQL). There is no
+		// checkpoint utility in 11.x.
+		return r.mustExec(ctx, s, "checkpoint", fmt.Sprintf("printf ';checkpoint\\n' | csql --sysadm -u dba %s > %s/log/checkpoint-%s.log 2>&1", db, workPerf, db), 5*time.Minute)
+	}
+	before, err := read()
+	if err != nil {
+		return "", err
+	}
+	if err := ask(); err != nil {
+		return "", err
+	}
+	if !before.ok {
+		return "checkpoint counters unreadable; the checkpoint before the window was asked for and not waited for", nil
+	}
+	deadline := time.Now().Add(bound)
+	asked := time.Now()
+	var now checkpointCounts
+	for {
+		if now, err = read(); err != nil {
+			return "", err
+		}
+		if checkpointDone(before, now) {
+			return "", nil
+		}
+		if now.ok && now.started == before.started && now.ended >= now.started && time.Since(asked) > 5*time.Second {
+			if err := ask(); err != nil {
+				return "", err
+			}
+			asked = time.Now()
+		}
+		if time.Now().After(deadline) {
+			return fmt.Sprintf("the checkpoint before the window had not ended after %s (started %d -> %d, ended %d)", bound, before.started, now.started, now.ended), nil
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// checkpointCounts is one statdump read of the checkpoint counters.
+type checkpointCounts struct {
+	started, ended int64
+	ok             bool
+}
+
+// checkpointDone says a checkpoint started after before was read and every
+// started one has ended.
+func checkpointDone(before, now checkpointCounts) bool {
+	return before.ok && now.ok && now.started > before.started && now.ended >= now.started
+}
+
+// parseCheckpointCounts reads Num_log_start_checkpoints and
+// Num_log_end_checkpoints from statdump lines; ok only with both.
+func parseCheckpointCounts(statdump string) checkpointCounts {
+	var c checkpointCounts
+	var haveStart, haveEnd bool
+	for _, line := range strings.Split(statdump, "\n") {
+		k, val, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(val), 10, 64)
+		if err != nil {
+			continue
+		}
+		switch strings.TrimSpace(k) {
+		case "Num_log_start_checkpoints":
+			c.started, haveStart = n, true
+		case "Num_log_end_checkpoints":
+			c.ended, haveEnd = n, true
+		}
+	}
+	c.ok = haveStart && haveEnd
+	return c
+}
+
 // vacuumCounts is one statdump read of the two vacuum accumulators.
 type vacuumCounts struct {
 	toVacuum, vacuumed int64

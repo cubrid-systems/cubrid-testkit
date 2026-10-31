@@ -213,3 +213,36 @@ func TestVacuumIdleReadsTheAccumulators(t *testing.T) {
 		t.Error("one statistic missing: ok or idle")
 	}
 }
+
+// The checkpoint before a defer case's window is done only when one started
+// after the request and every started one ended: the request only wakes the
+// daemon, and one already running when asked is not the one asked for.
+func TestCheckpointDoneWaitsForTheOneAskedFor(t *testing.T) {
+	read := func(started, ended int64) checkpointCounts {
+		return parseCheckpointCounts(fmt.Sprintf("Num_log_start_checkpoints     = %10d\nNum_log_end_checkpoints       = %10d\n", started, ended))
+	}
+	before := read(41, 41)
+	if !before.ok || before.started != 41 || before.ended != 41 {
+		t.Fatalf("parse: %+v", before)
+	}
+	if checkpointDone(before, read(41, 41)) {
+		t.Error("not started yet: done")
+	}
+	if checkpointDone(before, read(42, 41)) {
+		t.Error("started, not ended: done")
+	}
+	if !checkpointDone(before, read(42, 42)) {
+		t.Error("started after the request and ended: not done")
+	}
+	// One was running when asked: its end is not the checkpoint asked for.
+	running := read(42, 41)
+	if checkpointDone(running, read(42, 42)) {
+		t.Error("the running one ended: done")
+	}
+	if !checkpointDone(running, read(43, 43)) {
+		t.Error("a later one started and ended: not done")
+	}
+	if missing := parseCheckpointCounts("Num_log_start_checkpoints     =         42\n"); missing.ok || checkpointDone(before, missing) {
+		t.Error("one statistic missing: ok or done")
+	}
+}

@@ -372,9 +372,14 @@ func (w checkpointWait) run(ctx context.Context) (string, error) {
 			*w.offset = d
 		}
 	}
-	shrink(base)
-	if *w.offset != 0 && base.started-base.ended == *w.offset {
-		say(fmt.Sprintf("checkpoint counters offset %d (started minus ended) in effect, found by an earlier wait on this server", *w.offset))
+	if stored := *w.offset; stored != 0 {
+		if shrink(base); *w.offset == stored {
+			say(fmt.Sprintf("checkpoint counter offset %d (started minus ended) stored by an earlier wait on this server applied", stored))
+		} else {
+			say(fmt.Sprintf("checkpoint counter offset %d stored by an earlier wait on this server dropped to %d", stored, *w.offset))
+		}
+	} else {
+		shrink(base)
 	}
 	ahead := func(c checkpointCounts) bool { return c.started-c.ended > *w.offset }
 	if ahead(base) {

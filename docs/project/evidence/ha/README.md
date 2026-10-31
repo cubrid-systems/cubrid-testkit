@@ -14,6 +14,63 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [fk-index-insert-loses-the-victims-error](fk-index-insert-loses-the-victims-error.md) —
+  **2026-10-30.** **A child INSERT chosen as a deadlock victim while it locks its own new row for
+  the foreign key index is not told so.** The lock's failure path returns `NO_ERROR`; the insert goes
+  on without its remaining index entries and either waits again for good — a stress run on develop
+  with #8026 hung two hours — or commits a row no index has, which the slave never gets (checkdb on
+  #8198's head: 7 OIDs against 6 in the B+tree). Three sessions reproduce it on develop, #7881 and
+  #8198 alike. Fixed on #8198 (`ef96fd9d0`), together with a second deadlock of the family that
+  #8198's own change had made reachable; develop gets the fix when #8198 merges after #7881, and
+  #7881 has a third deadlock of the family. The
+  stress script's comparison read through the primary key and missed the row; it now counts the heap
+  too.
+
+- [concurrent-cascade-leaves-orphans](concurrent-cascade-leaves-orphans.md) — **2026-10-29.**
+  **CBRD-27464 across a pair.** When a parent DELETE with `ON DELETE CASCADE` waits on an open
+  child insert, the master keeps the new child as an orphan (the issue's case A) — and the slave
+  does not have it. Two sessions reproduce it on develop and on #8052 alike; under eight clients
+  every divergence seen has that shape, one child row
+  each, and the -711 apply failures are what a later statement on such an orphan would meet (a
+  reading). Already on the tracker as CBRD-27464 (fix in #8026, open); the HA consequence is what
+  the issue does not say. Predates CBRD-27508. **#8026 fixes it** (2026-10-30): both cases end the
+  same and right on both nodes, two runs each, and seven stress runs ended with no divergence and
+  no orphan.
+
+- [parallel-apply-under-pressure](parallel-apply-under-pressure.md) — **2026-10-29.** The four
+  things the conflict-order run left unasked, and one more: assertions (a debug build), the
+  history cleared by capacity, the per-transaction key limit, eight clients at once, `applylogdb`
+  killed three times a run mid-apply, and a dependent write chasing its predecessor's commit.
+  **Nothing broke the parallel applier** — with foreign keys left out of the several-client runs,
+  for the reason in the entry above. Also measured: every replicated statement clears the
+  whole history, and a history smaller than the transactions serialises the applier. These pairs
+  filled the host's root disk — set `CSB_HOME` first.
+
+- [parallel-apply-keeps-conflict-order](parallel-apply-keeps-conflict-order.md) — **2026-10-29.**
+  The other half of the question: whether CBRD-27508's writeset finds the dependencies it must.
+  Thirteen conflicting pairs — a changed primary key, a unique value deleted and re-inserted or
+  moved, REVERSE UNIQUE, single, composite and cascading foreign keys, two savepoint shapes, DDL
+  before DML, a row moved across partitions — each built so the later transaction would reach the
+  shared key first if the gate let it through. **None did in 20 rounds each**, no table differed
+  and `fail_counter` stayed at 0, while the control with nothing shared went first in 20 of 20.
+  What it left unasked — the history cleared by capacity, more than two transactions at once,
+  assertions, restart — was asked next, in parallel-apply-under-pressure. **2026-10-30:** keys the
+  index holds equal that the writeset saw as different (-0.0 and +0.0, one instant in two zones, a
+  subclass and its superclass): on the head measured above it missed all six such patterns and the pair
+  diverged; on #8052's new head `61ee0944a`, which fixed those hashes, all eight equality patterns and
+  the fifteen earlier ones kept their order.
+
+- [parallel-apply-and-the-marker](parallel-apply-and-the-marker.md) — **2026-10-29.** CBRD-27508's
+  parallel applier keeps conflict order and nothing else, so a marker sharing no key with the
+  transaction before it is applied first: on four workers an INSERT-only marker was visible ahead
+  of a 20,000-row transaction in **18 and 17 rounds of 20**. testkit's own marker was ahead in
+  **0 of 20, twice**, because it creates its table and a replicated statement is applied in commit
+  order with everything after it waiting. So `sandbox.WaitForReplication` holds on #8052, for a
+  reason it did not know it had; the CREATE is now documented as load-bearing and a live test,
+  checked against the change it guards, fails if it goes. CTP's `wait_for_slave` has the same
+  shape and is covered by the same argument, by reading. **CTP's `ha_repl` flag is an UPDATE on a
+  kept table, the shape that overtakes** — not run, since CTP cannot reach a csb pair.
+
 - [ctp-ha-repl-deletes-the-call](ctp-ha-repl-deletes-the-call.md) — **2026-09-23.** Why the
   findings above are new, and it is not that nobody looked. CTP's ha_repl conversion **deletes
   every statement beginning with `CALL`** — a 2012 rule, from when `CALL` meant a method on a class

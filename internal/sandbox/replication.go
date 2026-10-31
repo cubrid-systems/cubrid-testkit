@@ -45,6 +45,17 @@ func (p *Pair) WaitForReplication(ctx context.Context, timeout time.Duration) (t
 	marker := fmt.Sprintf("tkrepl_%d", time.Now().UnixNano())
 	master := p.MasterChannel()
 
+	// The CREATE is what makes this wait mean anything under a parallel
+	// applier, and it must stay. With ha_apply_worker_count above one
+	// (CBRD-27508) the slave keeps conflict order only, so a row that shares no
+	// key with what came before it can arrive first: on four workers an INSERT
+	// into a table kept between calls was visible ahead of a 20,000-row
+	// transaction in 18 rounds of 20, and this marker in 0 of 20. A replicated
+	// statement is applied in commit order and everything after it waits for it
+	// (repl_log_insert_statement; evidence/ha/parallel-apply-and-the-marker.md).
+	// CTP's ha_repl flag is an UPDATE of a table kept for the run
+	// (Test.java:755), which is the shape that overtakes.
+	// TestLiveTheWaitCoversWhatWasCommittedAheadOfTheMarker fails if this goes.
 	create := fmt.Sprintf(
 		"csql -u dba -c \"CREATE TABLE %s(i INT PRIMARY KEY); INSERT INTO %s VALUES(1);\" %s",
 		marker, marker, p.DB)

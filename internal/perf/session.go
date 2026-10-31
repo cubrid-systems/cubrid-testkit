@@ -812,7 +812,9 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 			skipGroup(g, firstNonEmptyStr(stop, broken))
 			continue
 		}
-		params.add(g.Key, ss.t.params, ss.r.params)
+		if !params.add(g.Key, ss.t.params, ss.r.params) {
+			s.note("pair %s: param_diff: conf group %q not compared (a side has no paramdump)", p.Name, confLabel(g.Key))
+		}
 		p.ParamDiff = params.list()
 		res, st := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, []*Side{ss.o}, pairDir, false)
 		for _, cr := range res {

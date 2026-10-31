@@ -49,9 +49,10 @@ type Side struct {
 	// frozen is set when the side could not be unpaused: every exec into
 	// it would wait for its timeout, so the pair stops (Design §11).
 	frozen error
-	// params is what the cluster's server and clients run with, scope/name
-	// to value (recordParams); nil when it could not be read.
-	params      map[string]string
+	// params is the parameters the cluster's server runs with, and the
+	// client-only ones a client on its node loads (recordParams); nil when
+	// they could not be read.
+	params      map[string]paramValue
 	paramsTried bool
 }
 

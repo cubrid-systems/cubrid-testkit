@@ -1,22 +1,25 @@
 package perf
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-// paramdump's two formats: develop marks each line with its section and
-// whether it differs from the default and prints the default; 11.4.6 prints
-// name=value. Both put the client's section first, then the server's.
-func TestParseParamdumpReadsBothFormats(t *testing.T) {
-	develop := `System parameters to be used by the client program.
+// paramdump -b as the two lines print it: develop splits the parameters
+// between the client's section and the server's and marks each line;
+// 11.4 prints every parameter in both sections as name=value.
+const (
+	developDump = `System parameters to be used by the client program.
 #
 # cubrid.conf
 #
 
 # system parameters were loaded from the files ([@section])
-# /opt/cubrid/conf/cubrid.conf
+# /work/pf-x-t-n1/cubrid/conf/cubrid.conf [@perf_narrow_1m]
 
 # system parameters
-[C ] er_log_debug=n (n)
-[C*] parallelism=4 (4)
+[C ] ansi_quotes=y (y)
+[C*] optimization_level=1 (2)
 
 System parameters loaded by the server 'perf_narrow_1m'
 #
@@ -27,53 +30,95 @@ System parameters loaded by the server 'perf_narrow_1m'
 [S*] data_buffer_size=4G (32768K)
 [S ] parallelism=4 (4)
 [S ] intl_date_lang="" ("")
+[S ] some_list=a (b) (a (b))
 `
-	got := parseParamdump(develop)
-	want := map[string]string{
-		"client/er_log_debug":     "n",
-		"client/parallelism":      "4",
-		"server/data_buffer_size": "4G",
-		"server/parallelism":      "4",
-		"server/intl_date_lang":   `""`,
+	release114Dump = `System parameters to be used by the client program.
+#
+# cubrid.conf
+#
+
+# system parameters
+ansi_quotes=y
+data_buffer_size=4G
+optimization_level=1
+removed_in_develop=7
+
+System parameters loaded by the server 'perf_narrow_1m'
+#
+# cubrid.conf
+#
+
+# system parameters
+ansi_quotes=y
+data_buffer_size=4G
+optimization_level=1
+removed_in_develop=7
+`
+)
+
+func TestParseParamdumpKeysByNameAcrossSections(t *testing.T) {
+	got := parseParamdump(developDump)
+	want := map[string]paramValue{
+		"ansi_quotes":        {"client", "y"},
+		"optimization_level": {"client", "1"},
+		"data_buffer_size":   {"server", "4G"},
+		"parallelism":        {"server", "4"},
+		"intl_date_lang":     {"server", `""`},
+		"some_list":          {"server", "a (b)"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("develop: %v", got)
 	}
 	for k, v := range want {
 		if got[k] != v {
-			t.Errorf("develop %s: %q, want %q", k, got[k], v)
+			t.Errorf("develop %s: %+v, want %+v", k, got[k], v)
 		}
 	}
-	old := "System parameters to be used by the client program.\n# system parameters\ner_log_debug=n\n\nSystem parameters loaded by the server 'perf_narrow_1m'\n# system parameters\ndata_buffer_size=4G\n"
-	got = parseParamdump(old)
-	if len(got) != 2 || got["client/er_log_debug"] != "n" || got["server/data_buffer_size"] != "4G" {
-		t.Errorf("11.4.6: %v", got)
+	// 11.4: both sections list everything; the server's value is kept.
+	got = parseParamdump(release114Dump)
+	if len(got) != 4 || got["data_buffer_size"] != (paramValue{"server", "4G"}) || got["ansi_quotes"] != (paramValue{"server", "y"}) {
+		t.Errorf("11.4: %v", got)
 	}
 	if got := parseParamdump("ERROR: database perf_x is unknown\n"); len(got) != 0 {
 		t.Errorf("an error message: %v", got)
 	}
 }
 
-// The diff keeps what differs or is on one side only, and says in which conf
-// groups only when it was not seen in all of them.
-func TestParamDiffsAcrossConfGroups(t *testing.T) {
-	target := map[string]string{"server/data_buffer_size": "2G", "server/parallelism": "4", "server/log_buffer_size": "16M"}
-	reference := map[string]string{"server/data_buffer_size": "2G", "server/log_buffer_size": "16M"}
+// develop against 11.4: a parameter in different sections of the two dumps
+// is in both builds; only what no section of one build has is one-sided.
+func TestParamDiffsAcrossBuildsAndConfGroups(t *testing.T) {
+	dev, rel := parseParamdump(developDump), parseParamdump(release114Dump)
 	var d paramDiffs
-	d.add("data_buffer_size=2G", target, reference)
-	d.add("data_buffer_size=4G", map[string]string{"server/parallelism": "4", "server/checkpoint_interval": "6min"},
-		map[string]string{"server/checkpoint_interval": "1440min"})
-	d.add("no params", target, nil)
-	got := d.list()
-	if len(got) != 2 {
-		t.Fatalf("entries: %+v", got)
+	if !d.add("data_buffer_size=4G", dev, rel) {
+		t.Fatal("not compared")
 	}
-	p := got[0]
-	if p.Scope != "server" || p.Name != "parallelism" || p.Target == nil || *p.Target != "4" || p.Reference != nil || p.Conf != nil {
-		t.Errorf("parallelism, in both groups compared: %+v", p)
+	tweaked := map[string]paramValue{}
+	for k, v := range rel {
+		tweaked[k] = v
 	}
-	c := got[1]
-	if c.Name != "checkpoint_interval" || *c.Target != "6min" || *c.Reference != "1440min" || len(c.Conf) != 1 || c.Conf[0] != "data_buffer_size=4G" {
-		t.Errorf("checkpoint_interval, in one group: %+v", c)
+	tweaked["optimization_level"] = paramValue{"server", "2"}
+	if !d.add("", dev, tweaked) {
+		t.Fatal("not compared")
+	}
+	if d.add("other", dev, nil) {
+		t.Error("a side without parameters: compared")
+	}
+	byName := map[string][]ParamDiff{}
+	for _, e := range d.list() {
+		byName[e.Name] = append(byName[e.Name], e)
+	}
+	for _, n := range []string{"ansi_quotes", "data_buffer_size"} {
+		if len(byName[n]) != 0 {
+			t.Errorf("%s, in both builds with the same value: %+v", n, byName[n])
+		}
+	}
+	if e := byName["parallelism"]; len(e) != 1 || e[0].Scope != "server" || *e[0].Target != "4" || e[0].Reference != nil || e[0].Conf != nil {
+		t.Errorf("parallelism, develop only, every group: %+v", e)
+	}
+	if e := byName["removed_in_develop"]; len(e) != 1 || e[0].Target != nil || *e[0].Reference != "7" {
+		t.Errorf("removed_in_develop, 11.4 only: %+v", e)
+	}
+	if e := byName["optimization_level"]; len(e) != 1 || *e[0].Target != "1" || *e[0].Reference != "2" || strings.Join(e[0].Conf, ",") != "(no conf)" {
+		t.Errorf("optimization_level, apart in one group: %+v", e)
 	}
 }

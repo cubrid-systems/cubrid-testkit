@@ -122,6 +122,9 @@ FK 에서 `'Key'` 와 `'Key '`. 이 둘은 `ignore_trailing_space` 를 켠 쌍�
 쓰이기 전에 폭까지 공백이 채워져 `'Key'` 와 `'Key '` 가 어디서나 같은 바이트이고, 두 head 모두에서
 held 였다.
 
+org JIRA 에서 `ignore_trailing_space` 옵션을 없애자는 논의가 있다(2026-11-01 기준, 이슈 번호는 적지
+않았다). 옵션이 없어지면 두 패턴과 쌍에 묻는 질의는 그때 다시 본다. 지금은 기록만 한다.
+
 ### 3-5. 클러스터
 
 - 기본은 명령이 쌍을 직접 세운다: `--preset ha --clients 1 --set-hidden ha_apply_worker_count=<N>`,

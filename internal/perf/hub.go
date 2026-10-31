@@ -342,6 +342,21 @@ func readSessionPairs(root, id string) []*SessionPair {
 	return nil
 }
 
+// timedPair finds the newest earlier session in which a pair of this name
+// ran cases and has a time (timeOf), for the estimate. previousPair (FR-2)
+// would also return a pair that ran no case -- invalid, or never reached by
+// a session that died -- and its time says nothing.
+func timedPair(root, selfID, name string) (*SessionPair, string) {
+	for _, id := range previousSessions(root, selfID) {
+		for _, p := range readSessionPairs(root, id) {
+			if p.Name == name && timeOf(p, id) != nil {
+				return p, id
+			}
+		}
+	}
+	return nil, ""
+}
+
 // previousPair finds the newest earlier session that measured a pair of
 // this name: one that was skipped, or whose fingerprint is empty, is not a
 // session to compare against and is passed over (FR-2).

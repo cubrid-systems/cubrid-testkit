@@ -159,7 +159,8 @@ func countSelected(s *Suite, b Branch) int {
 }
 
 // list prints what the session would consider: one line per case, with the
-// pass budget and the bound the session checks the weekend against -- for
+// pass budget and the case's bound, which the session's case gate checks --
+// for
 // the conf's interleave mode, or case mode when there is only a suite. A
 // case that could not be read is reported after the table, and the exit says
 // so.

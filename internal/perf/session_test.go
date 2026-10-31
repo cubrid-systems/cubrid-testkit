@@ -2,6 +2,7 @@ package perf
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -539,27 +540,88 @@ func TestSessionExitCodes(t *testing.T) {
 	}
 }
 
-// The pair gate's estimate: the earlier time per case that ran, scaled and
-// with the margin, never above the bound; the bound without an earlier time.
-func TestPairEstimateScalesTheEarlierTime(t *testing.T) {
-	bound := 47 * time.Hour
-	prev := &SessionPair{Seconds: 7550, CasesRun: 16}
-	est, _ := pairEstimate(bound, prev, 37)
-	secs := 7550.0 * 37 / 16 * 1.5
-	if want := time.Duration(secs) * time.Second; est != want {
-		t.Errorf("16 cases in 7550 s, 37 now: %s, want %s", est, want)
+// The pair gate's estimate: an earlier time per case run, scaled to the
+// cases and sides now, times the margin, at least the setup part and at most
+// the bound; the bound without a time.
+func TestPairEstimate(t *testing.T) {
+	mk := func(prefix string, n int) []*Case {
+		var out []*Case
+		for i := 0; i < n; i++ {
+			out = append(out, &Case{ID: fmt.Sprintf("%s.c%d", prefix, i), Warmup: 1, Repeats: 5, BudgetS: 120, WarmS: 10, Fixture: FixtureRef{Name: "f"}})
+		}
+		return out
 	}
-	if est, from := pairEstimate(bound, nil, 37); est != bound || !strings.Contains(from, "no earlier time") {
-		t.Errorf("no earlier pair: %s (%s)", est, from)
+	canaries, cases := mk("canary", 2), mk("x", 37)
+	bound := pairBound(canaries, cases, false)
+	scaled := func(secs float64) time.Duration { return time.Duration(secs) * time.Second }
+	week := &pairTime{seconds: 7550, cases: 16, sides: 2, from: "session 20261031_perf-weekly"}
+	for _, tc := range []struct {
+		name    string
+		cases   []*Case
+		overlap bool
+		t       *pairTime
+		want    time.Duration
+		from    string
+	}{
+		{"scaled", cases, false, week, scaled(7550.0 / 16 * 37 * pairEstimateMargin), "scaled to 37"},
+		{"no time", cases, false, nil, bound, "no earlier time"},
+		{"no case", nil, false, week, pairBound(canaries, nil, false), "no case selected"},
+		{"above the bound", cases, false, &pairTime{seconds: 7550, cases: 1, sides: 2}, bound, "the bound: 7550 s"},
+		{"the setup floor", cases, false, &pairTime{seconds: 60, cases: 16, sides: 2}, pairSetupBound(canaries, cases, false), "scaled to 37"},
+		{"an overlap now, none before", cases, true, week, scaled(7550.0 / 16 * 37 * 2 * pairEstimateMargin), "scaled to 37"},
+		{"an overlap before, none now", cases, false, &pairTime{seconds: 7550, cases: 16, sides: 3}, scaled(7550.0 / 16 * 37 / 2 * pairEstimateMargin), "scaled to 37"},
+	} {
+		got, from := pairEstimate(canaries, tc.cases, tc.overlap, tc.t)
+		if got != tc.want || !strings.Contains(from, tc.from) {
+			t.Errorf("%s: %s (%s), want %s (%q)", tc.name, got, from, tc.want, tc.from)
+		}
 	}
-	if est, _ := pairEstimate(bound, &SessionPair{Seconds: 7550}, 37); est != bound {
-		t.Errorf("earlier pair ran nothing: %s", est)
+	// The record's time: null cases are among the run ones, not added; a
+	// pair that ran nothing or has no time gives none.
+	if a, b := timeOf(&SessionPair{Seconds: 7550, CasesRun: 16, CasesNull: 4}, ""), timeOf(&SessionPair{Seconds: 7550, CasesRun: 16}, ""); a == nil || b == nil || a.cases != b.cases {
+		t.Errorf("null cases: %+v against %+v", a, b)
 	}
-	if est, _ := pairEstimate(time.Hour, prev, 37); est != time.Hour {
-		t.Errorf("scaled time above the bound: %s", est)
+	for _, p := range []*SessionPair{{Seconds: 7550}, {CasesRun: 16}, nil} {
+		if timeOf(p, "") != nil {
+			t.Errorf("no time from %+v", p)
+		}
 	}
-	nulls := &SessionPair{Seconds: 7550, CasesRun: 12, CasesNull: 4}
-	if a, b := pairEstimate(bound, nulls, 37); a != est {
-		t.Errorf("null cases ran too: %s (%s), want %s", a, b, est)
+	// A pair's own time wins over this session's; with none, this
+	// session's stands in.
+	p := &SessionPair{earlier: week}
+	other := &pairTime{seconds: 100, cases: 37, sides: 2, from: "this session's develop"}
+	if _, from := p.estimate(canaries, cases, other); !strings.Contains(from, "20261031") {
+		t.Errorf("own time not used: %s", from)
+	}
+	if _, from := (&SessionPair{}).estimate(canaries, cases, other); !strings.Contains(from, "this session's develop") {
+		t.Errorf("this session's time not used: %s", from)
+	}
+}
+
+// timedPair passes over records with no time -- an invalid pair, a pair
+// skipped for budget -- to the newest one that ran cases; FR-2's
+// previousPair would stop at the invalid one.
+func TestTimedPairSkipsRecordsWithoutTime(t *testing.T) {
+	root := t.TempDir()
+	write := func(id string, pairs ...map[string]any) {
+		t.Helper()
+		dir := filepath.Join(root, id, "results")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := json.Marshal(map[string]any{"pairs": pairs})
+		if err := os.WriteFile(filepath.Join(dir, "session.json"), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("20261017_perf-weekly", map[string]any{"name": "aa", "seconds": 7000, "cases_run": 16})
+	write("20261024_perf-weekly", map[string]any{"name": "aa", "seconds": 300, "cases_run": 0})
+	write("20261031_perf-weekly", map[string]any{"name": "aa", "skipped": "budget"})
+	p, id := timedPair(root, "20261107_perf-weekly", "aa")
+	if p == nil || id != "20261017_perf-weekly" || p.Seconds != 7000 {
+		t.Errorf("timedPair: %+v from %q", p, id)
+	}
+	if p, _ := timedPair(root, "20261107_perf-weekly", "develop"); p != nil {
+		t.Errorf("a pair never run: %+v", p)
 	}
 }

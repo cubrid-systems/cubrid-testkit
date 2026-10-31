@@ -279,8 +279,14 @@ func (r *Runner) runOne(ctx context.Context, c *Case, f *Fixture) (int, string) 
 			writeSession("incomplete", "fixture")
 			return ExitEnvironment, ""
 		}
+		keepParams(s, r.Out)
 	}
 	t, ref := sides[0], sides[1]
+	var params paramDiffs
+	if !params.add(confKey(c), t.params, ref.params) {
+		session.Notes = append(session.Notes, "param_diff: not compared (a side has no paramdump)")
+	}
+	session.ParamDiff = params.list()
 	cr := r.runCase(ctx, c, f, t, ref)
 	for _, p := range cr.Passes {
 		s := t

@@ -155,6 +155,13 @@ func TestBudgetBoundsAndTheClock(t *testing.T) {
 	if got := remeasureBound(c); got != 5*2*(130+60)*time.Second {
 		t.Errorf("remeasureBound = %s", got)
 	}
+	d := &Case{ID: "x.z", Warmup: 1, Repeats: 5, BudgetS: 120, WarmS: 10, Background: "defer"}
+	if got := caseBound(d); got != 6*2*(120+10+60+60)*time.Second+fixtureSwitchBound {
+		t.Errorf("caseBound, defer = %s", got)
+	}
+	if got := remeasureBound(d); got != 5*2*(130+60+60)*time.Second {
+		t.Errorf("remeasureBound, defer = %s", got)
+	}
 	now := time.Now()
 	k := clock{End: now.Add(time.Hour)}
 	if !k.fits(now, 59*time.Minute) || k.fits(now, 61*time.Minute) {

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -97,9 +98,9 @@ func (p *Pair) WaitForReplication(ctx context.Context, timeout time.Duration) (t
 				break
 			}
 			if time.Now().After(deadline) {
-				return time.Since(start), fmt.Errorf(
+				return time.Since(start), notReplicated(fmt.Sprintf(
 					"sandbox: %s did not see the master's marker within %s; last read:\n%s",
-					p.Slaves[i], timeout, tail(res.Stdout))
+					p.Slaves[i], timeout, tail(res.Stdout)))
 			}
 			select {
 			case <-ctx.Done():
@@ -113,6 +114,17 @@ func (p *Pair) WaitForReplication(ctx context.Context, timeout time.Duration) (t
 	}
 	return time.Since(start), nil
 }
+
+// ErrNotReplicated is what WaitForReplication's error is when a slave did not
+// show the marker in time: the slave's failure, where the wait's other errors
+// -- a master that would not take the marker, a read that failed -- are not.
+// The error's text is the wait's own, as it was before this existed.
+var ErrNotReplicated = errors.New("sandbox: a slave did not show the master's marker in time")
+
+type notReplicated string
+
+func (e notReplicated) Error() string      { return string(e) }
+func (notReplicated) Is(target error) bool { return target == ErrNotReplicated }
 
 // SameOnBothNodes runs one query on the master and on every slave and reports
 // the first node whose answer differs, or "" when they all agree.

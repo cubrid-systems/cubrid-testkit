@@ -2,10 +2,12 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeCSB writes a stand-in for the tool: a script that records the argv it was
@@ -39,6 +41,30 @@ func argv(t *testing.T, path string) []string {
 	out := strings.Split(string(b), "\x00")
 	return out[:len(out)-1] // printf leaves a trailing separator
 
+}
+
+// A slave that never shows the marker is ErrNotReplicated, in the wait's own
+// words; a master that will not take the marker is not.
+func TestTheReplicationWaitSaysWhenTheSlaveIsTheOneBehind(t *testing.T) {
+	cases := []struct {
+		name, body string
+		behind     bool
+	}{
+		{"the slave never shows it", `echo '{"schema":"csb/v1","ok":true,"data":{"n":{"exit":0,"stdout":"","stderr":""}}}'`, true},
+		{"the master refuses it", `case "$*" in *CREATE*) code=1 ;; *) code=0 ;; esac
+echo '{"schema":"csb/v1","ok":true,"data":{"n":{"exit":'$code',"stdout":"","stderr":""}}}'`, false},
+	}
+	for _, c := range cases {
+		bin, _ := fakeCSB(t, c.body)
+		p := &Pair{Cluster: "hap", Master: "m1", Slaves: []string{"s1"}, DB: "db", cli: &CLI{Bin: bin, Cluster: "hap"}}
+		_, err := p.WaitForReplication(context.Background(), 200*time.Millisecond)
+		if err == nil || errors.Is(err, ErrNotReplicated) != c.behind {
+			t.Errorf("%s: err %v, ErrNotReplicated %t", c.name, err, errors.Is(err, ErrNotReplicated))
+		}
+		if c.behind && !strings.Contains(err.Error(), "s1 did not see the master's marker within 200ms") {
+			t.Errorf("%s: the wait's words changed: %v", c.name, err)
+		}
+	}
 }
 
 // The flags go before the separator. `node exec` ends in `-- <command>` and

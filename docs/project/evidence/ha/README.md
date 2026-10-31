@@ -26,6 +26,15 @@ is next, and the traps that cost a day each.
   stress script's comparison read through the primary key and missed the row; it now counts the heap
   too.
 
+- [ha-apply-stress-and-the-heap-only-row](ha-apply-stress-and-the-heap-only-row.md) —
+  **2026-10-30.** `testkit ha-apply stress` (ADR-EXT-012 M2). A seed names the shell prototype's SQL
+  byte for byte. On the pair #8198 `6ce1c05d2` damaged, `--compare-only` reads `s_child` alike
+  through the primary key on both nodes and 9 rows against 7 through the master's heap: **damaged**,
+  where the prototype said same. On #8052's new head a run without foreign keys is **same**; with
+  them six runs of nine diverged, five on `fail_counter` alone and one with a child row the slave
+  does not have, and no seed gave one verdict across its runs: by reading, CBRD-27464, which this
+  tree does not fix.
+
 - [ha-apply-gives-the-prototypes-verdicts](ha-apply-gives-the-prototypes-verdicts.md) —
   **2026-10-30.** `testkit ha-apply pairs` (ADR-EXT-012) gives the shell prototype's verdicts. On
   #8052's old head the six patterns of keys the index holds equal were missed, with no writeset

@@ -142,10 +142,13 @@ func TestPairsTakesAnyPatternWithABuild(t *testing.T) {
 
 // On a pair that keeps trailing spaces the whole catalog runs without the
 // trailing-space patterns and says so; the ledger that was at the path is
-// replaced once the run measures.
+// replaced once the run measures. The fake's csql dies in the first pattern
+// after the control, so the run stops there: the whole catalog through the
+// fake takes minutes under -race, and what is asked here comes before it.
 func TestTheCatalogLeavesTheTrailingSpacePatternsOutWhereTheKeysAreTwo(t *testing.T) {
 	state := fakeEnv(t, "1")
 	setState(t, state, "look", "1")
+	t.Setenv("CRASH", "_fp_negzero")
 	ledger := filepath.Join(t.TempDir(), "l.tsv")
 	if err := os.WriteFile(ledger, []byte(strings.Repeat("an earlier run\n", 1000)), 0o644); err != nil {
 		t.Fatal(err)
@@ -153,7 +156,8 @@ func TestTheCatalogLeavesTheTrailingSpacePatternsOutWhereTheKeysAreTwo(t *testin
 	var errOut bytes.Buffer
 	code := Main([]string{"pairs", "--cluster", "fake", "--rounds", "1", "--rows", "1", "--ledger", ledger},
 		&bytes.Buffer{}, &errOut)
-	if code != 0 || !strings.Contains(errOut.String(), "so vc_trail, fk_vc_trail are not run") {
+	if code != 1 || !strings.Contains(errOut.String(), "so vc_trail, fk_vc_trail are not run") ||
+		!strings.Contains(errOut.String(), "ha-apply: fp_negzero: ") {
 		t.Fatalf("exit %d, stderr %q", code, errOut.String())
 	}
 	b, err := os.ReadFile(ledger)
@@ -161,8 +165,32 @@ func TestTheCatalogLeavesTheTrailingSpacePatternsOutWhereTheKeysAreTwo(t *testin
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if !strings.Contains(lines[0], " ignore_trailing_space=no ") || len(lines) != 2+len(Catalog)-2 ||
-		strings.Contains(string(b), "vc_trail") || strings.Contains(string(b), "an earlier run") {
+	if len(lines) != 3 || !strings.Contains(lines[0], " ignore_trailing_space=no ") ||
+		!strings.HasPrefix(lines[2], "ctl\t") || strings.Contains(string(b), "an earlier run") {
+		t.Errorf("ledger:\n%s", b)
+	}
+}
+
+// The patterns the pair leaves out are not run: a trailing-space pattern run
+// where its keys are two would write a missed that is not one.
+func TestTheLeftOutPatternsAreNotRun(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the whole catalog through the fake takes minutes under -race")
+	}
+	state := fakeEnv(t, "1")
+	setState(t, state, "look", "1")
+	ledger := filepath.Join(t.TempDir(), "l.tsv")
+	var errOut bytes.Buffer
+	if code := Main([]string{"pairs", "--cluster", "fake", "--rounds", "1", "--rows", "1", "--ledger", ledger},
+		&bytes.Buffer{}, &errOut); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	b, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2+len(Catalog)-2 || strings.Contains(string(b), "vc_trail") {
 		t.Errorf("ledger:\n%s", b)
 	}
 }

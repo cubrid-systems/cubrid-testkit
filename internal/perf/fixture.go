@@ -203,12 +203,16 @@ func reflinkCopy(src []string, dstDir string) error {
 // the difference at or below 0 with vacuumed not moving over one interval
 // when the difference is 0, two when it is below (vacuumIdle). Records in the
 // log block still being filled are in neither until the block is handed over,
-// so up to one block can still be vacuumed after the wait. The note says when
-// the bound hit; the caller decides what that means.
+// so up to one block can still be vacuumed after the wait. A block that was
+// handed over is still left alone while the end of the log is at most a page
+// past its last MVCC record, so a backlog that stops moving gets one push
+// (vacuumPush): log with no MVCC record moves the end of the log on, and
+// vacuum takes the block. The note says when the bound hit; the caller
+// decides what that means.
 func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.Duration) (note string, err error) {
 	deadline := time.Now().Add(bound)
 	var reads []vacuumCounts
-	rearmed := false
+	rearmed, pushed := false, false
 	for {
 		res, err := r.exec(ctx, s.N1, fmt.Sprintf("bash %s/scripts/statdump_window.sh status %s >/dev/null 2>&1 && echo watcher=up; "+
 			"cubrid statdump %s 2>/dev/null | grep -E '^Num_vacuum_log_pages_(to_vacuum|vacuumed) '", workPerf, db, db), time.Minute)
@@ -228,6 +232,12 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 					return "statdump watcher was down during the vacuum wait and was re-armed", nil
 				}
 				return "", nil
+			}
+			if !pushed && vacuumStalled(reads) {
+				if err := r.mustExec(ctx, s, "vacuum push", vacuumPush(db), time.Minute); err != nil {
+					return "", err
+				}
+				pushed = true
 			}
 		}
 		if time.Now().After(deadline) {
@@ -540,6 +550,28 @@ func vacuumIdle(reads []vacuumCounts) bool {
 		}
 	}
 	return true
+}
+
+// vacuumStalled is a backlog above 0 that did not move over the last
+// interval: neither counter changed between the last two reads.
+func vacuumStalled(reads []vacuumCounts) bool {
+	n := len(reads)
+	if n < 2 {
+		return false
+	}
+	a, b := reads[n-2], reads[n-1]
+	return a.ok && b.ok && b.backlog() > 0 && a == b
+}
+
+// vacuumPush writes log with no MVCC record: 2,000 NEXT_VALUEs of a NOCACHE
+// serial, about 36 log pages on both 11.4 and develop (serial objects are not
+// MVCC; the suite's scripts/vacuum_after.sh measured it). The serial is made
+// on the first push and kept; a CREATE that finds it there fails, and that
+// is fine. db_class crossed with itself has the 2,000 rows to read it over.
+func vacuumPush(db string) string {
+	q := shellJoin([]string{db})
+	return fmt.Sprintf(`csql -u dba -c "CREATE SERIAL perf_vac_push START WITH 1 NOCACHE" %s >/dev/null 2>&1; `+
+		`csql -u dba -c "SELECT perf_vac_push.NEXT_VALUE FROM db_class a, db_class b LIMIT 2000" %s >/dev/null`, q, q)
 }
 
 func firstNonEmptyStr(a, b string) string {

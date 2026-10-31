@@ -216,6 +216,42 @@ func TestVacuumIdleReadsTheAccumulators(t *testing.T) {
 	}
 }
 
+// A backlog that did not move over one interval is a stall, and gets the
+// push; one still moving, or none, is not. The numbers are made up: a
+// handed-over block that vacuum holds reads as a backlog standing still.
+func TestVacuumStalledIsABacklogStandingStill(t *testing.T) {
+	v := func(to, done int64) vacuumCounts { return vacuumCounts{toVacuum: to, vacuumed: done, ok: true} }
+	stalled := func(rs ...vacuumCounts) bool { return vacuumStalled(rs) }
+	held := v(5000, 4968)
+	if !stalled(held, held) {
+		t.Error("32 pages behind and still: not a stall")
+	}
+	if stalled(held) {
+		t.Error("one read: a stall")
+	}
+	if stalled(v(5000, 4900), held) {
+		t.Error("vacuumed moving: a stall")
+	}
+	if stalled(v(4968, 4968), held) {
+		t.Error("a block just handed over: a stall")
+	}
+	if stalled(v(4968, 4968), v(4968, 4968)) {
+		t.Error("caught up: a stall")
+	}
+	if stalled(v(400, 431), v(400, 431)) {
+		t.Error("negative difference: a stall")
+	}
+	if stalled(vacuumCounts{}, vacuumCounts{}) {
+		t.Error("unreadable: a stall")
+	}
+	push := vacuumPush("perf_ckpt_400k")
+	for _, want := range []string{"CREATE SERIAL perf_vac_push START WITH 1 NOCACHE", "perf_vac_push.NEXT_VALUE", "LIMIT 2000", "perf_ckpt_400k"} {
+		if !strings.Contains(push, want) {
+			t.Errorf("push %q lacks %q", push, want)
+		}
+	}
+}
+
 // The checkpoint before a defer case's window is done only when one started
 // after the request and every started one ended: the request only wakes the
 // daemon, and one already running when asked is not the one asked for.

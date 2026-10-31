@@ -265,6 +265,7 @@ type checkpointScript struct {
 	reads    int
 	asks     []time.Time
 	rearms   int
+	offset   int64
 }
 
 type checkpointReading struct {
@@ -282,8 +283,9 @@ func (s *checkpointScript) wait(bound time.Duration) checkpointWait {
 		ask:   func() error { s.asks = append(s.asks, s.t); return nil },
 		rearm: func() error { s.rearms++; return nil },
 		bound: bound, poll: time.Second, reask: 5 * time.Second, running: 2 * time.Minute, unreadable: 10,
-		now:   func() time.Time { return s.t },
-		sleep: func(ctx context.Context, d time.Duration) error { s.t = s.t.Add(d); return ctx.Err() },
+		offset: &s.offset,
+		now:    func() time.Time { return s.t },
+		sleep:  func(ctx context.Context, d time.Duration) error { s.t = s.t.Add(d); return ctx.Err() },
 	}
 }
 
@@ -320,8 +322,14 @@ func TestCheckpointWaitCases(t *testing.T) {
 	for i := 0; i < 125; i++ {
 		rs = append(rs, r(45, 41))
 	}
-	if s, note := run(5*time.Minute, append(rs, r(46, 41), r(46, 42))...); !strings.Contains(note, "taken as an offset") || len(s.asks) != 1 {
-		t.Errorf("start offset: note %q, asks %d", note, len(s.asks))
+	s, note := run(5*time.Minute, append(rs, r(46, 41), r(46, 42))...)
+	if !strings.Contains(note, "taken as an offset") || len(s.asks) != 1 || s.offset != 4 {
+		t.Errorf("start offset: note %q, asks %d, offset %d", note, len(s.asks), s.offset)
+	}
+	// The next wait on that server knows the offset: asked at once.
+	known := &checkpointScript{t: time.Unix(0, 0), readings: []checkpointReading{r(46, 42), r(47, 42), r(47, 43)}, offset: 4}
+	if note, err := known.wait(time.Minute).run(context.Background()); err != nil || note != "" || len(known.asks) != 1 || !known.asks[0].Equal(time.Unix(0, 0)) {
+		t.Errorf("known offset: note %q, err %v, asks %v", note, err, known.asks)
 	}
 	// The watcher down mid-wait: re-armed, baseline and request again.
 	if s, note := run(time.Minute, r(41, 41), checkpointReading{started: 41, ended: 41, down: true}, r(41, 41), r(42, 42)); !strings.Contains(note, "re-armed") || s.rearms != 1 || len(s.asks) != 2 {
@@ -329,7 +337,7 @@ func TestCheckpointWaitCases(t *testing.T) {
 	}
 	// Counters that never move: bounded, re-asked every reask but not in
 	// the last poll before the bound.
-	s, note := run(30*time.Second, r(41, 41))
+	s, note = run(30*time.Second, r(41, 41))
 	if !strings.Contains(note, "had not ended after 30s") || len(s.asks) < 2 {
 		t.Errorf("frozen: note %q, asks %d", note, len(s.asks))
 	}

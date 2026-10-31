@@ -283,8 +283,16 @@ func (r *Runner) checkpoint(ctx context.Context, s *Side, db string, bound time.
 		bound: bound, poll: time.Second, reask: 5 * time.Second, running: 2 * time.Minute, unreadable: 10,
 		now: time.Now, sleep: sleepCtx,
 	}
+	// A lasting offset is waited out once per server start, not every pass:
+	// the counters start over with the server (serverStart forgets it).
+	offset := s.ckptOffset[db]
+	w.offset = &offset
 	start := time.Now()
 	note, err = w.run(ctx)
+	if s.ckptOffset == nil {
+		s.ckptOffset = map[string]int64{}
+	}
+	s.ckptOffset[db] = offset
 	r.logf("%s %s: checkpoint before the window took %s", s.Role, db, time.Since(start).Round(time.Millisecond))
 	return note, err
 }
@@ -295,9 +303,11 @@ func (r *Runner) checkpoint(ctx context.Context, s *Side, db string, bound time.
 // the counts, because the two can be apart for good -- a failed checkpoint
 // counts a start and no end, and either misses what ran while no watcher
 // was registered.
-//   - A checkpoint running at the baseline (more started than ended) is
-//     waited for up to running; one that does not end by then is a lasting
-//     offset, said in a note, and the baseline is taken as it is.
+//   - A checkpoint running at the baseline (more started than ended, past
+//     the offset already known) is waited for up to running; one that does
+//     not end by then is a lasting offset, said in a note and kept in
+//     offset for the next waits on that server, and the baseline is taken
+//     as it is.
 //   - With none started since the request after reask, the request was
 //     dropped by one running then, and it asks again -- never in the last
 //     poll before the bound, where a new one would run into the window.
@@ -311,6 +321,7 @@ type checkpointWait struct {
 	ask, rearm                  func() error
 	bound, poll, reask, running time.Duration
 	unreadable                  int
+	offset                      *int64 // started minus ended known to last on this server
 	now                         func() time.Time
 	sleep                       func(context.Context, time.Duration) error
 }
@@ -353,9 +364,10 @@ func (w checkpointWait) run(ctx context.Context) (string, error) {
 		}
 		return say("checkpoint counters unreadable; the checkpoint before the window was asked for and not waited for"), nil
 	}
-	if base.started > base.ended {
+	ahead := func(c checkpointCounts) bool { return c.started-c.ended > *w.offset }
+	if ahead(base) {
 		until := w.now().Add(w.running)
-		for base.started > base.ended && w.now().Before(until) {
+		for ahead(base) && w.now().Before(until) {
 			if err := w.sleep(ctx, w.poll); err != nil {
 				return "", err
 			}
@@ -367,7 +379,8 @@ func (w checkpointWait) run(ctx context.Context) (string, error) {
 				base = c
 			}
 		}
-		if base.started > base.ended {
+		if ahead(base) {
+			*w.offset = base.started - base.ended
 			say(fmt.Sprintf("checkpoint counters %d started, %d ended for %s: taken as an offset", base.started, base.ended, w.running))
 		}
 	}

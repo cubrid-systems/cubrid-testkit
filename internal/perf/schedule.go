@@ -113,7 +113,11 @@ func caseBound(c *Case) time.Duration {
 const deferCheckpointAllowance = time.Minute
 
 func remeasureBound(c *Case) time.Duration {
-	return time.Duration(remeasurePairs*2) * (time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second)
+	per := time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second
+	if c.Background == "defer" {
+		per += deferCheckpointAllowance
+	}
+	return time.Duration(remeasurePairs*2) * per
 }
 
 // pairBound is one pair's upper bound: the clusters it stands up (r, tc, t,

@@ -86,15 +86,11 @@ type paramValue struct {
 
 // section is the section two builds compare a parameter in: the server's
 // when both print it there, else the client's when both do there (11.4's
-// server section has the client-only parameters too, at the server's
-// value, not the client's), else each build's own, the server's first.
+// server section has the client-only parameters too, at their defaults: the
+// server skips them when it loads cubrid.conf), else each build's own, the
+// server's first, the scope then "<target's>/<reference's>" when the two
+// differ.
 func section(t, r paramValue) (scope, tv, rv string) {
-	own := func(v paramValue) (string, string) {
-		if v.inServer {
-			return "server", v.server
-		}
-		return "client", v.client
-	}
 	switch {
 	case t.inServer && r.inServer:
 		return "server", t.server, r.server
@@ -102,8 +98,19 @@ func section(t, r paramValue) (scope, tv, rv string) {
 		return "client", t.client, r.client
 	}
 	scope, tv = own(t)
-	_, rv = own(r)
+	rs, rv := own(r)
+	if rs != scope {
+		scope += "/" + rs
+	}
 	return scope, tv, rv
+}
+
+// own is a parameter's section and value in one build, the server's first.
+func own(v paramValue) (scope, value string) {
+	if v.inServer {
+		return "server", v.server
+	}
+	return "client", v.client
 }
 
 // instanceParams are set from the node or the start time, not the build:
@@ -212,16 +219,20 @@ func (d *paramDiffs) add(conf string, target, reference map[string]paramValue) b
 		}
 		t, tok := target[n]
 		r, rok := reference[n]
-		scope, tv, rv := section(t, r)
-		if tok && rok && tv == rv {
-			continue
+		var scope, tv, rv string
+		switch {
+		case tok && rok:
+			if scope, tv, rv = section(t, r); tv == rv {
+				continue
+			}
+		case tok:
+			scope, tv = own(t)
+		default:
+			scope, rv = own(r)
 		}
 		e := d.find(n, tv, tok, rv, rok)
 		if e == nil {
 			e = &ParamDiff{Name: n, Scope: scope}
-			if !tok {
-				e.Scope, _, _ = section(r, t)
-			}
 			if tok {
 				e.Target = &tv
 			}

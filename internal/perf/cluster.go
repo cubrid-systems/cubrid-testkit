@@ -54,6 +54,9 @@ type Side struct {
 	// they could not be read.
 	params      map[string]paramValue
 	paramsTried bool
+	// ckptOffset is the started-minus-ended checkpoint count a wait found
+	// lasting on a database's server, until that server starts again.
+	ckptOffset map[string]int64
 }
 
 // Pinning says how the server and the client were kept apart: cpuset when the
@@ -404,6 +407,7 @@ const jdbcJar = `jar=$(ls /opt/cubrid-ro/jdbc/cubrid_jdbc.jar /opt/cubrid-ro/jdb
 // timeout (csb T8; seen again on the hub in M0).
 func (r *Runner) serverStart(ctx context.Context, s *Side, db string) error {
 	s.startN[db]++
+	delete(s.ckptOffset, db)
 	log := fmt.Sprintf("%s/log/start-%s-%d.log", workPerf, db, s.startN[db])
 	script := fmt.Sprintf("cubrid server start %s > %s 2>&1; rc=$?; tail -3 %s; exit $rc", db, log, log)
 	res, err := r.exec(ctx, s.N1, script, 5*time.Minute)

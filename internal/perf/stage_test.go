@@ -107,4 +107,14 @@ func TestCheckSourcesWantsTheCdcProgramsSource(t *testing.T) {
 	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "cdc_extract.c") {
 		t.Errorf("want one error naming cdc_extract.c, got %v", errs)
 	}
+	// In another case's src/ is not enough: it is staged only when that case
+	// runs in the same cluster.
+	other := stageSuite(t, map[string]string{
+		"cases/cdc/extract_insert/src/cdc_extract.c": "int main (void) { return 0; }",
+		"cases/cdc/extract_update/case.json":         "{}",
+	})
+	errs = checkSources(other, []*Case{stageCase(other, "cdc.extract_insert", "cdc_ins"), stageCase(other, "cdc.extract_update", "cdc_upd")})
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "extract_update") {
+		t.Errorf("program in another case's src/: want one error for cdc.extract_update, got %v", errs)
+	}
 }

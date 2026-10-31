@@ -588,7 +588,9 @@ func checkSources(root string, cases []*Case) []error {
 		if c.Driver != "cdc-api" || c.CDC == nil {
 			continue
 		}
-		if _, ok := owner[c.CDC.Bin+".c"]; !ok {
+		// Its own src/ or scripts/common: another case's src/ is staged only
+		// when that case runs in the same cluster.
+		if o := owner[c.CDC.Bin+".c"]; o != "scripts/common" && o != c.ID {
 			errs = append(errs, fmt.Errorf("%s: client.bin %s has no %s.c in its src/ or in scripts/common", c.Dir, c.CDC.Bin, c.CDC.Bin))
 		}
 	}

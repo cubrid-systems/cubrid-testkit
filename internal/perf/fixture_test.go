@@ -292,6 +292,18 @@ func TestVacuumPusherPushesOnAStallThatComesBackAfterProgress(t *testing.T) {
 	if late.want(held, 3*time.Second) {
 		t.Error("a stall with one read left: pushed")
 	}
+	// An unreadable read between two of the same stall is not progress.
+	var blind vacuumPusher
+	seq := append([]vacuumCounts{}, held...)
+	if !blind.want(seq, room) {
+		t.Fatal("first stall: no push")
+	}
+	blind.pushed()
+	for _, r := range []vacuumCounts{{}, v(5000, 4968), v(5000, 4968)} {
+		if seq = append(seq, r); blind.want(seq, room) {
+			t.Error("the same stall after an unreadable read: pushed again")
+		}
+	}
 }
 
 // The checkpoint before a defer case's window is done only when one started

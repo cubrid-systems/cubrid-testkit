@@ -74,6 +74,9 @@ func (r *Runner) buildFixture(ctx context.Context, s *Side, f *Fixture) error {
 	// the loader's vacuum backlog or dirty pages: both would be paid inside
 	// the first passes, and only on the side that happened to get them.
 	if note, err := r.waitVacuum(ctx, s, db, 10*time.Minute); err != nil {
+		if note != "" {
+			return fmt.Errorf("%s: vacuum after load (%s): %w", s.Role, note, err)
+		}
 		return fmt.Errorf("%s: vacuum after load: %w", s.Role, err)
 	} else if note != "" {
 		r.logf("%s: %s", s.Role, note)
@@ -232,11 +235,11 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 		res, err := r.exec(ctx, s.N1, fmt.Sprintf("bash %s/scripts/statdump_window.sh status %s >/dev/null 2>&1 && echo watcher=up; "+
 			"cubrid statdump %s 2>/dev/null | grep -E '^Num_vacuum_log_pages_(to_vacuum|vacuumed) '", workPerf, db, db), time.Minute)
 		if err != nil {
-			return "", err
+			return strings.Join(notes, "; "), err
 		}
 		if !strings.Contains(res.Stdout, "watcher=up") {
 			if err := r.watcherStart(ctx, s, db); err != nil {
-				return "", err
+				return strings.Join(notes, "; "), err
 			}
 			// What was counted before is not comparable with what comes now.
 			reads, rearmed = nil, true
@@ -252,7 +255,7 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 				behind := reads[len(reads)-1].backlog()
 				if err := r.mustExec(ctx, s, "vacuum push", vacuumPush(db), time.Minute); err != nil {
 					if ctx.Err() != nil {
-						return "", err
+						return strings.Join(notes, "; "), err
 					}
 					notes = append(notes, "vacuum push failed: "+err.Error())
 				} else {
@@ -277,7 +280,7 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 		}
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return strings.Join(notes, "; "), ctx.Err()
 		case <-time.After(vacuumPoll):
 		}
 	}
@@ -301,7 +304,7 @@ type vacuumPusher struct {
 }
 
 func (p *vacuumPusher) want(reads []vacuumCounts, left time.Duration) bool {
-	if n := len(reads); n >= 2 && reads[n-1] != reads[n-2] {
+	if n := len(reads); n >= 2 && reads[n-1].ok && reads[n-2].ok && reads[n-1] != reads[n-2] {
 		p.moved = true
 	}
 	return p.pushes < maxVacuumPushes && (p.pushes == 0 || p.moved) && left > 2*vacuumPoll && vacuumStalled(reads)

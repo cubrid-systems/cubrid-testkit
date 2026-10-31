@@ -159,9 +159,9 @@ func countSelected(s *Suite, b Branch) int {
 }
 
 // list prints what the session would consider: one line per case, with the
-// pass budget and the case's bound, which the session's case gate checks --
-// for
-// the conf's interleave mode, or case mode when there is only a suite. A
+// pass budget and its passes at that budget (the case gate adds warm-up,
+// slack and the fixture switch) -- for the conf's interleave mode, or case
+// mode when there is only a suite. A
 // case that could not be read is reported after the table, and the exit says
 // so.
 func list(args []string, stdout, stderr io.Writer) int {

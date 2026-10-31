@@ -53,8 +53,8 @@ runner does not lean on it.
 `testkit perf validate <case-dir|fixture-dir|suite-dir|branches.conf|perf.conf>` reads a file with
 the session's own parser and names every problem, exit 2 when there is one. A conf is validated
 with what it points at: the suite, the registrations, and that each canary is a case the suite has.
-`testkit perf list -c <perf.conf> | --suite <dir>` prints the cases with the pass budget and each
-case's bound. The session gates a pair on an estimate -- the pair's newest earlier time that ran
+`testkit perf list -c <perf.conf> | --suite <dir>` prints the cases with the pass budget and their
+passes at that budget (MAX_S; the case gate adds warm-up, slack and the fixture switch). The session gates a pair on an estimate -- the pair's newest earlier time that ran
 cases, per case, scaled to its cases and sides now, times 1.5, between the setup part of its bound
 and the bound (the bound when there is no time) -- and each conf group and case on its bound.
 

@@ -307,10 +307,11 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			continue
 		}
 		p.selected = selectCases(suite, p.branch, s.Only)
-		// FR-2: against the newest earlier session that measured this pair.
+		// The pair gate's estimate: the newest earlier time it ran cases in.
 		if tp, id := timedPair(s.runs, s.SessionID, p.Name); tp != nil {
 			p.earlier = timeOf(tp, "session "+id)
 		}
+		// FR-2: against the newest earlier session that measured this pair.
 		if pp, id := previousPair(s.runs, s.SessionID, p.Name); pp != nil {
 			if s.doc.Previous == "" {
 				s.doc.Previous = id
@@ -546,6 +547,9 @@ func (s *Session) plan(canaries []*Case) {
 			names = append(names, fmt.Sprintf("[%s]", strings.Join(in, " ")))
 		}
 		est, from := p.estimate(canaries, order, nil)
+		if p.earlier == nil && len(order) > 0 {
+			from += ", until a pair of this session has run"
+		}
 		s.logf("pair %s: %d case(s) in %d conf group(s), estimate %s (%s): %s", p.Name, len(order), len(confGroups(order)), est.Round(time.Minute), from, strings.Join(names, " "))
 	}
 }
@@ -810,7 +814,7 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		// The group's clusters and fixtures come before its first case's
 		// gate: with the pair started on an estimate, not its bound, they
 		// are checked here, with that case.
-		if need := groupSetupBound(g, pairSides(p.Overlap != nil)) + caseBound(g.Cases[0]); !s.Clock.fits(time.Now(), need) {
+		if need := groupSetupBound(byKey[g.Key], pairSides(p.Overlap != nil)) + caseBound(g.Cases[0]); !s.Clock.fits(time.Now(), need) {
 			s.note("pair %s: %s left, conf group %q needs %s to stand up and run its first case; the rest is skipped (FR-5)", p.Name, s.Clock.left(time.Now()).Round(time.Minute), confLabel(g.Key), need.Round(time.Minute))
 			stop = "budget"
 			skipGroup(g, stop)

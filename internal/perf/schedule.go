@@ -163,10 +163,11 @@ func pairSetupBound(canaries, cases []*Case, overlap bool) time.Duration {
 }
 
 // groupSetupBound is what a conf group costs before its first case: its
-// clusters and their fixtures. The session checks it with the group's first
-// case before standing the group up; the case gate starts only after.
-func groupSetupBound(g confGroup, sides int) time.Duration {
-	return time.Duration(sides) * (clusterCreateBound + time.Duration(len(fixturesOf(g.Cases)))*fixtureBound)
+// clusters and the fixtures of every case they are made for (canaries of the
+// same conf too). The session checks it with the group's first case before
+// standing the group up; the case gate starts only after.
+func groupSetupBound(cases []*Case, sides int) time.Duration {
+	return time.Duration(sides) * (clusterCreateBound + time.Duration(len(fixturesOf(cases)))*fixtureBound)
 }
 
 // pairTime is a time a pair took, for the estimate: the seconds, the cases
@@ -208,14 +209,15 @@ func pairEstimate(canaries, cases []*Case, overlap bool, t *pairTime) (time.Dura
 	}
 	sides := pairSides(overlap)
 	secs := float64(t.seconds) / float64(t.cases) * float64(len(cases)) * float64(sides-1) / float64(t.sides-1) * pairEstimateMargin
-	floor := pairSetupBound(canaries, cases, overlap).Seconds()
-	if secs < floor {
-		secs = floor
+	floored := ""
+	if floor := pairSetupBound(canaries, cases, overlap); secs < floor.Seconds() {
+		secs = floor.Seconds()
+		floored = fmt.Sprintf("; raised to the setup part of the bound, %s", floor.Round(time.Minute))
 	}
 	if secs >= bound.Seconds() {
 		return bound, fmt.Sprintf("the bound: %d s for %d case(s) (%s) scales to %.1f h", t.seconds, t.cases, t.from, secs/3600)
 	}
-	return time.Duration(secs) * time.Second, fmt.Sprintf("%d s for %d case(s) (%s), scaled to %d, times %.1f; bound %s", t.seconds, t.cases, t.from, len(cases), pairEstimateMargin, bound.Round(time.Minute))
+	return time.Duration(secs) * time.Second, fmt.Sprintf("%d s for %d case(s) (%s), scaled to %d, times %.1f%s; bound %s", t.seconds, t.cases, t.from, len(cases), pairEstimateMargin, floored, bound.Round(time.Minute))
 }
 
 // estimate is pairEstimate for this pair's cases from its own earlier time,

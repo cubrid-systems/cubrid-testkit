@@ -567,7 +567,7 @@ func TestPairEstimate(t *testing.T) {
 		{"no time", cases, false, nil, bound, "no earlier time"},
 		{"no case", nil, false, week, pairBound(canaries, nil, false), "no case selected"},
 		{"above the bound", cases, false, &pairTime{seconds: 7550, cases: 1, sides: 2}, bound, "the bound: 7550 s"},
-		{"the setup floor", cases, false, &pairTime{seconds: 60, cases: 16, sides: 2}, pairSetupBound(canaries, cases, false), "scaled to 37"},
+		{"the setup floor", cases, false, &pairTime{seconds: 60, cases: 16, sides: 2}, pairSetupBound(canaries, cases, false), "raised to the setup part"},
 		{"an overlap now, none before", cases, true, week, scaled(7550.0 / 16 * 37 * 2 * pairEstimateMargin), "scaled to 37"},
 		{"an overlap before, none now", cases, false, &pairTime{seconds: 7550, cases: 16, sides: 3}, scaled(7550.0 / 16 * 37 / 2 * pairEstimateMargin), "scaled to 37"},
 	} {

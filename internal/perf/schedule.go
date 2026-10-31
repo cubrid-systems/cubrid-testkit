@@ -1,6 +1,7 @@
 package perf
 
 import (
+	"fmt"
 	"math/rand"
 	"path"
 	"sort"
@@ -149,6 +150,33 @@ func pairBound(canaries, cases []*Case, overlap bool) time.Duration {
 	}
 	return d
 }
+
+// pairEstimate is what a pair is expected to take, for the gate before it
+// starts: the previous session's time for the pair, per case that ran there,
+// times the cases now and pairEstimateMargin, at most the bound. With no
+// previous time it is the bound. The bound has every pass run to its budget
+// and is several times the real time: the pairs of 16 cases took 2.1 h on
+// 2026-10-31, and the bound of the 37-case pairs after it is 47 h, which put
+// the second pair past the Monday deadline. The case gate (caseBound) still
+// stops a session that runs late, case by case.
+func pairEstimate(bound time.Duration, previous *SessionPair, cases int) (time.Duration, string) {
+	if previous == nil || previous.Seconds <= 0 || cases == 0 {
+		return bound, "the bound: no earlier time"
+	}
+	ran := previous.CasesRun + previous.CasesNull
+	if ran <= 0 {
+		return bound, "the bound: the earlier pair ran no case"
+	}
+	est := time.Duration(float64(previous.Seconds)*float64(cases)/float64(ran)*pairEstimateMargin) * time.Second
+	if est >= bound {
+		return bound, "the bound, below the earlier time scaled"
+	}
+	return est, fmt.Sprintf("%d s for %d case(s) earlier, scaled to %d, times %.1f; bound %s", previous.Seconds, ran, cases, pairEstimateMargin, bound.Round(time.Minute))
+}
+
+// pairEstimateMargin covers cases slower than the earlier ones on average,
+// such as a batch of new ones that reload a fixture every pass.
+const pairEstimateMargin = 1.5
 
 func fixturesOf(cases []*Case) []string {
 	seen := map[string]bool{}

@@ -309,6 +309,7 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		p.selected = selectCases(suite, p.branch, s.Only)
 		// FR-2: against the newest earlier session that measured this pair.
 		if pp, id := previousPair(s.runs, s.SessionID, p.Name); pp != nil {
+			p.previous = pp
 			if s.doc.Previous == "" {
 				s.doc.Previous = id
 			}
@@ -409,9 +410,9 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			p.Skipped = reason
 			continue
 		}
-		if bound := pairBound(canaries, p.selected, p.Overlap != nil); !s.Clock.fits(time.Now(), bound) {
+		if est, from := pairEstimate(pairBound(canaries, p.selected, p.Overlap != nil), p.previous, len(p.selected)); !s.Clock.fits(time.Now(), est) {
 			p.Skipped = "budget"
-			s.logf("pair %s: skipped, %s left and the pair's bound is %s", p.Name, s.Clock.left(time.Now()).Round(time.Minute), bound.Round(time.Minute))
+			s.logf("pair %s: skipped, %s left and the pair's estimate is %s (%s)", p.Name, s.Clock.left(time.Now()).Round(time.Minute), est.Round(time.Minute), from)
 			continue
 		}
 		attempted++
@@ -535,7 +536,8 @@ func (s *Session) plan(canaries []*Case) {
 			}
 			names = append(names, fmt.Sprintf("[%s]", strings.Join(in, " ")))
 		}
-		s.logf("pair %s: %d case(s) in %d conf group(s), bound %s: %s", p.Name, len(order), len(confGroups(order)), pairBound(canaries, order, p.Overlap != nil).Round(time.Minute), strings.Join(names, " "))
+		est, from := pairEstimate(pairBound(canaries, order, p.Overlap != nil), p.previous, len(order))
+		s.logf("pair %s: %d case(s) in %d conf group(s), estimate %s (%s): %s", p.Name, len(order), len(confGroups(order)), est.Round(time.Minute), from, strings.Join(names, " "))
 	}
 }
 

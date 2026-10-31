@@ -538,3 +538,28 @@ func TestSessionExitCodes(t *testing.T) {
 		t.Error("pairRan reads written and Skipped together")
 	}
 }
+
+// The pair gate's estimate: the earlier time per case that ran, scaled and
+// with the margin, never above the bound; the bound without an earlier time.
+func TestPairEstimateScalesTheEarlierTime(t *testing.T) {
+	bound := 47 * time.Hour
+	prev := &SessionPair{Seconds: 7550, CasesRun: 16}
+	est, _ := pairEstimate(bound, prev, 37)
+	secs := 7550.0 * 37 / 16 * 1.5
+	if want := time.Duration(secs) * time.Second; est != want {
+		t.Errorf("16 cases in 7550 s, 37 now: %s, want %s", est, want)
+	}
+	if est, from := pairEstimate(bound, nil, 37); est != bound || !strings.Contains(from, "no earlier time") {
+		t.Errorf("no earlier pair: %s (%s)", est, from)
+	}
+	if est, _ := pairEstimate(bound, &SessionPair{Seconds: 7550}, 37); est != bound {
+		t.Errorf("earlier pair ran nothing: %s", est)
+	}
+	if est, _ := pairEstimate(time.Hour, prev, 37); est != time.Hour {
+		t.Errorf("scaled time above the bound: %s", est)
+	}
+	nulls := &SessionPair{Seconds: 7550, CasesRun: 12, CasesNull: 4}
+	if a, b := pairEstimate(bound, nulls, 37); a != est {
+		t.Errorf("null cases ran too: %s (%s), want %s", a, b, est)
+	}
+}

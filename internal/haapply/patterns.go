@@ -46,6 +46,12 @@ func parentChild(p, action string) string {
 func tz0(r int) string { return fmt.Sprintf("'2020-01-01 00:%02d:%02d +00:00'", r/60, r%60) }
 func tz9(r int) string { return fmt.Sprintf("'2020-01-01 09:%02d:%02d +09:00'", r/60, r%60) }
 
+// vb17 and vb24 are one VARBIT key per round: the round in 16 bits and a 1,
+// then the same with seven zeros, which the index, comparing whole bytes,
+// holds equal.
+func vb17(r int) string { return fmt.Sprintf("B'%016b1'", r) }
+func vb24(r int) string { return fmt.Sprintf("B'%016b10000000'", r) }
+
 // Catalog is every pattern, in the order a run takes them: the control first,
 // then the keys the index holds equal while the writeset might not, then the
 // prototype's integer-key patterns.
@@ -155,6 +161,91 @@ var Catalog = []Pattern{
 			return Round{
 				T1: fmt.Sprintf("INSERT INTO parent_%s VALUES ('Key%d');", p, r),
 				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, 'Key%d ');", p, r, r),
+			}
+		}},
+	// The index compares a MONETARY amount without its currency, a VARBIT in
+	// whole bytes and a NUL in a string as a space, and holds a DOUBLE NaN equal
+	// to every key; #8052 eb31453ff hashes the first three the same way and
+	// sends a NaN's transaction to commit order.
+	{Name: "mon_cur", Shares: "MONETARY UNIQUE: $ and \\ for one amount",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE t_%s (id INT PRIMARY KEY, m MONETARY UNIQUE);", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				Pre: fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2, $%d);", p, r, r),
+				T1:  fmt.Sprintf("DELETE FROM t_%s WHERE id = %d * 2;", p, r),
+				T2:  fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2 + 1, \\%d);", p, r, r),
+			}
+		}},
+	{Name: "vb_len", Shares: "VARBIT UNIQUE: 17 bits and the same padded to 24",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE t_%s (id INT PRIMARY KEY, b BIT VARYING(32) UNIQUE);", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				Pre: fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2, %s);", p, r, vb17(r)),
+				T1:  fmt.Sprintf("DELETE FROM t_%s WHERE id = %d * 2;", p, r),
+				T2:  fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2 + 1, %s);", p, r, vb24(r)),
+			}
+		}},
+	{Name: "str_nul", Shares: "VARCHAR UNIQUE: a NUL and a space",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE t_%s (id INT PRIMARY KEY, s VARCHAR(20) UNIQUE);", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				Pre: fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2, 'Key' || CHR(0) || '%d');", p, r, r),
+				T1:  fmt.Sprintf("DELETE FROM t_%s WHERE id = %d * 2;", p, r),
+				T2:  fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2 + 1, 'Key %d');", p, r, r),
+			}
+		}},
+	// A NaN is one key with every other, so the table holds one row at a time.
+	{Name: "dbl_nan", Shares: "DOUBLE UNIQUE: NaN, then any value",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE t_%s (id INT PRIMARY KEY, d DOUBLE UNIQUE);", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				Pre: fmt.Sprintf("DELETE FROM t_%[1]s; INSERT INTO t_%[1]s VALUES (%[2]d * 2, CAST('NaN' AS DOUBLE));", p, r),
+				T1:  fmt.Sprintf("DELETE FROM t_%s WHERE id = %d * 2;", p, r),
+				T2:  fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2 + 1, %d);", p, r, r),
+			}
+		}},
+	{Name: "fk_mon_cur", Shares: "FK MONETARY: parent $, child \\",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE parent_%[1]s (m MONETARY PRIMARY KEY); "+
+				"CREATE TABLE child_%[1]s (c INT PRIMARY KEY, m MONETARY, "+
+				"CONSTRAINT fk_%[1]s FOREIGN KEY (m) REFERENCES parent_%[1]s (m));", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				T1: fmt.Sprintf("INSERT INTO parent_%s VALUES ($%d);", p, r),
+				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, \\%d);", p, r, r),
+			}
+		}},
+	{Name: "fk_vb_len", Shares: "FK VARBIT: parent 17 bits, child padded to 24",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE parent_%[1]s (b BIT VARYING(32) PRIMARY KEY); "+
+				"CREATE TABLE child_%[1]s (c INT PRIMARY KEY, b BIT VARYING(32), "+
+				"CONSTRAINT fk_%[1]s FOREIGN KEY (b) REFERENCES parent_%[1]s (b));", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				T1: fmt.Sprintf("INSERT INTO parent_%s VALUES (%s);", p, vb17(r)),
+				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, %s);", p, r, vb24(r)),
+			}
+		}},
+	{Name: "fk_str_nul", Shares: "FK VARCHAR: parent with a NUL, child with a space",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE parent_%[1]s (s VARCHAR(20) PRIMARY KEY); "+
+				"CREATE TABLE child_%[1]s (c INT PRIMARY KEY, s VARCHAR(20), "+
+				"CONSTRAINT fk_%[1]s FOREIGN KEY (s) REFERENCES parent_%[1]s (s));", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				T1: fmt.Sprintf("INSERT INTO parent_%s VALUES ('Key' || CHR(0) || '%d');", p, r),
+				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, 'Key %d');", p, r, r),
 			}
 		}},
 

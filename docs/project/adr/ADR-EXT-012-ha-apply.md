@@ -6,7 +6,8 @@
   21 개가 held 이고 `fk_ci`·`pk_move` 가 inconclusive 였다. 두 패턴은 50 라운드에서 held 였고,
   missed 는 없었다. M2(`stress`)도 구현됐고 §4 의 완료 조건을 충족했다 (2026-10-30,
   `docs/project/evidence/ha/ha-apply-stress-and-the-heap-only-row.md`). 뒤쪽 공백 조건도 충족했다
-  (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-trailing-space.md`). 셸 프로토타입은
+  (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-trailing-space.md`). `eb31453ff` 의 일곱도
+  충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-reduced-keys.md`). 셸 프로토타입은
   `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
 - **Date:** 2026-10-30
 - **Trigger:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), 구현 CBRD-27508 / CUBRID/cubrid #8052 —
@@ -125,6 +126,12 @@ held 였다.
 org JIRA 에서 `ignore_trailing_space` 옵션을 없애자는 논의가 있다(2026-11-01 기준, 이슈 번호는 적지
 않았다). 옵션이 없어지면 두 패턴과 쌍에 묻는 질의는 그때 다시 본다. 지금은 기록만 한다.
 
+#8052 `eb31453ff`(키를 인덱스가 비교하는 대로 줄여서 해시) 뒤에 일곱을 더해 33 개다: MONETARY 의
+통화(`$` 와 `\` 로 쓴 한 금액), VARBIT 의 비트 길이(17 비트와, 0 을 채운 24 비트), 문자열 안의 NUL 과
+공백, 그 셋의 FK 짝, 그리고 DOUBLE 의 NaN 이다. 파라미터 없이도 마스터의 인덱스는 앞의 셋을 UNIQUE
+와 FK 에서 한 키로 본다. 인덱스는 NaN 을 모든 키와 같다고 보므로 `dbl_nan` 의 표는 한 번에 한 행만
+갖는다. 새 head 는 NaN 을 쓴 트랜잭션을 커밋 순서로 적용한다(fallback).
+
 ### 3-5. 클러스터
 
 - 기본은 명령이 쌍을 직접 세운다: `--preset ha --clients 1 --set-hidden ha_apply_worker_count=<N>`,
@@ -178,6 +185,7 @@ org JIRA 에서 `ignore_trailing_space` 옵션을 없애자는 논의가 있다(
   head 의 쌍에서 FK 를 뺀 연산(0–4, 9)의 실행이 same 이다. FK 연산은 #8026 이 없는 트리에서
   CBRD-27464 의 불일치를 낼 수 있으므로 이 조건에서 뺀다. 뒤쪽 공백 패턴 둘(§3-4)은
   `ignore_trailing_space` 를 켠 쌍에서 #8052 `61ee0944a` 가 missed, `17aae152e` 를 담은 `3fb54e549` 가 held 이다.
+  `eb31453ff` 의 일곱(§3-4)은 `3fb54e549` 가 missed, `eb31453ff` 를 담은 `fb1636c34` 가 held 이다.
 
 ## 5. 기각한 대안
 

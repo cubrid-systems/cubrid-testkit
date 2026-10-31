@@ -214,6 +214,7 @@ type RunSession struct {
 	Reference   BuildRef    `json:"reference"`
 	Cases       []string    `json:"cases"`
 	Clusters    []string    `json:"clusters"`
+	ParamDiff   []ParamDiff `json:"param_diff,omitempty"`
 	ExitReason  string      `json:"exit_reason"`
 	Notes       []string    `json:"notes,omitempty"`
 }

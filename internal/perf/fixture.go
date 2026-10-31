@@ -85,6 +85,9 @@ func (r *Runner) buildFixture(ctx context.Context, s *Side, f *Fixture) error {
 	if err := r.serverStart(ctx, s, db); err != nil {
 		return err
 	}
+	if !s.paramsTried {
+		r.recordParams(ctx, s, db)
+	}
 	return r.watcherStart(ctx, s, db)
 }
 

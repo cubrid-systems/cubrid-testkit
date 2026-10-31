@@ -671,7 +671,9 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		if err != nil {
 			return err
 		}
-		return s.buildFixtures(ctx, side, s.Suite, byKey[key])
+		err = s.buildFixtures(ctx, side, s.Suite, byKey[key])
+		keepParams(side, dir)
+		return err
 	}
 
 	// Canaries: both clusters stood up on the reference build, an A/A across
@@ -773,6 +775,7 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 	// what was judged before stays on record.
 	order := shuffled(p.selected, seedFrom(s.SessionID+"/"+p.Name))
 	var entries, overlapEntries []CaseEntry
+	var params paramDiffs
 	verdicts, overlapVerdicts := map[string]Verdict{}, map[string]Verdict{}
 	broken := ""
 	skipGroup := func(g confGroup, why string) {
@@ -809,6 +812,8 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 			skipGroup(g, firstNonEmptyStr(stop, broken))
 			continue
 		}
+		params.add(g.Key, ss.t.params, ss.r.params)
+		p.ParamDiff = params.list()
 		res, st := s.runGroup(ctx, p, g.Cases, ss.t, ss.r, []*Side{ss.o}, pairDir, false)
 		for _, cr := range res {
 			entries = append(entries, cr.entry)

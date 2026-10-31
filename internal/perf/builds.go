@@ -88,6 +88,7 @@ type SessionPair struct {
 	Seconds            int            `json:"seconds"`
 	Skipped            string         `json:"skipped,omitempty"`
 	Clusters           []string       `json:"clusters,omitempty"`
+	ParamDiff          []ParamDiff    `json:"param_diff,omitempty"`
 
 	branch         *Branch     // nil for a pair perf.conf names
 	selected       []*Case     // the cases this pair runs A/B

@@ -1,11 +1,13 @@
 package perf
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A restore replaces the database directory's contents and keeps the
@@ -244,5 +246,112 @@ func TestCheckpointDoneWaitsForTheOneAskedFor(t *testing.T) {
 	}
 	if missing := parseCheckpointCounts("Num_log_start_checkpoints     =         42\n"); missing.ok || checkpointDone(before, missing) {
 		t.Error("one statistic missing: ok or done")
+	}
+	// The counters apart for good: deltas decide, not the counts.
+	if !checkpointDone(read(45, 41), read(46, 42)) {
+		t.Error("started ahead by a lasting offset, one more started and ended: not done")
+	}
+	if checkpointDone(read(41, 44), read(42, 44)) {
+		t.Error("ended ahead by a lasting offset, the new one not ended: done")
+	}
+}
+
+// checkpointScript plays checkpointWait against scripted reads on a fake
+// clock: each read returns the next reading (the last one repeats), and
+// sleeping moves the clock.
+type checkpointScript struct {
+	t        time.Time
+	readings []checkpointReading
+	reads    int
+	asks     []time.Time
+	rearms   int
+}
+
+type checkpointReading struct {
+	started, ended int64
+	down, bad      bool
+}
+
+func (s *checkpointScript) wait(bound time.Duration) checkpointWait {
+	return checkpointWait{
+		read: func() (checkpointCounts, bool, error) {
+			r := s.readings[min(s.reads, len(s.readings)-1)]
+			s.reads++
+			return checkpointCounts{started: r.started, ended: r.ended, ok: !r.bad}, !r.down, nil
+		},
+		ask:   func() error { s.asks = append(s.asks, s.t); return nil },
+		rearm: func() error { s.rearms++; return nil },
+		bound: bound, poll: time.Second, reask: 5 * time.Second, running: 2 * time.Minute, unreadable: 10,
+		now:   func() time.Time { return s.t },
+		sleep: func(ctx context.Context, d time.Duration) error { s.t = s.t.Add(d); return ctx.Err() },
+	}
+}
+
+func TestCheckpointWaitCases(t *testing.T) {
+	r := func(started, ended int64) checkpointReading { return checkpointReading{started: started, ended: ended} }
+	run := func(bound time.Duration, rs ...checkpointReading) (*checkpointScript, string) {
+		t.Helper()
+		s := &checkpointScript{t: time.Unix(0, 0), readings: rs}
+		note, err := s.wait(bound).run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s, note
+	}
+	// The usual: asked once, done when it ended.
+	if s, note := run(time.Minute, r(41, 41), r(42, 41), r(42, 42)); note != "" || len(s.asks) != 1 || s.reads != 3 {
+		t.Errorf("usual: note %q, asks %d, reads %d", note, len(s.asks), s.reads)
+	}
+	// One running at the baseline: waited out, then asked; its end is not
+	// the one asked for.
+	if s, note := run(time.Minute, r(42, 41), r(42, 41), r(42, 42), r(43, 42), r(43, 43)); note != "" || len(s.asks) != 1 || !s.asks[0].Equal(time.Unix(2, 0)) {
+		t.Errorf("running at the baseline: note %q, asks %v", note, s.asks)
+	}
+	// The request dropped: asked again after reask, done on the second.
+	rs := []checkpointReading{r(41, 41)}
+	for i := 0; i < 6; i++ {
+		rs = append(rs, r(41, 41))
+	}
+	if s, note := run(time.Minute, append(rs, r(42, 42))...); note != "" || len(s.asks) != 2 {
+		t.Errorf("dropped request: note %q, asks %v", note, s.asks)
+	}
+	// A lasting start offset: noted after running, then waited by deltas.
+	rs = []checkpointReading{}
+	for i := 0; i < 125; i++ {
+		rs = append(rs, r(45, 41))
+	}
+	if s, note := run(5*time.Minute, append(rs, r(46, 41), r(46, 42))...); !strings.Contains(note, "taken as an offset") || len(s.asks) != 1 {
+		t.Errorf("start offset: note %q, asks %d", note, len(s.asks))
+	}
+	// The watcher down mid-wait: re-armed, baseline and request again.
+	if s, note := run(time.Minute, r(41, 41), checkpointReading{started: 41, ended: 41, down: true}, r(41, 41), r(42, 42)); !strings.Contains(note, "re-armed") || s.rearms != 1 || len(s.asks) != 2 {
+		t.Errorf("watcher down: note %q, rearms %d, asks %d", note, s.rearms, len(s.asks))
+	}
+	// Counters that never move: bounded, re-asked every reask but not in
+	// the last poll before the bound.
+	s, note := run(30*time.Second, r(41, 41))
+	if !strings.Contains(note, "had not ended after 30s") || len(s.asks) < 2 {
+		t.Errorf("frozen: note %q, asks %d", note, len(s.asks))
+	}
+	if last := s.asks[len(s.asks)-1]; last.After(time.Unix(29, 0)) {
+		t.Errorf("frozen: asked at %v, inside the last poll", last.Sub(time.Unix(0, 0)))
+	}
+	// A watcher that cannot be re-armed: asked for, not waited for, said once.
+	bad := &checkpointScript{t: time.Unix(0, 0), readings: []checkpointReading{{started: 41, ended: 41, down: true}}}
+	w := bad.wait(time.Minute)
+	w.rearm = func() error { bad.rearms++; return fmt.Errorf("no watcher") }
+	if note, err := w.run(context.Background()); err != nil || len(bad.asks) != 1 || strings.Count(note, "not re-armed") != 1 || !strings.Contains(note, "not waited for") {
+		t.Errorf("not re-armed: note %q, err %v, asks %d", note, err, len(bad.asks))
+	}
+	// Unreadable: stopped after ten in a row.
+	if s, note := run(time.Hour, r(41, 41), checkpointReading{bad: true}); !strings.Contains(note, "unreadable 10 times") || s.reads != 11 {
+		t.Errorf("unreadable: note %q, reads %d", note, s.reads)
+	}
+	// Cancelled: the context's error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cs := &checkpointScript{t: time.Unix(0, 0), readings: []checkpointReading{r(41, 41)}}
+	if _, err := cs.wait(time.Minute).run(ctx); err == nil {
+		t.Error("cancelled: no error")
 	}
 }

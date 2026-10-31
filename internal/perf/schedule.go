@@ -94,11 +94,23 @@ const (
 
 // caseBound is one case's upper bound: every pass to its budget plus the
 // warming and the exec slack (client.go gives the node 60 s more), and the
-// fixture switch before it.
+// fixture switch before it. A defer case's checkpoint before the window gets
+// deferCheckpointAllowance a pass, its usual cost with room, not its 10 min
+// bound: that bound on every pass would put most pairs past the session's
+// budget. pass() logs what each one took.
 func caseBound(c *Case) time.Duration {
 	passes := (c.Warmup + c.Repeats) * 2
-	return time.Duration(passes)*(time.Duration(c.BudgetS+c.WarmS)*time.Second+60*time.Second) + fixtureSwitchBound
+	per := time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second
+	if c.Background == "defer" {
+		per += deferCheckpointAllowance
+	}
+	return time.Duration(passes)*per + fixtureSwitchBound
 }
+
+// deferCheckpointAllowance is a defer case's checkpoint wait with room: a
+// checkpoint writes about 1,000 pages a second (checkpoint_sleep_msecs), so
+// a minute covers 60,000 dirty pages.
+const deferCheckpointAllowance = time.Minute
 
 func remeasureBound(c *Case) time.Duration {
 	return time.Duration(remeasurePairs*2) * (time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second)

@@ -5,7 +5,8 @@
   `docs/project/evidence/ha/ha-apply-gives-the-prototypes-verdicts.md`). 새 head 의 한 실행에서는
   21 개가 held 이고 `fk_ci`·`pk_move` 가 inconclusive 였다. 두 패턴은 50 라운드에서 held 였고,
   missed 는 없었다. M2(`stress`)도 구현됐고 §4 의 완료 조건을 충족했다 (2026-10-30,
-  `docs/project/evidence/ha/ha-apply-stress-and-the-heap-only-row.md`). 셸 프로토타입은
+  `docs/project/evidence/ha/ha-apply-stress-and-the-heap-only-row.md`). 뒤쪽 공백 조건도 충족했다
+  (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-trailing-space.md`). 셸 프로토타입은
   `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
 - **Date:** 2026-10-30
 - **Trigger:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), 구현 CBRD-27508 / CUBRID/cubrid #8052 —
@@ -108,6 +109,19 @@ PK·UNIQUE·REVERSE UNIQUE·FK(단일·복합·CASCADE)·savepoint·DDL·파티�
 (-0.0, TIMESTAMPTZ·DATETIMETZ 시간대, `utf8_en_ci`, 상속, 그 FK 짝). 케이스 파일 형식을 새로
 만들지 않는다 — HA 에는 새 케이스 언어가 필요 없다는 `module-ha.md` 의 결론을 따른다.
 
+#8052 `17aae152e`(인덱스가 무시하는 문자열 키의 뒤쪽 공백) 뒤에 둘을 더해 26 개다: VARCHAR 의 UNIQUE 와
+FK 에서 `'Key'` 와 `'Key '`. 이 둘은 `ignore_trailing_space` 를 켠 쌍에서만 한 키이고, 다른 쌍에서는 T2
+가 먼저 가도 옳으므로 missed 로 읽힌다. 그래서 `pairs` 는 두 노드에
+`CAST('k' AS VARCHAR(4)) = CAST('k ' AS VARCHAR(4))` 를 물어, 뒤쪽 공백을 무시하지 않는 쌍에서는 전체
+목록에서 둘을 빼고 그렇다고 말하며, 이름으로 고르면 측정 전에 거부한다.
+두 노드의 답이 다르면 실행의 실패다. conf 를 읽지 않고 비교를 묻는 것은, 이 파라미터를
+`cubrid_ha.conf` 에 쓰면 엔진이 읽지 않기 때문이다(엔진은 그 파일에서 HA 파라미터만 읽는다. csb 의
+`--set-hidden` 이 그 파일에 쓴다). 그런 쌍은 설치 트리의 `conf/cubrid.conf` 에 넣고 세우거나
+(csb 는 그 파일을 노드마다 복사한다. `--build` 의 쌍도 그렇게 그 값을 얻는다), 선 쌍의 노드마다
+`cubrid.conf` 에 넣고 서버를 다시 시작해 만든다. CHAR 의 같은 쌍은 패턴이 되지 못한다. CHAR 는
+쓰이기 전에 폭까지 공백이 채워져 `'Key'` 와 `'Key '` 가 어디서나 같은 바이트이고, 두 head 모두에서
+held 였다.
+
 ### 3-5. 클러스터
 
 - 기본은 명령이 쌍을 직접 세운다: `--preset ha --clients 1 --set-hidden ha_apply_worker_count=<N>`,
@@ -129,7 +143,8 @@ PK·UNIQUE·REVERSE UNIQUE·FK(단일·복합·CASCADE)·savepoint·DDL·파티�
   않은 횟수, 마스터가 거부한 횟수, 끝의 비교(`same`, `differ:<표>`, `stalled`), `fail_counter` 변화,
   writeset 카운터(write·ref 충돌, fallback, history clear), 판정.
 - 첫 줄에 클러스터, 빌드 식별자, 슬레이브의 `cubrid_ha.conf` 에서 다시 읽은
-  `ha_apply_worker_count` 와 `ha_writeset_history_size`, 라운드 수, ballast 행 수를 적는다.
+  `ha_apply_worker_count` 와 `ha_writeset_history_size`, 두 노드에 물은 `ignore_trailing_space`, 라운드
+  수, ballast 행 수를 적는다.
 - 행은 패턴이 끝날 때마다 쓴다. 대조군이 먼저 돌므로 이미 쓴 판정은 바뀌지 않는다.
 - 표준 출력에는 패턴마다 한 줄과 요약 한 줄을 쓴다.
 - `stress` 의 원장은 실행 하나에 한 행이다: seed, 마스터 오류 수, writeset 카운터, `fail_counter`
@@ -158,7 +173,8 @@ PK·UNIQUE·REVERSE UNIQUE·FK(단일·복합·CASCADE)·savepoint·DDL·파티�
   프로토타입과 바이트 단위로 같은 SQL 을 만든다(golden 테스트). #8198 `6ce1c05d2` 의 쌍 ws98b 에 남은
   손상 상태(마스터 `s_child` 가 heap 9 행, PK 7 행)에서 `--compare-only` 가 damaged 를 낸다. #8052 새
   head 의 쌍에서 FK 를 뺀 연산(0–4, 9)의 실행이 same 이다. FK 연산은 #8026 이 없는 트리에서
-  CBRD-27464 의 불일치를 낼 수 있으므로 이 조건에서 뺀다.
+  CBRD-27464 의 불일치를 낼 수 있으므로 이 조건에서 뺀다. 뒤쪽 공백 패턴 둘(§3-4)은
+  `ignore_trailing_space` 를 켠 쌍에서 #8052 `61ee0944a` 가 missed, `17aae152e` 를 담은 `3fb54e549` 가 held 이다.
 
 ## 5. 기각한 대안
 

@@ -23,6 +23,10 @@ type Pattern struct {
 	// Round is the statements of round r: Pre is committed and replicated
 	// before the round, T1 follows the ballast, T2 the dependent operation.
 	Round func(p string, r int) Round
+	// TrailingSpace is a pattern whose keys are one key only on a pair that
+	// compares VARCHAR without trailing spaces (ignore_trailing_space); on
+	// another pair T2 may rightly go first.
+	TrailingSpace bool
 }
 
 // Round is one round's statements, each a list ending in a semicolon.
@@ -124,6 +128,33 @@ var Catalog = []Pattern{
 			return Round{
 				T1: fmt.Sprintf("INSERT INTO parent_%s VALUES ('Key%d');", p, r),
 				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, 'KEY%d');", p, r, r),
+			}
+		}},
+	// Under ignore_trailing_space the index compares VARCHAR without its
+	// trailing spaces, so a value and the same with one are one key there.
+	// CHAR has no such pair: it is padded to its width before it is written,
+	// and 'Key' and 'Key ' are the same bytes everywhere.
+	{Name: "vc_trail", Shares: "VARCHAR UNIQUE under ignore_trailing_space: 'Key' and 'Key '", TrailingSpace: true,
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE t_%s (id INT PRIMARY KEY, s VARCHAR(20) UNIQUE);", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				Pre: fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2, 'Key%d');", p, r, r),
+				T1:  fmt.Sprintf("DELETE FROM t_%s WHERE id = %d * 2;", p, r),
+				T2:  fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2 + 1, 'Key%d ');", p, r, r),
+			}
+		}},
+	{Name: "fk_vc_trail", Shares: "FK VARCHAR under ignore_trailing_space: parent 'Key', child 'Key '", TrailingSpace: true,
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE parent_%[1]s (s VARCHAR(20) PRIMARY KEY); "+
+				"CREATE TABLE child_%[1]s (c INT PRIMARY KEY, s VARCHAR(20), "+
+				"CONSTRAINT fk_%[1]s FOREIGN KEY (s) REFERENCES parent_%[1]s (s));", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				T1: fmt.Sprintf("INSERT INTO parent_%s VALUES ('Key%d');", p, r),
+				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, 'Key%d ');", p, r, r),
 			}
 		}},
 
@@ -317,6 +348,20 @@ func Select(names []string) ([]Pattern, error) {
 		}
 	}
 	return out, nil
+}
+
+// ForPair is the patterns that ask something on a pair that does or does not
+// compare VARCHAR without trailing spaces, and the names of the ones left out:
+// on a pair that keeps them, a trailing-space pattern's T2 may rightly go first.
+func ForPair(pats []Pattern, trailingSpace bool) (kept []Pattern, left []string) {
+	for _, p := range pats {
+		if p.TrailingSpace && !trailingSpace {
+			left = append(left, p.Name)
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept, left
 }
 
 func find(name string) *Pattern {

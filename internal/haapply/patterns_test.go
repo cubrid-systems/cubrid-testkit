@@ -32,8 +32,25 @@ func TestEveryPatternIsComplete(t *testing.T) {
 			}
 		}
 	}
-	if len(Catalog) != 24 {
-		t.Errorf("catalog has %d patterns, the prototype had 24", len(Catalog))
+	// The prototype's 24, and the VARCHAR trailing-space keys of #8052 17aae152e.
+	if len(Catalog) != 26 {
+		t.Errorf("catalog has %d patterns, want the prototype's 24 and 2 trailing-space ones", len(Catalog))
+	}
+}
+
+// A pattern whose keys are one only under ignore_trailing_space is left out
+// on a pair that keeps trailing spaces, and only there.
+func TestTrailingSpacePatternsRunOnlyWhereTheKeysAreOne(t *testing.T) {
+	all, _ := Select(nil)
+	kept, left := ForPair(all, false)
+	if len(kept) != len(all)-2 || strings.Join(left, ",") != "vc_trail,fk_vc_trail" {
+		t.Errorf("no trailing space: %d kept, left %v", len(kept), left)
+	}
+	if kept[0].Name != "ctl" {
+		t.Errorf("the control was not kept first: %s", kept[0].Name)
+	}
+	if kept, left := ForPair(all, true); len(kept) != len(all) || len(left) != 0 {
+		t.Errorf("trailing space: %d kept, left %v", len(kept), left)
 	}
 }
 

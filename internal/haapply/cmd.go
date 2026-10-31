@@ -126,6 +126,7 @@ type pairsArgs struct {
 	pairOpts
 	rounds, rows int
 	patterns     []Pattern
+	named        bool // the patterns were asked for by name, not the whole catalog
 }
 
 func parsePairs(args []string, stderr io.Writer) (*pairsArgs, error) {
@@ -149,8 +150,15 @@ func parsePairs(args []string, stderr io.Writer) (*pairsArgs, error) {
 	if err != nil {
 		return nil, err
 	}
-	a.patterns = pats
+	a.patterns, a.named = pats, fs.NArg() > 0
 	return a, nil
+}
+
+func yesNo(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 func isSet(fs *flag.FlagSet, name string) bool {
@@ -160,16 +168,27 @@ func isSet(fs *flag.FlagSet, name string) bool {
 }
 
 // ledgerFile opens a ledger before any pair is touched: a path that cannot be
-// written should not cost a cluster create. drop is for a run that fails
-// before it measures anything: it leaves no empty ledger of its own, and a
-// path that was there before it is left there.
-func ledgerFile(path string) (f *os.File, drop func(), err error) {
+// written should not cost a cluster create. It is not truncated until start,
+// which the run calls as it writes the header. drop is for a run that fails
+// before then: it leaves no empty ledger of its own, and a file that was there
+// before it is left as it was.
+func ledgerFile(path string) (f *os.File, start func() error, drop func(), err error) {
 	_, statErr := os.Stat(path)
 	created := errors.Is(statErr, os.ErrNotExist)
-	if f, err = os.Create(path); err != nil {
-		return nil, nil, err
+	if f, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o666); err != nil {
+		return nil, nil, nil, err
 	}
-	return f, func() {
+	start = func() error {
+		fi, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if !fi.Mode().IsRegular() {
+			return nil // a device or a pipe has nothing to truncate, and refuses to
+		}
+		return f.Truncate(0)
+	}
+	return f, start, func() {
 		f.Close()
 		if created {
 			os.Remove(path)
@@ -251,7 +270,7 @@ func pairs(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ha-apply pairs: %v\n", err)
 		return 2
 	}
-	f, drop, err := ledgerFile(a.ledger)
+	f, start, drop, err := ledgerFile(a.ledger)
 	if err != nil {
 		fmt.Fprintf(stderr, "ha-apply: %v\n", err)
 		return 1
@@ -271,16 +290,43 @@ func pairs(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	meta := append(s.meta(ctx), fmt.Sprintf("rounds=%d", a.rounds), fmt.Sprintf("rows=%d", a.rows))
+	r := &Runner{Pair: s.pair, Client: s.client, Rounds: a.rounds, Rows: a.rows, Log: stderr,
+		WitnessWait: 30 * time.Second, StallFor: stallFor(a.rows), NoReadFor: time.Minute, BarrierFor: barrierFor}
+	// The probe reads the slave, and a pair just stood up may not answer yet.
+	if err := r.barrier(ctx); err != nil {
+		fmt.Fprintf(stderr, "ha-apply: %v\n", err)
+		return 1
+	}
+	trailing, err := r.IgnoresTrailingSpace(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "ha-apply: %v\n", err)
+		return 1
+	}
+	pats, left := ForPair(a.patterns, trailing)
+	switch {
+	case len(left) > 0 && a.named:
+		fmt.Fprintf(stderr, "ha-apply: %s does not compare VARCHAR without trailing spaces "+
+			"(ignore_trailing_space=yes in its nodes' cubrid.conf), so %s cannot run there\n",
+			s.cli.Cluster, strings.Join(left, ", "))
+		return 1
+	case len(left) > 0:
+		fmt.Fprintf(stderr, "ha-apply: %s does not compare VARCHAR without trailing spaces, so %s are not run\n",
+			s.cli.Cluster, strings.Join(left, ", "))
+	}
+
+	meta := append(s.meta(ctx), "ignore_trailing_space="+yesNo(trailing),
+		fmt.Sprintf("rounds=%d", a.rounds), fmt.Sprintf("rows=%d", a.rows))
+	if err := start(); err != nil {
+		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, err)
+		return 1
+	}
 	fmt.Fprintf(stdout, "# %s\n", strings.Join(meta, " "))
 	ledgerHead(f, meta)
 
 	headWritten = true
-	r := &Runner{Pair: s.pair, Client: s.client, Rounds: a.rounds, Rows: a.rows, Log: stderr,
-		WitnessWait: 30 * time.Second, StallFor: stallFor(a.rows), NoReadFor: time.Minute, BarrierFor: barrierFor}
 	var outs []Outcome
 	code := 0
-	for i, p := range a.patterns {
+	for i, p := range pats {
 		o, err := r.Pattern(ctx, p)
 		if err != nil {
 			fmt.Fprintf(stderr, "ha-apply: %s: %v\n", p.Name, err)
@@ -293,7 +339,7 @@ func pairs(args []string, stdout, stderr io.Writer) int {
 		// A row as it is known: the control runs first, so no later pattern
 		// changes a verdict already written.
 		ledgerRow(f, o, v)
-		if o.Stalled && i < len(a.patterns)-1 {
+		if o.Stalled && i < len(pats)-1 {
 			// Every later pattern starts with a wait on this slave.
 			fmt.Fprintf(stderr, "ha-apply: %s: the slave stopped applying, so the patterns after it are not run\n", p.Name)
 			code = 1
@@ -405,7 +451,7 @@ func stress(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ha-apply: %s already holds files; give another --ledger\n", save)
 		return 1
 	}
-	f, drop, err := ledgerFile(a.ledger)
+	f, start, drop, err := ledgerFile(a.ledger)
 	if err != nil {
 		fmt.Fprintf(stderr, "ha-apply: %v\n", err)
 		return 1
@@ -437,6 +483,10 @@ func stress(args []string, stdout, stderr io.Writer) int {
 		meta = append(meta, "mode=run", fmt.Sprintf("clients=%d", c.Clients), fmt.Sprintf("txns=%d", c.Txns),
 			fmt.Sprintf("keys=%d", c.Keys), "ops="+strings.Join(ops, ","), fmt.Sprintf("ballast=%d", c.Ballast),
 			fmt.Sprintf("seed=%d", c.Seed), "timeout="+c.Timeout.String())
+	}
+	if err := start(); err != nil {
+		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, err)
+		return 1
 	}
 	fmt.Fprintf(stdout, "# %s\n", strings.Join(meta, " "))
 	stressHead(f, meta)

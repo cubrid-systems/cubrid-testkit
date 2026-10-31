@@ -307,6 +307,10 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			continue
 		}
 		p.selected = selectCases(suite, p.branch, s.Only)
+		// The pair gate's estimate: the newest earlier time it ran cases in.
+		if tp, id := timedPair(s.runs, s.SessionID, p.Name); tp != nil {
+			p.earlier = timeOf(tp, "session "+id)
+		}
 		// FR-2: against the newest earlier session that measured this pair.
 		if pp, id := previousPair(s.runs, s.SessionID, p.Name); pp != nil {
 			if s.doc.Previous == "" {
@@ -400,6 +404,10 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 	defer stop()
 	reason := "done"
 	attempted, ran := 0, 0
+	// The time of a pair already run in this session stands in for a pair
+	// with no earlier time of its own (a new registration): same host, same
+	// suite, hours before.
+	var thisSession *pairTime
 	for _, p := range s.Pairs {
 		if p.Skipped != "" {
 			s.logf("pair %s: skipped (%s)", p.Name, p.Skipped)
@@ -409,9 +417,9 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			p.Skipped = reason
 			continue
 		}
-		if bound := pairBound(canaries, p.selected, p.Overlap != nil); !s.Clock.fits(time.Now(), bound) {
+		if est, from := p.estimate(canaries, p.selected, thisSession); !s.Clock.fits(time.Now(), est) {
 			p.Skipped = "budget"
-			s.logf("pair %s: skipped, %s left and the pair's bound is %s", p.Name, s.Clock.left(time.Now()).Round(time.Minute), bound.Round(time.Minute))
+			s.logf("pair %s: skipped, %s left and the pair's estimate is %s (%s)", p.Name, s.Clock.left(time.Now()).Round(time.Minute), est.Round(time.Minute), from)
 			continue
 		}
 		attempted++
@@ -420,6 +428,9 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		}
 		if pairRan(p) {
 			ran++
+		}
+		if t := timeOf(p, "this session's "+p.Name); t != nil {
+			thisSession = t
 		}
 		s.writeDoc("incomplete", "")
 	}
@@ -535,7 +546,11 @@ func (s *Session) plan(canaries []*Case) {
 			}
 			names = append(names, fmt.Sprintf("[%s]", strings.Join(in, " ")))
 		}
-		s.logf("pair %s: %d case(s) in %d conf group(s), bound %s: %s", p.Name, len(order), len(confGroups(order)), pairBound(canaries, order, p.Overlap != nil).Round(time.Minute), strings.Join(names, " "))
+		est, from := p.estimate(canaries, order, nil)
+		if p.earlier == nil && len(order) > 0 {
+			from += ", until a pair of this session has run"
+		}
+		s.logf("pair %s: %d case(s) in %d conf group(s), estimate %s (%s): %s", p.Name, len(order), len(confGroups(order)), est.Round(time.Minute), from, strings.Join(names, " "))
 	}
 }
 
@@ -794,6 +809,15 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		if why := s.groupMemory(g, p.Overlap != nil); why != "" {
 			s.note("pair %s: conf group %q: %s", p.Name, g.Key, why)
 			skipGroup(g, why)
+			continue
+		}
+		// The group's clusters and fixtures come before its first case's
+		// gate: with the pair started on an estimate, not its bound, they
+		// are checked here, with that case.
+		if need := groupSetupBound(byKey[g.Key], pairSides(p.Overlap != nil)) + caseBound(g.Cases[0]); !s.Clock.fits(time.Now(), need) {
+			s.note("pair %s: %s left, conf group %q needs %s to stand up and run its first case; the rest is skipped (FR-5)", p.Name, s.Clock.left(time.Now()).Round(time.Minute), confLabel(g.Key), need.Round(time.Minute))
+			stop = "budget"
+			skipGroup(g, stop)
 			continue
 		}
 		var err error

@@ -92,6 +92,7 @@ type SessionPair struct {
 
 	branch         *Branch     // nil for a pair perf.conf names
 	selected       []*Case     // the cases this pair runs A/B
+	earlier        *pairTime   // the newest earlier time of this pair that ran cases, for the estimate
 	entries        []CaseEntry // what the sidecar got, for the summary
 	overlapEntries []CaseEntry // the same against the overlap reference (FR-29)
 	written        bool        // the pair's sidecar is on disk: the pair ran

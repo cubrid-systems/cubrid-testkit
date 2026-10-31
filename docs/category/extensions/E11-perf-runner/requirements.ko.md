@@ -51,8 +51,10 @@ E7(workload)이고, 이것은 C-004 가 testkit 쪽에 남긴 몫이다
 `testkit perf validate <case-dir|fixture-dir|suite-dir|branches.conf|perf.conf>` 는 세션의 파서로
 파일을 읽고 문제를 전부 이름으로 말한다. 하나라도 있으면 종료 코드 2. conf 는 가리키는 것까지
 검증한다: suite, 등록, 그리고 카나리마다 suite 에 있는 케이스인지.
-`testkit perf list -c <perf.conf> | --suite <dir>` 는 케이스를 패스 예산과, 세션이 주말과 견주는
-상한과 함께 표로 낸다.
+`testkit perf list -c <perf.conf> | --suite <dir>` 는 케이스를 패스 예산과, 그 예산으로 돈 패스들(MAX_S;
+케이스 관문은 워밍업·여유·fixture 전환을 더한다)과 함께 표로 낸다. 세션은 쌍을 추정으로 거른다 — 그 쌍이 케이스를 돈 가장 최근의 이전 시간을 케이스당으로
+지금의 케이스·쪽 수에 맞추고 1.5 를 곱한 값, 상한의 준비 부분과 상한 사이(시간이 없으면 상한) —
+그리고 conf 묶음과 케이스는 각자의 상한으로 거른다.
 
 거부 목록은 Spec §7.2 의 것이다: 모르는 키, 빠진 키, 틀린 타입, 디렉터리와 다른 id, 수집 층 목록
 밖의 카운터(statdump 이름은 엔진 자신의 표 — `statdump_names.go`, develop `5f3a30d` 기준 234개 — 로 확인한다), `repeats < 3`, `warmup < 1`, `tolerance ≤ 0`, 다른 드라이버 모양의 client,

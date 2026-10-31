@@ -1,6 +1,7 @@
 package perf
 
 import (
+	"fmt"
 	"math/rand"
 	"path"
 	"sort"
@@ -83,7 +84,7 @@ func selectCases(s *Suite, b *Branch, only string) []*Case {
 }
 
 // Bounds (§5.9), all upper: the time a thing takes when every pass runs to
-// its budget. budgetFits compares them with what is left.
+// its budget. clock.fits compares them, or pairEstimate, with what is left.
 const (
 	clusterCreateBound = 2 * time.Minute
 	fixtureBound       = 5 * time.Minute
@@ -124,10 +125,28 @@ func remeasureBound(c *Case) time.Duration {
 // and the extra ones per conf group), the fixtures each of them builds, the
 // canaries, the cases, and the judging.
 func pairBound(canaries, cases []*Case, overlap bool) time.Duration {
-	sides := 2
-	if overlap {
-		sides = 3
+	sides := pairSides(overlap)
+	d := pairSetupBound(canaries, cases, overlap)
+	for _, c := range canaries {
+		d += caseBound(c)
 	}
+	for _, c := range cases {
+		d += caseBound(c) * time.Duration(sides-1)
+	}
+	return d
+}
+
+func pairSides(overlap bool) int {
+	if overlap {
+		return 3
+	}
+	return 2
+}
+
+// pairSetupBound is the part of pairBound that is not the passes: the
+// clusters, the fixtures and the judging.
+func pairSetupBound(canaries, cases []*Case, overlap bool) time.Duration {
+	sides := pairSides(overlap)
 	groups := len(confGroups(cases))
 	if groups == 0 {
 		groups = 1
@@ -140,15 +159,80 @@ func pairBound(canaries, cases []*Case, overlap bool) time.Duration {
 	for _, g := range confGroups(cases) {
 		fixtures += sides * len(fixturesOf(g.Cases))
 	}
-	d := time.Duration(creates)*clusterCreateBound + time.Duration(fixtures)*fixtureBound + judgeBound
-	for _, c := range canaries {
-		d += caseBound(c)
-	}
-	for _, c := range cases {
-		d += caseBound(c) * time.Duration(sides-1)
-	}
-	return d
+	return time.Duration(creates)*clusterCreateBound + time.Duration(fixtures)*fixtureBound + judgeBound
 }
+
+// groupSetupBound is what a conf group costs before its first case: its
+// clusters and the fixtures of every case they are made for (canaries of the
+// same conf too). The session checks it with the group's first case before
+// standing the group up; the case gate starts only after.
+func groupSetupBound(cases []*Case, sides int) time.Duration {
+	return time.Duration(sides) * (clusterCreateBound + time.Duration(len(fixturesOf(cases)))*fixtureBound)
+}
+
+// pairTime is a time a pair took, for the estimate: the seconds, the cases
+// it ran, its sides (an overlap pair runs each case twice), and where it
+// comes from.
+type pairTime struct {
+	seconds, cases, sides int
+	from                  string
+}
+
+// timeOf is a pair record's time, or nil when it ran no case or has no
+// time: an invalid pair, a session that died before it, a dry run. FR-2's
+// previous pair can be any of those; the estimate passes them over.
+func timeOf(p *SessionPair, from string) *pairTime {
+	if p == nil || p.Seconds <= 0 || p.CasesRun <= 0 {
+		return nil
+	}
+	return &pairTime{seconds: p.Seconds, cases: p.CasesRun, sides: pairSides(p.Overlap != nil), from: from}
+}
+
+// pairEstimate is what a pair is expected to take, for the gate before it
+// starts. From a time it took (the newest earlier session in which it ran
+// cases; else a pair that ran earlier in this session): that time per case
+// run there, scaled to the cases now and their sides, times
+// pairEstimateMargin, at least the setup part of the bound and at most the
+// bound. With no time, the bound. The bound has every pass run to its
+// budget and is several times the real time: the pairs of 16 cases took
+// 2.1 h on 2026-10-31, and the bound of the 37-case pairs after it is 47 h,
+// which put the second pair past the Monday deadline. Within the pair the
+// group gate (groupSetupBound) and the case gate (caseBound) still stop a
+// session that runs late.
+func pairEstimate(canaries, cases []*Case, overlap bool, t *pairTime) (time.Duration, string) {
+	bound := pairBound(canaries, cases, overlap)
+	switch {
+	case len(cases) == 0:
+		return bound, "the bound: no case selected"
+	case t == nil:
+		return bound, "the bound: no earlier time"
+	}
+	sides := pairSides(overlap)
+	secs := float64(t.seconds) / float64(t.cases) * float64(len(cases)) * float64(sides-1) / float64(t.sides-1) * pairEstimateMargin
+	floored := ""
+	if floor := pairSetupBound(canaries, cases, overlap); secs < floor.Seconds() {
+		secs = floor.Seconds()
+		floored = fmt.Sprintf("; raised to the setup part of the bound, %s", floor.Round(time.Minute))
+	}
+	if secs >= bound.Seconds() {
+		return bound, fmt.Sprintf("the bound: %d s for %d case(s) (%s) scales to %.1f h", t.seconds, t.cases, t.from, secs/3600)
+	}
+	return time.Duration(secs) * time.Second, fmt.Sprintf("%d s for %d case(s) (%s), scaled to %d, times %.1f%s; bound %s", t.seconds, t.cases, t.from, len(cases), pairEstimateMargin, floored, bound.Round(time.Minute))
+}
+
+// estimate is pairEstimate for this pair's cases from its own earlier time,
+// else from fallback.
+func (p *SessionPair) estimate(canaries, cases []*Case, fallback *pairTime) (time.Duration, string) {
+	t := p.earlier
+	if t == nil {
+		t = fallback
+	}
+	return pairEstimate(canaries, cases, p.Overlap != nil, t)
+}
+
+// pairEstimateMargin covers cases slower than the earlier ones on average,
+// such as a batch of new ones that reload a fixture every pass.
+const pairEstimateMargin = 1.5
 
 func fixturesOf(cases []*Case) []string {
 	seen := map[string]bool{}

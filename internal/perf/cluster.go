@@ -305,9 +305,10 @@ func confUnion(cases []*Case) []string {
 }
 
 // stageWork copies what the nodes will read into <work>/perf: the scripts,
-// every client source (the common class with them), each case's reset.sql,
-// each fixture's files. /work is bind-mounted into every node, so one copy
-// serves the server node and the client node (Design §5.3).
+// every client source (the common ones with them, Java and C, so two cases can
+// run one cdc-api program), each case's reset.sql, each fixture's files.
+// /work is bind-mounted into every node, so one copy serves the server node
+// and the client node (Design §5.3).
 func (r *Runner) stageWork(s *Side, cases []*Case) error {
 	root := filepath.Join(s.Work, "perf")
 	for _, d := range []string{"scripts", "src", "cases", "fixtures", "log", "out", "statdump", "tmp", "classes", "snap"} {
@@ -318,11 +319,17 @@ func (r *Runner) stageWork(s *Side, cases []*Case) error {
 	if err := copyTree(filepath.Join(r.SuiteDir, "scripts"), filepath.Join(root, "scripts")); err != nil {
 		return fmt.Errorf("staging scripts: %w", err)
 	}
-	if err := copyGlob(filepath.Join(r.SuiteDir, "scripts", "common", "*.java"), filepath.Join(root, "src")); err != nil {
-		return err
-	}
 	fixtures := map[string]bool{}
 	seen := map[string]string{}
+	for _, pattern := range []string{"*.java", "*.c"} {
+		common, _ := filepath.Glob(filepath.Join(r.SuiteDir, "scripts", "common", pattern))
+		for _, f := range common {
+			seen[filepath.Base(f)] = "scripts/common"
+		}
+		if err := copyGlob(filepath.Join(r.SuiteDir, "scripts", "common", pattern), filepath.Join(root, "src")); err != nil {
+			return err
+		}
+	}
 	for _, c := range cases {
 		fixtures[c.Fixture.Name] = true
 		// Every case's sources share one directory, so one name in two

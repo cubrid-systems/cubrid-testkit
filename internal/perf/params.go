@@ -15,10 +15,11 @@ import (
 // under the same conf, or that only one of them has: layer 1 of the
 // parameter matrix -- a default that changed, or a parameter that is new,
 // shows here without a case of its own. Scope is the paramdump section the
-// value was read from (the target's when it has the parameter). A nil value
-// is a build without the parameter in any section. Conf lists the conf
-// groups it was seen in, and is empty when it was seen in every group
-// compared.
+// values were compared in (section), or the one build's section when only
+// one has it. A nil value is a build without the parameter in any section.
+// Conf lists the conf groups it was seen in, and is empty when it was seen
+// in every group compared. Parameters set from the node or the start time
+// are left out (instanceParams).
 type ParamDiff struct {
 	Scope     string   `json:"scope"`
 	Name      string   `json:"name"`
@@ -76,17 +77,46 @@ func keepParams(s *Side, dir string) {
 	_ = os.WriteFile(filepath.Join(dir, "clusters", name), append([]byte("# perf conf group: "+confLabel(s.confKey)+"\n"), text...), 0o644)
 }
 
-// paramValue is one parameter as paramdump printed it.
-type paramValue struct{ scope, value string }
+// paramValue is one parameter as paramdump printed it, in each section that
+// has it.
+type paramValue struct {
+	server, client     string
+	inServer, inClient bool
+}
 
-// parseParamdump reads cubrid paramdump -b into one value per parameter.
+// section is the section two builds compare a parameter in: the server's
+// when both print it there, else the client's when both do there (11.4's
+// server section has the client-only parameters too, at the server's
+// value, not the client's), else each build's own, the server's first.
+func section(t, r paramValue) (scope, tv, rv string) {
+	own := func(v paramValue) (string, string) {
+		if v.inServer {
+			return "server", v.server
+		}
+		return "client", v.client
+	}
+	switch {
+	case t.inServer && r.inServer:
+		return "server", t.server, r.server
+	case t.inClient && r.inClient:
+		return "client", t.client, r.client
+	}
+	scope, tv = own(t)
+	_, rv = own(r)
+	return scope, tv, rv
+}
+
+// instanceParams are set from the node or the start time, not the build:
+// they differ between any two clusters.
+var instanceParams = map[string]bool{"error_log": true, "ha_node_list": true}
+
+// parseParamdump reads cubrid paramdump -b into one entry per parameter.
 // The sections are not the same on the two lines: 11.4 prints every
 // parameter in both, develop only the client's in the first and the
-// server's in the second. So a parameter is keyed by name, the server's
-// section winning, and the section is kept for the record. develop prints
-// "[S*] name=value (default)", 11.4.6 "name=value"; a line's section comes
-// from the header before it ("... used by the client program", "... loaded
-// by the server '<db>'").
+// server's in the second; so a parameter is keyed by name, its value kept
+// per section (section). develop prints "[S*] name=value (default)",
+// 11.4.6 "name=value"; a line's section comes from the header before it
+// ("... used by the client program", "... loaded by the server '<db>'").
 func parseParamdump(text string) map[string]paramValue {
 	out := map[string]paramValue{}
 	scope := ""
@@ -109,10 +139,13 @@ func parseParamdump(text string) map[string]paramValue {
 		if !found || name == "" || strings.ContainsAny(name, " \t") {
 			continue
 		}
-		if _, have := out[name]; have && scope == "client" {
-			continue
+		v := out[name]
+		if scope == "server" {
+			v.server, v.inServer = value, true
+		} else {
+			v.client, v.inClient = value, true
 		}
-		out[name] = paramValue{scope: scope, value: value}
+		out[name] = v
 	}
 	return out
 }
@@ -174,20 +207,26 @@ func (d *paramDiffs) add(conf string, target, reference map[string]paramValue) b
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		tv, tok := target[n]
-		rv, rok := reference[n]
-		if tok && rok && tv.value == rv.value {
+		if instanceParams[n] {
 			continue
 		}
-		e := d.find(n, tv.value, tok, rv.value, rok)
+		t, tok := target[n]
+		r, rok := reference[n]
+		scope, tv, rv := section(t, r)
+		if tok && rok && tv == rv {
+			continue
+		}
+		e := d.find(n, tv, tok, rv, rok)
 		if e == nil {
-			e = &ParamDiff{Name: n, Scope: rv.scope}
+			e = &ParamDiff{Name: n, Scope: scope}
+			if !tok {
+				e.Scope, _, _ = section(r, t)
+			}
 			if tok {
-				e.Scope = tv.scope
-				e.Target = &tv.value
+				e.Target = &tv
 			}
 			if rok {
-				e.Reference = &rv.value
+				e.Reference = &rv
 			}
 			d.entries = append(d.entries, e)
 		}

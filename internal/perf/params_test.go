@@ -20,6 +20,7 @@ const (
 # system parameters
 [C ] ansi_quotes=y (y)
 [C*] optimization_level=1 (2)
+[C ] intl_collation="utf8_bin" ("")
 
 System parameters loaded by the server 'perf_narrow_1m'
 #
@@ -28,6 +29,7 @@ System parameters loaded by the server 'perf_narrow_1m'
 
 # system parameters
 [S*] data_buffer_size=4G (32768K)
+[S*] error_log="server/perf_narrow_1m_20261031_0442.err" ("")
 [S ] parallelism=4 (4)
 [S ] intl_date_lang="" ("")
 [S ] some_list=a (b) (a (b))
@@ -40,6 +42,8 @@ System parameters loaded by the server 'perf_narrow_1m'
 # system parameters
 ansi_quotes=y
 data_buffer_size=4G
+error_log=""
+intl_collation="utf8_bin"
 optimization_level=1
 removed_in_develop=7
 
@@ -51,20 +55,26 @@ System parameters loaded by the server 'perf_narrow_1m'
 # system parameters
 ansi_quotes=y
 data_buffer_size=4G
+error_log="server/perf_narrow_1m_20261031_0443.err"
+intl_collation=""
 optimization_level=1
 removed_in_develop=7
 `
 )
 
 func TestParseParamdumpKeysByNameAcrossSections(t *testing.T) {
+	client := func(v string) paramValue { return paramValue{client: v, inClient: true} }
+	server := func(v string) paramValue { return paramValue{server: v, inServer: true} }
 	got := parseParamdump(developDump)
 	want := map[string]paramValue{
-		"ansi_quotes":        {"client", "y"},
-		"optimization_level": {"client", "1"},
-		"data_buffer_size":   {"server", "4G"},
-		"parallelism":        {"server", "4"},
-		"intl_date_lang":     {"server", `""`},
-		"some_list":          {"server", "a (b)"},
+		"ansi_quotes":        client("y"),
+		"optimization_level": client("1"),
+		"data_buffer_size":   server("4G"),
+		"parallelism":        server("4"),
+		"intl_date_lang":     server(`""`),
+		"some_list":          server("a (b)"),
+		"intl_collation":     client(`"utf8_bin"`),
+		"error_log":          server(`"server/perf_narrow_1m_20261031_0442.err"`),
 	}
 	if len(got) != len(want) {
 		t.Fatalf("develop: %v", got)
@@ -74,9 +84,10 @@ func TestParseParamdumpKeysByNameAcrossSections(t *testing.T) {
 			t.Errorf("develop %s: %+v, want %+v", k, got[k], v)
 		}
 	}
-	// 11.4: both sections list everything; the server's value is kept.
+	// 11.4: both sections list everything.
 	got = parseParamdump(release114Dump)
-	if len(got) != 4 || got["data_buffer_size"] != (paramValue{"server", "4G"}) || got["ansi_quotes"] != (paramValue{"server", "y"}) {
+	both := paramValue{server: "4G", client: "4G", inServer: true, inClient: true}
+	if len(got) != 6 || got["data_buffer_size"] != both || !got["ansi_quotes"].inClient || !got["ansi_quotes"].inServer {
 		t.Errorf("11.4: %v", got)
 	}
 	if got := parseParamdump("ERROR: database perf_x is unknown\n"); len(got) != 0 {
@@ -96,7 +107,7 @@ func TestParamDiffsAcrossBuildsAndConfGroups(t *testing.T) {
 	for k, v := range rel {
 		tweaked[k] = v
 	}
-	tweaked["optimization_level"] = paramValue{"server", "2"}
+	tweaked["optimization_level"] = paramValue{server: "1", client: "2", inServer: true, inClient: true}
 	if !d.add("", dev, tweaked) {
 		t.Fatal("not compared")
 	}
@@ -107,9 +118,11 @@ func TestParamDiffsAcrossBuildsAndConfGroups(t *testing.T) {
 	for _, e := range d.list() {
 		byName[e.Name] = append(byName[e.Name], e)
 	}
-	for _, n := range []string{"ansi_quotes", "data_buffer_size"} {
+	// intl_collation: the client's value on both, though 11.4's server
+	// section prints it empty; error_log: set from the start time.
+	for _, n := range []string{"ansi_quotes", "data_buffer_size", "intl_collation", "error_log"} {
 		if len(byName[n]) != 0 {
-			t.Errorf("%s, in both builds with the same value: %+v", n, byName[n])
+			t.Errorf("%s: %+v", n, byName[n])
 		}
 	}
 	if e := byName["parallelism"]; len(e) != 1 || e[0].Scope != "server" || *e[0].Target != "4" || e[0].Reference != nil || e[0].Conf != nil {

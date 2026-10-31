@@ -326,10 +326,27 @@ func TestCheckpointWaitCases(t *testing.T) {
 	if !strings.Contains(note, "taken as an offset") || len(s.asks) != 1 || s.offset != 4 {
 		t.Errorf("start offset: note %q, asks %d, offset %d", note, len(s.asks), s.offset)
 	}
-	// The next wait on that server knows the offset: asked at once.
+	// The next wait on that server knows the offset: asked at once, said.
 	known := &checkpointScript{t: time.Unix(0, 0), readings: []checkpointReading{r(46, 42), r(47, 42), r(47, 43)}, offset: 4}
-	if note, err := known.wait(time.Minute).run(context.Background()); err != nil || note != "" || len(known.asks) != 1 || !known.asks[0].Equal(time.Unix(0, 0)) {
+	if note, err := known.wait(time.Minute).run(context.Background()); err != nil || !strings.Contains(note, "offset 4") || len(known.asks) != 1 || !known.asks[0].Equal(time.Unix(0, 0)) {
 		t.Errorf("known offset: note %q, err %v, asks %v", note, err, known.asks)
+	}
+	// A checkpoint that ran past running, taken as an offset: when it ends,
+	// the offset shrinks back and the wait is for one started after it.
+	rs = []checkpointReading{}
+	for i := 0; i < 122; i++ {
+		rs = append(rs, r(42, 41))
+	}
+	long := &checkpointScript{t: time.Unix(0, 0), readings: append(rs, r(42, 42), r(42, 42), r(42, 42), r(42, 42), r(42, 42), r(42, 42), r(43, 42), r(43, 43))}
+	if note, err := long.wait(5 * time.Minute).run(context.Background()); err != nil || long.offset != 0 || len(long.asks) != 2 || long.reads != len(long.readings) {
+		t.Errorf("long checkpoint: note %q, err %v, offset %d, asks %d, reads %d of %d", note, err, long.offset, len(long.asks), long.reads, len(long.readings))
+	}
+	// An offset stored too large hides a running checkpoint at the
+	// baseline: its end rebases the wait, the request dropped meanwhile is
+	// made again, and done waits for that one.
+	stale := &checkpointScript{t: time.Unix(0, 0), readings: []checkpointReading{r(50, 49), r(50, 50), r(50, 50), r(50, 50), r(50, 50), r(50, 50), r(51, 50), r(51, 51)}, offset: 1}
+	if note, err := stale.wait(time.Minute).run(context.Background()); err != nil || stale.offset != 0 || len(stale.asks) != 2 || stale.reads != len(stale.readings) {
+		t.Errorf("stale offset: note %q, err %v, offset %d, asks %d, reads %d of %d", note, err, stale.offset, len(stale.asks), stale.reads, len(stale.readings))
 	}
 	// The watcher down mid-wait: re-armed, baseline and request again.
 	if s, note := run(time.Minute, r(41, 41), checkpointReading{started: 41, ended: 41, down: true}, r(41, 41), r(42, 42)); !strings.Contains(note, "re-armed") || s.rearms != 1 || len(s.asks) != 2 {

@@ -364,6 +364,18 @@ func (w checkpointWait) run(ctx context.Context) (string, error) {
 		}
 		return say("checkpoint counters unreadable; the checkpoint before the window was asked for and not waited for"), nil
 	}
+	// The offset only shrinks: a read with fewer started past ended was
+	// taken with nothing running, so a larger one stored was a checkpoint
+	// that ran past running, not a lasting gap.
+	shrink := func(c checkpointCounts) {
+		if d := c.started - c.ended; c.ok && d < *w.offset {
+			*w.offset = d
+		}
+	}
+	shrink(base)
+	if *w.offset != 0 && base.started-base.ended == *w.offset {
+		say(fmt.Sprintf("checkpoint counters offset %d (started minus ended) in effect, found by an earlier wait on this server", *w.offset))
+	}
 	ahead := func(c checkpointCounts) bool { return c.started-c.ended > *w.offset }
 	if ahead(base) {
 		until := w.now().Add(w.running)
@@ -396,6 +408,15 @@ func (w checkpointWait) run(ctx context.Context) (string, error) {
 		var rearmed bool
 		if c, rearmed, err = next(); err != nil {
 			return "", err
+		}
+		if c.ok && !rearmed {
+			shrink(c)
+			// A checkpoint running at the baseline ended (one taken as an
+			// offset, or one the offset hid): what started since is
+			// measured from here.
+			if c.started == base.started && c.ended > base.ended {
+				base = c
+			}
 		}
 		switch {
 		case rearmed && c.ok:

@@ -297,15 +297,21 @@ const maxVacuumPushes = 3
 // push did not end is not one a second push ends; one that comes back after
 // vacuum moved on is a new block held), at most maxVacuumPushes times, and
 // not with less than two reads left before the bound, where the block it
-// handed over would be vacuumed after the wait, inside the window.
+// handed over would be vacuumed after the wait, inside the window. A move is
+// a readable read that differs from the last readable one, so an unreadable
+// read between two neither makes nor hides one.
 type vacuumPusher struct {
 	pushes int
 	moved  bool
+	last   vacuumCounts // the last readable read; ok is false before one
 }
 
 func (p *vacuumPusher) want(reads []vacuumCounts, left time.Duration) bool {
-	if n := len(reads); n >= 2 && reads[n-1].ok && reads[n-2].ok && reads[n-1] != reads[n-2] {
-		p.moved = true
+	if n := len(reads); n >= 1 && reads[n-1].ok {
+		if p.last.ok && reads[n-1] != p.last {
+			p.moved = true
+		}
+		p.last = reads[n-1]
 	}
 	return p.pushes < maxVacuumPushes && (p.pushes == 0 || p.moved) && left > 2*vacuumPoll && vacuumStalled(reads)
 }

@@ -304,6 +304,22 @@ func TestVacuumPusherPushesOnAStallThatComesBackAfterProgress(t *testing.T) {
 			t.Error("the same stall after an unreadable read: pushed again")
 		}
 	}
+	// Progress that falls on an unreadable read is still progress.
+	var gap vacuumPusher
+	seq = append([]vacuumCounts{}, held...)
+	if !gap.want(seq, room) {
+		t.Fatal("first stall: no push")
+	}
+	gap.pushed()
+	pushedAgain := false
+	for _, r := range []vacuumCounts{{}, v(5100, 5000), v(5100, 5000)} {
+		if seq = append(seq, r); gap.want(seq, room) {
+			pushedAgain = true
+		}
+	}
+	if !pushedAgain {
+		t.Error("a new stall after progress across an unreadable read: no push")
+	}
 }
 
 // The checkpoint before a defer case's window is done only when one started

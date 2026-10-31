@@ -76,9 +76,10 @@ func fakeCSB(args []string, dir string) int {
 // which the first fail_counter read does not see. A client's script (-i)
 // prints $STATE/clientlog, or waits for good under $HANG. The stress tables'
 // counts answer per node from heap.<table>.<host>, pk.<table>.<host> and
-// orphans.<host>, 0 when absent; the table $DIFFER names reads differently
-// on each node, under $STALL the slave never sees a marker, and under
-// $NOMARKER the master refuses to make one.
+// orphans.<host>, 0 when absent, and whether 'k' and 'k ' compare equal from
+// trailing.<host>; the table $DIFFER names reads differently on each node,
+// under $STALL the slave never sees a marker, and under $NOMARKER the master
+// refuses to make one.
 const pairCSQL = `#!/bin/sh
 sql=""; tx=0; script=""; host=""
 for a in "$@"; do
@@ -98,6 +99,7 @@ if [ $tx = 1 ]; then
 fi
 per() { [ -f "$STATE/$1" ] && cat "$STATE/$1" || echo 0; }
 case "$sql" in
+  "SELECT CAST('k' AS VARCHAR(4))"*) printf '\n     %s\n' "$(per trailing.$host)"; exit 0 ;;
   "SELECT COUNT(*) FROM s_child c WHERE NOT EXISTS"*) printf '\n     %s\n' "$(per orphans.$host)"; exit 0 ;;
   "SELECT COUNT(*) FROM s_"*"NVL"*) t=$(echo "$sql" | awk '{ print $4 }'); printf '\n     %s\n' "$(per heap.$t.$host)"; exit 0 ;;
   "SELECT id FROM s_"*|"SELECT p FROM s_"*|"SELECT c FROM s_"*)
@@ -126,16 +128,8 @@ exit 0
 // slave's answers: the count of a round's ballast starts at count.
 func fakePair(t *testing.T, count string) (*Runner, string, *bytes.Buffer) {
 	t.Helper()
-	bin, state := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "csql"), []byte(pairCSQL), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv(fakeCSBEnv, bin)
-	t.Setenv("STATE", state)
-	t.Setenv("CRASH", "")
-	setState(t, state, "count", count)
-	setState(t, state, "fail", "0")
-	cli := &sandbox.CLI{Bin: os.Args[0], Cluster: "fake"}
+	state := fakeEnv(t, count)
+	cli := &sandbox.CLI{Cluster: "fake"}
 	pair, err := sandbox.Describe(context.Background(), cli, "")
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +138,23 @@ func fakePair(t *testing.T, count string) (*Runner, string, *bytes.Buffer) {
 	r := &Runner{Pair: pair, Client: sandbox.NewNode(cli, "c1"), Rounds: 3, Rows: 100, Log: &log,
 		WitnessWait: time.Second, StallFor: 3 * time.Second, NoReadFor: 2 * time.Second, BarrierFor: 2 * time.Second}
 	return r, state, &log
+}
+
+// fakeEnv makes this test's csb the test binary and its csql the pair fake,
+// and returns the fake's state directory.
+func fakeEnv(t *testing.T, count string) string {
+	t.Helper()
+	bin, state := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "csql"), []byte(pairCSQL), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(fakeCSBEnv, bin)
+	t.Setenv("STATE", state)
+	t.Setenv("CRASH", "")
+	t.Setenv(sandbox.BinEnv, os.Args[0])
+	setState(t, state, "count", count)
+	setState(t, state, "fail", "0")
+	return state
 }
 
 func setState(t *testing.T, state, name, v string) {

@@ -41,7 +41,10 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 
 패턴은 Go 안의 닫힌 목록이다. PK, UNIQUE, REVERSE UNIQUE, FK(단일·복합·CASCADE), savepoint, DDL,
 파티션, 그리고 인덱스는 같다고 보는데 쓰는 방식이 다른 키(-0.0 과 +0.0, 두 시간대로 쓴 한 시각,
-대소문자 무시 collation, 하위 클래스와 상위 클래스)를 담는다. 모르는 이름은 거부한다.
+대소문자 무시 collation, 하위 클래스와 상위 클래스, 문자열과 그 뒤에 공백을 붙인 문자열)를 담는다.
+모르는 이름은 거부한다. VARCHAR 의 뒤쪽 공백 패턴 둘은 `ignore_trailing_space` 를 켠 쌍에서만 한
+키이므로, 물었을 때 두 노드가 그렇다고 답하는 쌍에서만 돈다. 다른 쌍에서는 전체 목록에서 빠지며 그렇다고
+말하고, 이름으로 고르면 거부한다.
 
 ## 4. 판정
 
@@ -81,6 +84,8 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
   `--compare-only` 가 `fk-index-insert-loses-the-victims-error` 의 손상된 쌍(#8198 `6ce1c05d2`, 마스터
   `s_child` 가 heap 으로 9 행, PK 로 7 행)을 **damaged** 로 판정한다. #8052 새 head 에서 FK 연산을 뺀
   실행은 **same** 이다.
+- **뒤쪽 공백** (#8052 `17aae152e` 뒤): `ignore_trailing_space` 를 켠 쌍에서 VARCHAR 의 뒤쪽 공백 패턴
+  둘이 `61ee0944a` 에서 **missed**, `3fb54e549` 에서 **held** 다.
 
 ## 6. 범위 밖
 

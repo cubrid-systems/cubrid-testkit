@@ -113,12 +113,16 @@ show; the two were removed from the catalog, since they hold on either head and 
 
 ## 4. Asking the pair
 
-cluster-sandbox's flags cannot set the parameter. `--set ignore_trailing_space=yes` is refused as a
-key it does not know. `--set-hidden ignore_trailing_space=yes` writes the key to `cubrid_ha.conf`,
-where the engine reads only HA parameters (`system_parameter.c`); `its61`, created that way, came up
-with the parameter off, and a VARCHAR UNIQUE took `'k'` and `'k '` both.
+The csb binary these runs used could not set the parameter with a flag. It was built from cluster-sandbox
+`4ba7e8c`, which refused `--set ignore_trailing_space=yes` as a key it does not know and pointed to
+`--set-hidden`. `--set-hidden ignore_trailing_space=yes` writes the key to `cubrid_ha.conf`, where
+the engine reads only HA parameters (`system_parameter.c`); `its61`, created that way, came up with
+the parameter off, and a VARCHAR UNIQUE took `'k'` and `'k '` both. cluster-sandbox #9
+(`b0e97a8`), which the submodule already points past, sends a `--set` key not named `ha_*` to
+`cubrid.conf` instead of refusing it (its `topology_test.go`). That would make such a pair, and was
+not run here. `--set-hidden` still writes every key to `cubrid_ha.conf`.
 
-Two ways work. csb copies the install tree's `conf/cubrid.conf` to every node
+Two other ways work. csb copies the install tree's `conf/cubrid.conf` to every node
 (`extensions/cluster-sandbox/internal/assembly/assembly.go`), so the key can go there before the
 pair is created, which is also how a pair `--build` stands up gets it. Or it goes into each node's
 `cubrid.conf` of a pair that is up, and the servers are restarted. `its61` and `its3f` were made

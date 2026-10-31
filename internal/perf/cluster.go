@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -305,7 +306,8 @@ func confUnion(cases []*Case) []string {
 }
 
 // stageWork copies what the nodes will read into <work>/perf: the scripts,
-// every client source (the common class with them), each case's reset.sql,
+// every client source (the common ones with them, Java and C with its
+// headers, so two cases can run one cdc-api program), each case's reset.sql,
 // each fixture's files. /work is bind-mounted into every node, so one copy
 // serves the server node and the client node (Design §5.3).
 func (r *Runner) stageWork(s *Side, cases []*Case) error {
@@ -318,11 +320,23 @@ func (r *Runner) stageWork(s *Side, cases []*Case) error {
 	if err := copyTree(filepath.Join(r.SuiteDir, "scripts"), filepath.Join(root, "scripts")); err != nil {
 		return fmt.Errorf("staging scripts: %w", err)
 	}
-	if err := copyGlob(filepath.Join(r.SuiteDir, "scripts", "common", "*.java"), filepath.Join(root, "src")); err != nil {
-		return err
-	}
 	fixtures := map[string]bool{}
 	seen := map[string]string{}
+	for _, pattern := range []string{"*.java", "*.c", "*.h"} {
+		common, err := filepath.Glob(filepath.Join(r.SuiteDir, "scripts", "common", pattern))
+		if err != nil {
+			return err
+		}
+		for _, f := range common {
+			if st, err := os.Stat(f); err != nil || st.IsDir() {
+				continue
+			}
+			if err := copyFile(f, filepath.Join(root, "src", filepath.Base(f))); err != nil {
+				return err
+			}
+			seen[filepath.Base(f)] = "scripts/common"
+		}
+	}
 	for _, c := range cases {
 		fixtures[c.Fixture.Name] = true
 		// Every case's sources share one directory, so one name in two
@@ -367,7 +381,10 @@ func (r *Runner) compileClients(ctx context.Context, s *Side, cases []*Case) err
 		case "jdbc":
 			java = true
 		case "cdc-api":
-			cBins = append(cBins, c.CDC.Bin)
+			// Two cases can run one program (scripts/common): build it once.
+			if !slices.Contains(cBins, c.CDC.Bin) {
+				cBins = append(cBins, c.CDC.Bin)
+			}
 		}
 	}
 	if java {

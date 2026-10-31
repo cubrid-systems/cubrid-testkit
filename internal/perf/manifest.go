@@ -556,7 +556,45 @@ func LoadSuite(root string) (*Suite, error) {
 	if len(s.Cases) == 0 && len(errs) == 0 {
 		errs = append(errs, fmt.Errorf("%s: no cases/<module>/<name>/case.json", root))
 	}
+	errs = append(errs, checkSources(root, s.Cases)...)
 	return s, errors.Join(errs...)
+}
+
+// checkSources finds here what stageWork and compileClients would find only
+// after the clusters are built: client sources share one directory, so a
+// name in two cases, or in a case and scripts/common, is refused; and a
+// cdc-api program's source is in its case's src/ or in scripts/common.
+func checkSources(root string, cases []*Case) []error {
+	var errs []error
+	owner := map[string]string{}
+	for _, pattern := range []string{"*.java", "*.c", "*.h"} {
+		common, _ := filepath.Glob(filepath.Join(root, "scripts", "common", pattern))
+		for _, f := range common {
+			owner[filepath.Base(f)] = "scripts/common"
+		}
+	}
+	for _, c := range cases {
+		srcs, _ := filepath.Glob(filepath.Join(c.Dir, "src", "*"))
+		for _, f := range srcs {
+			base := filepath.Base(f)
+			if other, dup := owner[base]; dup {
+				errs = append(errs, fmt.Errorf("%s: source %s is in both %s and %s; client sources share one directory", c.Dir, base, other, c.ID))
+				continue
+			}
+			owner[base] = c.ID
+		}
+	}
+	for _, c := range cases {
+		if c.Driver != "cdc-api" || c.CDC == nil {
+			continue
+		}
+		// Its own src/ or scripts/common: another case's src/ is staged only
+		// when that case runs in the same cluster.
+		if o := owner[c.CDC.Bin+".c"]; o != "scripts/common" && o != c.ID {
+			errs = append(errs, fmt.Errorf("%s: client.bin %s has no %s.c in its src/ or in scripts/common", c.Dir, c.CDC.Bin, c.CDC.Bin))
+		}
+	}
+	return errs
 }
 
 // Case returns a case by id.

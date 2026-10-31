@@ -170,10 +170,12 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		}
 		// Vacuum left by the reset or the previous pass must not run inside
 		// the window; wait for it, within a bound, and say when the bound hit.
-		if note, err := r.waitVacuum(ctx, s, db, time.Minute); err != nil {
-			p.Notes = append(p.Notes, "vacuum wait: "+err.Error())
-		} else if note != "" {
+		note, err := r.waitVacuum(ctx, s, db, time.Minute)
+		if note != "" {
 			p.Notes = append(p.Notes, note)
+		}
+		if err != nil {
+			p.Notes = append(p.Notes, "vacuum wait: "+err.Error())
 		}
 	}
 	if c.Background == "defer" {

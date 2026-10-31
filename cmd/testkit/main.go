@@ -32,6 +32,7 @@ import (
 	"github.com/cubrid-systems/cubrid-testkit/internal/contain"
 	"github.com/cubrid-systems/cubrid-testkit/internal/ctl"
 	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
+	"github.com/cubrid-systems/cubrid-testkit/internal/haapply"
 	"github.com/cubrid-systems/cubrid-testkit/internal/perf"
 	"github.com/cubrid-systems/cubrid-testkit/internal/registry"
 	"github.com/cubrid-systems/cubrid-testkit/internal/result"
@@ -87,6 +88,12 @@ func main() {
 	// corpus here, so it goes before containment and ignores TESTKIT_CONTAIN.
 	if len(os.Args) > 1 && os.Args[1] == "perf" {
 		os.Exit(perf.Main(os.Args[2:], os.Stdout, os.Stderr))
+	}
+	// ha-apply asks whether a parallel HA applier keeps conflicting transactions
+	// in order (ADR-EXT-012). Like perf it drives csb pairs and runs no corpus,
+	// so it goes before containment too.
+	if len(os.Args) > 1 && os.Args[1] == "ha-apply" {
+		os.Exit(haapply.Main(os.Args[2:], os.Stdout, os.Stderr))
 	}
 
 	// Containment happens before anything else or it happens to a process that

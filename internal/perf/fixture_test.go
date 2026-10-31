@@ -244,11 +244,53 @@ func TestVacuumStalledIsABacklogStandingStill(t *testing.T) {
 	if stalled(vacuumCounts{}, vacuumCounts{}) {
 		t.Error("unreadable: a stall")
 	}
-	push := vacuumPush("perf_ckpt_400k")
-	for _, want := range []string{"CREATE SERIAL perf_vac_push START WITH 1 NOCACHE", "perf_vac_push.NEXT_VALUE", "LIMIT 2000", "perf_ckpt_400k"} {
-		if !strings.Contains(push, want) {
-			t.Errorf("push %q lacks %q", push, want)
+	// The SELECT alone (buildFixture makes the serial), its exit code kept.
+	want := `csql -u dba -c "SELECT perf_vac_push.NEXT_VALUE FROM db_class a, db_class b, db_class c LIMIT 2000" 'perf_ckpt_400k' >/dev/null`
+	if got := vacuumPush("perf_ckpt_400k"); got != want {
+		t.Errorf("push:\n got %s\nwant %s", got, want)
+	}
+}
+
+// The pusher pushes on the first stall; again only after the counters moved
+// since, and never more than maxVacuumPushes times; and not with less than
+// two reads left before the bound.
+func TestVacuumPusherPushesOnAStallThatComesBackAfterProgress(t *testing.T) {
+	v := func(to, done int64) vacuumCounts { return vacuumCounts{toVacuum: to, vacuumed: done, ok: true} }
+	room := time.Minute
+	var p vacuumPusher
+	held := []vacuumCounts{v(5000, 4968), v(5000, 4968)}
+	if !p.want(held, room) {
+		t.Fatal("first stall: no push")
+	}
+	p.pushed()
+	// The push did not end it: the same stall, no progress since.
+	if p.want(append(held, v(5000, 4968)), room) {
+		t.Error("the stall the push did not end: pushed again")
+	}
+	// Vacuum moved on, then stood still at a later block.
+	reads := append(held, v(5000, 4968), v(5100, 5000))
+	if p.want(reads, room) {
+		t.Error("moving: pushed")
+	}
+	if reads = append(reads, v(5100, 5000)); !p.want(reads, room) {
+		t.Error("a new stall after progress: no push")
+	}
+	p.pushed()
+	// Five more stalls, each after progress, read one at a time as the wait
+	// reads them.
+	for i := int64(0); i < 5; i++ {
+		for _, r := range []vacuumCounts{v(5200+i*100, 5100+i*100), v(5200+i*100, 5100+i*100)} {
+			if reads = append(reads, r); p.want(reads, room) {
+				p.pushed()
+			}
 		}
+	}
+	if p.pushes != maxVacuumPushes {
+		t.Errorf("%d pushes over seven stalls, want the bound %d", p.pushes, maxVacuumPushes)
+	}
+	var late vacuumPusher
+	if late.want(held, 3*time.Second) {
+		t.Error("a stall with one read left: pushed")
 	}
 }
 

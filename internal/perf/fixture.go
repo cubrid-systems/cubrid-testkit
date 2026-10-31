@@ -60,6 +60,12 @@ func (r *Runner) buildFixture(ctx context.Context, s *Side, f *Fixture) error {
 		fmt.Sprintf("csql -u dba %s -i %s/%s", db, fdir, shellJoin([]string{f.SchemaSQL})), 5*time.Minute); err != nil {
 		return err
 	}
+	// The serial the vacuum wait pushes with, made here on both sides alike
+	// rather than on whichever side first needs a push.
+	if err := r.mustExecLog(ctx, s, "push serial", log("push-serial"),
+		fmt.Sprintf(`csql -u dba -c "CREATE SERIAL %s START WITH 1 NOCACHE" %s`, vacuumPushSerial, db), time.Minute); err != nil {
+		return err
+	}
 	if err := r.mustExecLog(ctx, s, "load", log("load"),
 		fmt.Sprintf("cd %s && bash %s/%s %s %d", fdir, fdir, shellJoin([]string{f.Load}), db, f.Rows), 30*time.Minute); err != nil {
 		return err
@@ -205,14 +211,23 @@ func reflinkCopy(src []string, dstDir string) error {
 // log block still being filled are in neither until the block is handed over,
 // so up to one block can still be vacuumed after the wait. A block that was
 // handed over is still left alone while the end of the log is at most a page
-// past its last MVCC record, so a backlog that stops moving gets one push
-// (vacuumPush): log with no MVCC record moves the end of the log on, and
-// vacuum takes the block. The note says when the bound hit; the caller
-// decides what that means.
+// past its last MVCC record, so a backlog that stops moving gets a push
+// (vacuumPush, when vacuumPusher says): log with no MVCC record moves the end
+// of the log on, and vacuum takes the block. A push is said in the note, and
+// one that fails is only said: the wait goes on as it would have without it.
+// The note says when the bound hit; the caller decides what that means.
 func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.Duration) (note string, err error) {
 	deadline := time.Now().Add(bound)
 	var reads []vacuumCounts
-	rearmed, pushed := false, false
+	var pusher vacuumPusher
+	var notes []string
+	rearmed := false
+	done := func(note string) (string, error) {
+		if note != "" {
+			notes = append(notes, note)
+		}
+		return strings.Join(notes, "; "), nil
+	}
 	for {
 		res, err := r.exec(ctx, s.N1, fmt.Sprintf("bash %s/scripts/statdump_window.sh status %s >/dev/null 2>&1 && echo watcher=up; "+
 			"cubrid statdump %s 2>/dev/null | grep -E '^Num_vacuum_log_pages_(to_vacuum|vacuumed) '", workPerf, db, db), time.Minute)
@@ -229,15 +244,21 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 			reads = append(reads, parseVacuumCounts(res.Stdout))
 			if vacuumIdle(reads) {
 				if rearmed {
-					return "statdump watcher was down during the vacuum wait and was re-armed", nil
+					return done("statdump watcher was down during the vacuum wait and was re-armed")
 				}
-				return "", nil
+				return done("")
 			}
-			if !pushed && vacuumStalled(reads) {
+			if pusher.want(reads, time.Until(deadline)) {
+				behind := reads[len(reads)-1].backlog()
 				if err := r.mustExec(ctx, s, "vacuum push", vacuumPush(db), time.Minute); err != nil {
-					return "", err
+					if ctx.Err() != nil {
+						return "", err
+					}
+					notes = append(notes, "vacuum push failed: "+err.Error())
+				} else {
+					notes = append(notes, fmt.Sprintf("vacuum stood still %d log pages behind; pushed the end of the log", behind))
 				}
-				pushed = true
+				pusher.pushed()
 			}
 		}
 		if time.Now().After(deadline) {
@@ -247,19 +268,48 @@ func (r *Runner) waitVacuum(ctx context.Context, s *Side, db string, bound time.
 			}
 			switch {
 			case !cur.ok:
-				return fmt.Sprintf("vacuum statistics unreadable after %s", bound), nil
+				return done(fmt.Sprintf("vacuum statistics unreadable after %s", bound))
 			case cur.backlog() > 0:
-				return fmt.Sprintf("vacuum still had %d log pages to do after %s", cur.backlog(), bound), nil
+				return done(fmt.Sprintf("vacuum still had %d log pages to do after %s", cur.backlog(), bound))
 			default:
-				return fmt.Sprintf("vacuum was still working after %s", bound), nil
+				return done(fmt.Sprintf("vacuum was still working after %s", bound))
 			}
 		}
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(2 * time.Second):
+		case <-time.After(vacuumPoll):
 		}
 	}
+}
+
+// vacuumPoll is the wait between two reads of the vacuum counters.
+const vacuumPoll = 2 * time.Second
+
+// maxVacuumPushes bounds the pushes of one wait.
+const maxVacuumPushes = 3
+
+// vacuumPusher says when the vacuum wait pushes: on a stall (vacuumStalled),
+// again only after the counters moved since the last push (a stall that a
+// push did not end is not one a second push ends; one that comes back after
+// vacuum moved on is a new block held), at most maxVacuumPushes times, and
+// not with less than two reads left before the bound, where the block it
+// handed over would be vacuumed after the wait, inside the window.
+type vacuumPusher struct {
+	pushes int
+	moved  bool
+}
+
+func (p *vacuumPusher) want(reads []vacuumCounts, left time.Duration) bool {
+	if n := len(reads); n >= 2 && reads[n-1] != reads[n-2] {
+		p.moved = true
+	}
+	return p.pushes < maxVacuumPushes && (p.pushes == 0 || p.moved) && left > 2*vacuumPoll && vacuumStalled(reads)
+}
+
+func (p *vacuumPusher) pushed() {
+	p.pushes++
+	p.moved = false
 }
 
 // checkpointRequest is csql's ;checkpoint session command: only a --sysadm
@@ -563,15 +613,19 @@ func vacuumStalled(reads []vacuumCounts) bool {
 	return a.ok && b.ok && b.backlog() > 0 && a == b
 }
 
+// vacuumPushSerial is the NOCACHE serial vacuumPush reads, made by
+// buildFixture on every fixture database.
+const vacuumPushSerial = "perf_vac_push"
+
 // vacuumPush writes log with no MVCC record: 2,000 NEXT_VALUEs of a NOCACHE
 // serial, about 36 log pages on both 11.4 and develop (serial objects are not
-// MVCC; the suite's scripts/vacuum_after.sh measured it). The serial is made
-// on the first push and kept; a CREATE that finds it there fails, and that
-// is fine. db_class crossed with itself has the 2,000 rows to read it over.
+// MVCC; the suite's scripts/vacuum_after.sh measured it). db_class crossed
+// with itself has 2,401 rows on 11.4.6 and 5,476 on develop; a third copy
+// keeps the 2,000 within reach of a smaller catalog, and the LIMIT stops the
+// join there (2,000 values on both, 2026-11-01).
 func vacuumPush(db string) string {
-	q := shellJoin([]string{db})
-	return fmt.Sprintf(`csql -u dba -c "CREATE SERIAL perf_vac_push START WITH 1 NOCACHE" %s >/dev/null 2>&1; `+
-		`csql -u dba -c "SELECT perf_vac_push.NEXT_VALUE FROM db_class a, db_class b LIMIT 2000" %s >/dev/null`, q, q)
+	return fmt.Sprintf(`csql -u dba -c "SELECT %s.NEXT_VALUE FROM db_class a, db_class b, db_class c LIMIT 2000" %s >/dev/null`,
+		vacuumPushSerial, shellJoin([]string{db}))
 }
 
 func firstNonEmptyStr(a, b string) string {

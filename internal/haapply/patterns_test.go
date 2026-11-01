@@ -33,9 +33,10 @@ func TestEveryPatternIsComplete(t *testing.T) {
 		}
 	}
 	// The prototype's 24, the VARCHAR trailing-space keys of #8052 17aae152e,
-	// and the seven of eb31453ff.
-	if len(Catalog) != 33 {
-		t.Errorf("catalog has %d patterns, want the prototype's 24, 2 trailing-space and 7 of eb31453ff", len(Catalog))
+	// the seven of eb31453ff, and the binary collation's trailing NUL of
+	// cf8955a91.
+	if len(Catalog) != 35 {
+		t.Errorf("catalog has %d patterns, want the prototype's 24, 2 trailing-space, 7 of eb31453ff and 2 of cf8955a91", len(Catalog))
 	}
 }
 

@@ -14,6 +14,13 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-and-the-binary-nul](ha-apply-and-the-binary-nul.md) — **2026-11-01.**
+  `testkit ha-apply pairs` against #8052 `cf8955a91`, which hashes a string under the binary
+  collation with its trailing NULs cut, as the index compares it. A VARCHAR `COLLATE binary` and the
+  same with a NUL after it, as a unique key and a reference, were missed on `fb1636c34` where
+  trailing spaces count (the default) and held on `b984637bb`. On `b984637bb`, which also carries
+  #7881, all 34 patterns besides the control held, and `stress` without foreign keys was the same.
+
 - [ha-apply-and-the-reduced-keys](ha-apply-and-the-reduced-keys.md) — **2026-11-01.**
   `testkit ha-apply pairs` against #8052 `eb31453ff`, which hashes a key as its index compares it:
   a MONETARY amount in two currencies, a VARBIT and the same padded with zero bits, a NUL and a

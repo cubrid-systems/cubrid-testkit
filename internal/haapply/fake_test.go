@@ -79,7 +79,10 @@ func fakeCSB(args []string, dir string) int {
 // orphans.<host>, 0 when absent, and whether 'k' and 'k ' compare equal from
 // trailing.<host>; the table $DIFFER names reads differently on each node,
 // under $STALL the slave never sees a marker, and under $NOMARKER the master
-// refuses to make one.
+// refuses to make one. The restart table's reads answer from rows.<host>,
+// sum.<host> and unmoved.<host>, and the slave's marker table from markers
+// (absent: no such table; ERR: a read that prints nothing); a client sleeps
+// $CLIENTSLEEP first.
 const pairCSQL = `#!/bin/sh
 sql=""; tx=0; script=""; host=""
 for a in "$@"; do
@@ -89,6 +92,7 @@ prev=""
 for a in "$@"; do [ "$prev" = "-i" ] && script=$a; prev=$a; done
 if [ -n "$script" ]; then
   [ -n "$HANG" ] && exec sleep 300
+  [ -n "$CLIENTSLEEP" ] && sleep "$CLIENTSLEEP"
   [ -f "$STATE/clientlog" ] && cat "$STATE/clientlog"
   exit 0
 fi
@@ -105,6 +109,13 @@ case "$sql" in
   "SELECT id FROM s_"*|"SELECT p FROM s_"*|"SELECT c FROM s_"*)
     t=$(echo "$sql" | awk '{ print $4 }'); n=$(per pk.$t.$host); i=1
     while [ $i -le $n ]; do printf '     %s\n' $i; i=$((i + 1)); done; exit 0 ;;
+  "SELECT COUNT(*) FROM r_kv WHERE"*) printf '\n     %s\n' "$(per unmoved.$host)"; exit 0 ;;
+  "SELECT COUNT(*) FROM r_kv") printf '\n     %s\n' "$(per rows.$host)"; exit 0 ;;
+  "SELECT NVL(SUM"*) printf '\n     %s\n' "$(per sum.$host)"; exit 0 ;;
+  "SELECT COUNT(*) FROM db_class WHERE class_name = 'ha_applied_tx_marker'")
+    if [ -f "$STATE/markers" ]; then printf '\n     1\n'; else printf '\n     0\n'; fi; exit 0 ;;
+  "SELECT COUNT(*) FROM ha_applied_tx_marker"*)
+    [ -f "$STATE/markers" ] && [ "$(cat "$STATE/markers")" != ERR ] && printf '\n     %s\n' "$(cat "$STATE/markers")"; exit 0 ;;
 esac
 case "$sql" in
   "SELECT COUNT(*) FROM ballast_"*)

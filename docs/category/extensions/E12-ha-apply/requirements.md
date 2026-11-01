@@ -39,6 +39,7 @@ writeset did not, which #8052 then fixed.
 |---|---|
 | `pairs` | For each pattern, T1 writes ballast and then a key; T2, committed after it, depends on that key and writes a witness. Is T2 ever applied before T1? |
 | `stress` (M2) | N clients on one small key space, a deterministic workload: do the nodes end the same — through the primary key, by heap count, with no orphan and no apply failure? |
+| `restart` (M3) | Each client inserts fresh keys of its own and moves each one in the next transaction, while the slave's applier is killed again and again: does an applier that starts again apply a committed transaction a second time? |
 | `list` | The patterns, and what each pair shares. |
 
 The patterns are a closed list in Go: primary, unique, reverse-unique and foreign keys (single,
@@ -83,6 +84,14 @@ no before; it creates and drops one marker table on the master to wait for the s
 its clients' scripts and logs, and both reads of any table that differs, beside its ledger, and
 refuses to start where an earlier run's files already are.
 
+A `restart` run has one verdict too: **missed** (the applier failed -- `fail_counter` moved, or the
+slave's applier log gained a -670 -- or a slave that caught up reads the table otherwise than the
+master: its rows, the sum of its keys, or the keys not moved), **inconclusive** (a slave that did not
+show the final marker within five minutes without failing, no kill that found an applier, or no kill
+that found `ha_applied_tx_marker` rows above the slave's stored apply position just before), or
+**held**. A slave with no marker table is never held: missed on a failure or on a caught-up slave
+whose table differs, inconclusive otherwise. Its clients' scripts and logs are kept as `stress` keeps them.
+
 ## 5. Acceptance
 
 - **M1** (`pairs`, `list`): on #8052 `bf560620e` the six equality patterns that the prototype caught
@@ -98,6 +107,8 @@ refuses to start where an earlier run's files already are.
 - **The binary collation's trailing NUL** (after #8052 `cf8955a91`): on a pair with
   `ignore_trailing_space` off, the two patterns are **missed** on `fb1636c34` and **held** on
   `b984637bb`.
+- **M3** (`restart`): a run is **missed** on #8052 `19e83a5d9`, the parent of `72650ce0d`, which
+  added the applied-tx marker, and **held** on `b984637bb`.
 
 ## 6. Not in scope
 

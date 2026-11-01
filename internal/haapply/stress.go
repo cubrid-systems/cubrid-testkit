@@ -174,7 +174,7 @@ func (r *Runner) Stress(ctx context.Context, c StressConfig, compareOnly bool) (
 	if !compareOnly {
 		// Kept whatever happens below: the seed names the SQL but not how the
 		// clients interleaved, so a run is not looked at twice.
-		defer r.keepFiles(c)
+		defer r.keepFiles(c.Host, c.Save, "stress")
 		var err error
 		if fail0, err = r.runStress(ctx, c, &o); err != nil {
 			return o, err
@@ -294,27 +294,27 @@ func firstLine(s string) string {
 	return ""
 }
 
-// keepFiles copies the clients' scripts and logs beside the ledger. A pair
-// this run stood up takes its work directory with it.
-func (r *Runner) keepFiles(c StressConfig) {
-	entries, err := os.ReadDir(c.Host)
+// keepFiles copies the clients' scripts and logs from host to save, beside
+// the ledger. A pair this run stood up takes its work directory with it.
+func (r *Runner) keepFiles(host, save, verb string) {
+	entries, err := os.ReadDir(host)
 	if err == nil {
-		err = os.MkdirAll(c.Save, 0o755)
+		err = os.MkdirAll(save, 0o755)
 	}
 	if err != nil {
-		r.logf("stress: the clients' files were not kept: %v", err)
+		r.logf("%s: the clients' files were not kept: %v", verb, err)
 		return
 	}
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(c.Host, e.Name()))
+		b, err := os.ReadFile(filepath.Join(host, e.Name()))
 		if err == nil {
-			err = os.WriteFile(filepath.Join(c.Save, e.Name()), b, 0o644)
+			err = os.WriteFile(filepath.Join(save, e.Name()), b, 0o644)
 		}
 		if err != nil {
-			r.logf("stress: %s was not kept: %v", e.Name(), err)
+			r.logf("%s: %s was not kept: %v", verb, e.Name(), err)
 		}
 	}
 }

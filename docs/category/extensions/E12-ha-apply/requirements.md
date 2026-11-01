@@ -90,7 +90,11 @@ master: its rows, the sum of its keys, or the keys not moved), **inconclusive** 
 show the final marker within five minutes without failing, no kill that found an applier, or no kill
 that found `ha_applied_tx_marker` rows above the slave's stored apply position just before), or
 **held**. A slave with no marker table is never held: missed on a failure or on a caught-up slave
-whose table differs, inconclusive otherwise. Its clients' scripts and logs are kept as `stress` keeps them.
+whose table differs, inconclusive otherwise. Where a count read from the applier log went down
+during the run (a rotation), -670s that still grew are missed, since lines are only lost; otherwise
+the run cannot show that no -670 came and is never held either, and `fail_counter` cannot fill the
+gap: it loses the failures counted after it was last stored when a kill comes before the next store.
+Its clients' scripts and logs are kept as `stress` keeps them.
 
 ## 5. Acceptance
 

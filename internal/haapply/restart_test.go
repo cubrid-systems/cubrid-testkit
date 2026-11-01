@@ -73,6 +73,10 @@ func TestARestartVerdictNeedsAKillWithCommitsToSkip(t *testing.T) {
 		{"no kill", func(o *RestartOutcome) { o.Kills, o.Backlog = 0, 0 }, Inconclusive},
 		{"no backlog", func(o *RestartOutcome) { o.Backlog = 0 }, Inconclusive},
 		{"no marker table", func(o *RestartOutcome) { o.Backlog = -1 }, Inconclusive},
+		{"a log that lost lines", func(o *RestartOutcome) { o.Restarts, o.Dup670 = -1, -1 }, Inconclusive},
+		{"a lost log that gained -670s", func(o *RestartOutcome) { o.Restarts, o.Dup670 = -1, 2 }, Missed},
+		{"a lost log and a failure", func(o *RestartOutcome) { o.Restarts, o.Dup670, o.FailDelta = -1, -1, 1 }, Missed},
+		{"a lost log and a key back", func(o *RestartOutcome) { o.Restarts, o.Dup670, o.UnmovedSlave = -1, -1, 1 }, Missed},
 	}
 	for _, c := range cases {
 		o := ok()
@@ -86,7 +90,10 @@ func TestARestartVerdictNeedsAKillWithCommitsToSkip(t *testing.T) {
 // restartPair is a fake pair for a restart run: the clients take two seconds, the
 // slave's pkill finds an applier unless $STATE/noapplier exists (and fails as
 // pkill without procps would under $STATE/pkillbroken), and each kill adds a
-// start to the applier log, as heartbeat starting it again would.
+// start to the applier log, as heartbeat starting it again would: first
+// rotating it as er_file_backup does under $STATE/rotate, and followed by a
+// -670 under $STATE/dup670. The slave's timeout fails under
+// $STATE/notimeout.
 func restartPair(t *testing.T) (*Runner, string, RestartConfig) {
 	r, state, _ := fakePair(t, "0")
 	setState(t, state, "clientlog", "Execute OK. (0.001 sec)\n")
@@ -98,10 +105,16 @@ func restartPair(t *testing.T) (*Runner, string, RestartConfig) {
 	t.Setenv("CUBRID", home)
 	applierLog := filepath.Join(home, "log", "db@localhost_applylogdb_db_m1.err")
 	setState(t, home, "log/db@localhost_applylogdb_db_m1.err", "log applier: log applier started.\n")
+	l := shellQuote(applierLog)
 	pkill := "#!/bin/sh\n[ -f \"$STATE/pkillbroken\" ] && exit 127\n[ -f \"$STATE/noapplier\" ] && exit 1\n" +
-		"echo 'log applier: log applier started.' >> " + shellQuote(applierLog) + "\nexit 0\n"
-	if err := os.WriteFile(filepath.Join(os.Getenv(fakeCSBEnv), "pkill"), []byte(pkill), 0o755); err != nil {
-		t.Fatal(err)
+		"[ -f \"$STATE/rotate\" ] && { rm -f " + l + ".bak; mv " + l + " " + l + ".bak; }\n" +
+		"echo 'log applier: log applier started.' >> " + l + "\n" +
+		"[ -f \"$STATE/dup670\" ] && echo 'failed to apply update replication log, server error: -670' >> " + l + "\nexit 0\n"
+	timeout := "#!/bin/sh\n[ -f \"$STATE/notimeout\" ] && exit 127\nshift\nexec \"$@\"\n"
+	for name, script := range map[string]string{"pkill": pkill, "timeout": timeout} {
+		if err := os.WriteFile(filepath.Join(os.Getenv(fakeCSBEnv), name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, host := range []string{"m1", "s1"} {
 		setState(t, state, "rows."+host, "6")
@@ -251,6 +264,101 @@ func TestAPkillThatFailsIsSaidAndNotCounted(t *testing.T) {
 	}
 	if o.Kills != 0 || !strings.Contains(log.String(), `pkill on s1 said "127"`) {
 		t.Errorf("kills %d, log %q: want none and the pkill failure said", o.Kills, log.String())
+	}
+}
+
+// A slave whose applier log never says the applier started has no applier
+// this run can count the starts of, so the run does not begin.
+func TestARestartRunNeedsAnApplierLogThatSaysItStarted(t *testing.T) {
+	r, state, c := restartPair(t)
+	setState(t, state, "markers", "5")
+	setState(t, os.Getenv("CUBRID"), "log/db@localhost_applylogdb_db_m1.err", "")
+	if _, err := r.Restart(context.Background(), c); err == nil || !strings.Contains(err.Error(), "says the applier started") {
+		t.Errorf("err %v, want a refusal for a log with no start", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Host, "c1.log")); err == nil {
+		t.Errorf("the clients ran on a slave with no applier start")
+	}
+}
+
+// The marker read before each kill is bounded by timeout(1), so a slave with
+// the marker table and no working timeout does not begin a run every read of
+// which would fail.
+func TestARestartRunNeedsTimeoutOnTheSlave(t *testing.T) {
+	r, state, c := restartPair(t)
+	setState(t, state, "markers", "5")
+	setState(t, state, "notimeout", "")
+	if _, err := r.Restart(context.Background(), c); err == nil || !strings.Contains(err.Error(), "no timeout(1) on s1") {
+		t.Errorf("err %v, want a refusal for a slave with no timeout", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Host, "c1.log")); err == nil {
+		t.Errorf("the clients ran on a slave with no timeout")
+	}
+}
+
+// An applier log that lost lines during the run leaves its starts and -670s
+// unknown: the row says so, and the run is judged without them.
+func TestAnApplierLogThatLostLinesIsNotHeld(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	setState(t, state, "markers", "5")
+	setState(t, state, "rotate", "")
+	setState(t, os.Getenv("CUBRID"), "log/db@localhost_applylogdb_db_m1.err.bak", strings.Repeat("log applier: log applier started.\n", 50))
+	o, err := r.Restart(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Kills == 0 || o.Backlog != o.Kills || o.Restarts != -1 || o.Dup670 != -1 || JudgeRestart(o) != Inconclusive {
+		t.Errorf("kills %d backlog %d restarts %d -670 %d verdict %s, want kills with markers, -1, -1, inconclusive",
+			o.Kills, o.Backlog, o.Restarts, o.Dup670, JudgeRestart(o))
+	}
+	var b bytes.Buffer
+	restartRow(&b, o, JudgeRestart(o))
+	if f := strings.Split(strings.TrimSpace(b.String()), "\t"); len(f) != 15 || f[5] != "-" || f[12] != "-" {
+		t.Errorf("the row %q should say - for the restarts and the -670s", b.String())
+	}
+}
+
+// Lines are only lost, so -670s that still grew across a rotation came during
+// the run: at least that many, and the run is missed.
+func TestMinus670sThatGrewAcrossARotationAreMissed(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	setState(t, state, "markers", "5")
+	setState(t, state, "rotate", "")
+	setState(t, os.Getenv("CUBRID"), "log/db@localhost_applylogdb_db_m1.err.bak", strings.Repeat("log applier: log applier started.\n", 50))
+	setState(t, state, "dup670", "")
+	o, err := r.Restart(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Restarts != -1 || o.Dup670 < 1 || JudgeRestart(o) != Missed {
+		t.Errorf("restarts %d -670 %d verdict %s, want -1, at least 1, missed", o.Restarts, o.Dup670, JudgeRestart(o))
+	}
+}
+
+// A kill the slave's channel could not run is said, and the loop goes on to
+// the next; the clients run to their end either way.
+func TestAKillThatCannotBeMadeIsSaidAndTheRunGoesOn(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	setState(t, state, "markers", "5")
+	t.Setenv("FAKE_EXEC_FAIL", "cub_admin [a]pplylogdb")
+	var log bytes.Buffer
+	r.Log = &log
+	o, err := r.Restart(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(log.String(), "a kill on s1 was not made"); o.Kills != 0 || n < 2 || JudgeRestart(o) != Inconclusive {
+		t.Errorf("kills %d, %d failed kills said, verdict %s: want none, the loop past the first, inconclusive; log %q",
+			o.Kills, n, JudgeRestart(o), log.String())
 	}
 }
 

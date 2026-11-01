@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +18,8 @@ import (
 
 // fakeCSBEnv makes the test binary a stand-in for csb: it answers `cluster
 // describe` with one pair, and runs every `node exec` script here with sh, the
-// directory the variable names first on PATH. Every node is this host.
+// directory the variable names first on PATH. Every node is this host. An exec
+// whose script holds $FAKE_EXEC_FAIL fails as csb does.
 const fakeCSBEnv = "HAAPPLY_FAKE_CSB"
 
 func TestMain(m *testing.M) {
@@ -50,6 +52,10 @@ func fakeCSB(args []string, dir string) int {
 				script = args[i+1]
 				break
 			}
+		}
+		if f := os.Getenv("FAKE_EXEC_FAIL"); f != "" && strings.Contains(script, f) {
+			reply(false, map[string]any{})
+			return 1
 		}
 		cmd := exec.Command("sh", "-c", script)
 		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))

@@ -83,7 +83,8 @@ type RestartOutcome struct {
 	// marker table. A kill whose marker read failed counts in neither way.
 	// MarkersPeak is the most markers one kill found.
 	Kills, Backlog, MarkersPeak int
-	// Restarts is how many times the slave's applier log says it started.
+	// Restarts is how many times the slave's applier log says it started, -1
+	// when the log lost lines during the run.
 	Restarts int
 	Stalled  bool
 	// The table on each node: its rows, the sum of its keys, and the keys not
@@ -93,7 +94,9 @@ type RestartOutcome struct {
 	UnmovedMaster, UnmovedSlave int
 	FailDelta                   int
 	// Dup670 is the -670s the slave's applier log gained: an INSERT or a key
-	// change that met a key the slave already had.
+	// change that met a key the slave already had. Where the log lost lines it
+	// is the gain if the count still grew, a floor since lines are only lost,
+	// and -1 otherwise.
 	Dup670 int
 }
 
@@ -101,14 +104,16 @@ type RestartOutcome struct {
 // failing, a -670 in its log, or a caught-up slave whose table is not the
 // master's. A stalled slave that did not fail is behind, which says nothing.
 // Held needs a kill whose applier had commits to skip, so a slave with no
-// marker table is never held.
+// marker table is never held, and a log that lost lines cannot show that no
+// -670 came, so neither is that run: fail_counter alone can miss one, since
+// a kill can come before the coordinator stores it.
 func JudgeRestart(o RestartOutcome) string {
-	failed := o.FailDelta != 0 || o.Dup670 != 0
+	failed := o.FailDelta != 0 || o.Dup670 > 0
 	differ := o.RowsMaster != o.RowsSlave || o.SumMaster != o.SumSlave || o.UnmovedMaster != o.UnmovedSlave
 	switch {
 	case failed || (!o.Stalled && differ):
 		return Missed
-	case o.Stalled || o.Kills == 0 || o.Backlog < 1:
+	case o.Stalled || o.Kills == 0 || o.Backlog < 1 || o.Dup670 < 0:
 		return Inconclusive
 	}
 	return Held
@@ -145,6 +150,8 @@ func (r *Runner) Restart(ctx context.Context, c RestartConfig) (RestartOutcome, 
 	}
 	if markers == 0 {
 		o.Backlog = -1
+	} else if err := r.slaveHasTimeout(ctx); err != nil {
+		return o, err
 	}
 	fail0, err := r.failCounter(ctx)
 	if err != nil {
@@ -217,12 +224,33 @@ func (r *Runner) Restart(ctx context.Context, c RestartConfig) (RestartOutcome, 
 	if err != nil {
 		return o, err
 	}
-	if log1.started < log0.started || log1.dup670 < log0.dup670 {
-		return o, fmt.Errorf("the applier log on %s shrank during the run (rotated?): starts %d to %d, -670s %d to %d",
-			r.slave(), log0.started, log1.started, log0.dup670, log1.dup670)
-	}
 	o.Restarts, o.Dup670 = log1.started-log0.started, log1.dup670-log0.dup670
+	if log1.lostSince(log0) {
+		r.logf("restart: the applier log on %s lost lines during the run (rotated): starts %d to %d, -670s %d to %d",
+			r.slave(), log0.started, log1.started, log0.dup670, log1.dup670)
+		o.Restarts = -1
+		if o.Dup670 <= 0 {
+			o.Dup670 = -1
+		}
+	}
 	return o, nil
+}
+
+// slaveHasTimeout fails the run where the kill script's bound on the marker
+// read is missing: every read would fail and leave the run inconclusive.
+func (r *Runner) slaveHasTimeout(ctx context.Context) error {
+	ch, err := r.Pair.SlaveChannel(0)
+	if err != nil {
+		return err
+	}
+	res, err := ch.Run(ctx, "timeout 1 true 2>/dev/null && echo timeout=yes")
+	if err != nil {
+		return err
+	}
+	if parseTags(res.Stdout)["timeout"] != "yes" {
+		return fmt.Errorf("no timeout(1) on %s to bound the marker reads", r.slave())
+	}
+	return nil
 }
 
 // killLoop kills the slave's applier every d until stop is closed, reading
@@ -298,7 +326,17 @@ echo "markers=${m:--}"
 
 type applierLogCounts struct{ started, dup670 int }
 
-// applierLog counts, in the slave's applier logs and the copies a rotation
+// lostSince says whether the log lost lines after a was read: a count that
+// went down. A rotation (er_file_backup, past error_log_size, 512 MB by
+// default) unlinks the .bak, so one that drops no more start lines and no
+// more -670 lines than the run adds is not seen; only as many -670 lines lost
+// as added can make such a run held. The inodes cannot tell either, since the
+// new log can take the one the .bak freed.
+func (b applierLogCounts) lostSince(a applierLogCounts) bool {
+	return b.started < a.started || b.dup670 < a.dup670
+}
+
+// applierLog counts, in the slave's applier logs and the copy a rotation
 // keeps, the starts and the -670s.
 func (r *Runner) applierLog(ctx context.Context) (applierLogCounts, error) {
 	ch, err := r.Pair.SlaveChannel(0)
@@ -370,7 +408,8 @@ func (r *Runner) compareRestart(ctx context.Context, o *RestartOutcome) error {
 }
 
 // The restart ledger: the run's identity, a header, and one row. backlog is
-// "-" on a slave with no marker table.
+// "-" on a slave with no marker table, restarts and apply_670 where the
+// applier log lost lines.
 func restartHead(w io.Writer, meta []string) {
 	fmt.Fprintf(w, "# %s\n", strings.Join(meta, " "))
 	fmt.Fprintln(w, strings.Join([]string{"master_errors", "clients", "kills", "kills_backlog", "markers_peak", "restarts",
@@ -379,22 +418,25 @@ func restartHead(w io.Writer, meta []string) {
 }
 
 func (o RestartOutcome) fields(verdict string) []string {
-	clients, slave, backlog, sum := "done", "caught", strconv.Itoa(o.Backlog), "same"
+	clients, slave, sum := "done", "caught", "same"
 	if o.Hung {
 		clients = "hung"
 	}
 	if o.Stalled {
 		slave = "stalled"
 	}
-	if o.Backlog < 0 {
-		backlog = "-"
-	}
 	if o.SumMaster != o.SumSlave {
 		sum = "differ"
 	}
-	return []string{strconv.Itoa(o.Errors), clients, strconv.Itoa(o.Kills), backlog, strconv.Itoa(o.MarkersPeak),
-		strconv.Itoa(o.Restarts), strconv.Itoa(o.RowsMaster), strconv.Itoa(o.RowsSlave), sum,
-		strconv.Itoa(o.UnmovedMaster), strconv.Itoa(o.UnmovedSlave), strconv.Itoa(o.FailDelta), strconv.Itoa(o.Dup670),
+	known := func(n int) string {
+		if n < 0 {
+			return "-"
+		}
+		return strconv.Itoa(n)
+	}
+	return []string{strconv.Itoa(o.Errors), clients, strconv.Itoa(o.Kills), known(o.Backlog), strconv.Itoa(o.MarkersPeak),
+		known(o.Restarts), strconv.Itoa(o.RowsMaster), strconv.Itoa(o.RowsSlave), sum,
+		strconv.Itoa(o.UnmovedMaster), strconv.Itoa(o.UnmovedSlave), strconv.Itoa(o.FailDelta), known(o.Dup670),
 		slave, verdict}
 }
 

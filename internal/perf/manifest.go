@@ -57,6 +57,11 @@ type Case struct {
 	JudgeCounters []string `json:"judge_counters"`
 	Background    string   `json:"background"`
 	Notes         string   `json:"notes,omitempty"`
+	// Pairs are the session pairs the case may run in, by name (a perf.conf
+	// pair or a registered branch); without it, every pair. A case whose
+	// conf only some builds take -- a parameter 11.4.6 does not have -- names
+	// the pair whose two builds both take it.
+	Pairs []string `json:"pairs,omitempty"`
 
 	// Conf is the cubrid.conf overrides as the file will carry them: a JSON
 	// string, number or true/false, each written out as text.
@@ -232,7 +237,7 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 		p.add("%v", err)
 		return nil, p
 	}
-	if !presence(p, raw, "", caseKeys, []string{"notes"}) {
+	if !presence(p, raw, "", caseKeys, []string{"notes", "pairs"}) {
 		return nil, p
 	}
 	var c Case
@@ -307,6 +312,17 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 		}
 	}
 	oneOf(p, "background", c.Background, Backgrounds)
+	if _, ok := rawKey(raw, "pairs"); ok && len(c.Pairs) == 0 {
+		p.add("pairs is empty; leave it out to run in every pair")
+	}
+	for i, name := range c.Pairs {
+		switch {
+		case strings.TrimSpace(name) == "":
+			p.add("pairs has an empty name")
+		case contains(c.Pairs[:i], name):
+			p.add("pairs has %q twice", name)
+		}
+	}
 
 	// The fixture's rules that need the case: version agreement, and warming
 	// after a restored snapshot. A fixture with problems of its own is said
@@ -664,6 +680,11 @@ func strict(raw []byte, v any) error {
 		return err
 	}
 	return nil
+}
+
+// RunsIn says whether the case may run in the session pair of that name.
+func (c *Case) RunsIn(pair string) bool {
+	return len(c.Pairs) == 0 || contains(c.Pairs, pair)
 }
 
 func contains(list []string, s string) bool {

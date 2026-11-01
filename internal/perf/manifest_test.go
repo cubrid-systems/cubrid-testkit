@@ -160,6 +160,9 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 			m["fixture"] = map[string]any{"NAME": "narrow_1m", "version": 1}
 		}, "unknown key fixture.NAME"},
 		{"a required key set to null", "txn.commit_single", func(m map[string]any) { m["conf"] = nil }, "missing conf"},
+		{"pairs that are empty", "txn.commit_single", func(m map[string]any) { m["pairs"] = []string{} }, "pairs is empty"},
+		{"a pair named twice", "txn.commit_single", func(m map[string]any) { m["pairs"] = []string{"dev", "dev"} }, `pairs has "dev" twice`},
+		{"a pair with no name", "txn.commit_single", func(m map[string]any) { m["pairs"] = []string{" "} }, "pairs has an empty name"},
 		{"a conf value that is an object", "txn.commit_single", func(m map[string]any) {
 			m["conf"] = map[string]any{"data_buffer_size": map[string]any{"v": 1}}
 		}, "conf.data_buffer_size must be a string"},

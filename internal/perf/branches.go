@@ -44,11 +44,15 @@ func (b Branch) Expired(now time.Time) bool {
 
 // Selects says whether a case id is on the registration's cases= list; a
 // registration without one runs the whole primary list.
-func (b Branch) Selects(id string) bool {
-	if len(b.Cases) == 0 {
+func (b Branch) Selects(id string) bool { return matchCases(b.Cases, id) }
+
+// matchCases says whether a case id matches one of the globs; no globs
+// match every id.
+func matchCases(globs []string, id string) bool {
+	if len(globs) == 0 {
 		return true
 	}
-	for _, g := range b.Cases {
+	for _, g := range globs {
 		if ok, _ := path.Match(g, id); ok {
 			return true
 		}

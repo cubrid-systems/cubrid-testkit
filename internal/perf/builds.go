@@ -91,6 +91,7 @@ type SessionPair struct {
 	ParamDiff          []ParamDiff    `json:"param_diff,omitempty"`
 
 	branch         *Branch     // nil for a pair perf.conf names
+	cases          []string    // its globs: the registration's cases=, or perf.conf's cases.<pair>
 	selected       []*Case     // the cases this pair runs A/B
 	earlier        *pairTime   // the newest earlier time of this pair that ran cases, for the estimate
 	entries        []CaseEntry // what the sidecar got, for the summary
@@ -135,7 +136,7 @@ func pairsFrom(c *Conf, branches []Branch, m *BuildsManifest, stale bool) []*Ses
 		}
 	}
 	for _, pr := range c.Pairs {
-		p := &SessionPair{Name: pr.Name, Canaries: []CanaryResult{}}
+		p := &SessionPair{Name: pr.Name, Canaries: []CanaryResult{}, cases: pr.Cases}
 		switch mp := lookup(pr.Name); {
 		case stale:
 			p.Skipped = "builds stale"
@@ -155,7 +156,7 @@ func pairsFrom(c *Conf, branches []Branch, m *BuildsManifest, stale bool) []*Ses
 	}
 	for i := range branches {
 		b := branches[i]
-		p := &SessionPair{Name: b.Name, Owner: b.Owner, Repo: b.Repo, Canaries: []CanaryResult{}, branch: &b}
+		p := &SessionPair{Name: b.Name, Owner: b.Owner, Repo: b.Repo, Canaries: []CanaryResult{}, branch: &b, cases: b.Cases}
 		switch mp := lookup(b.Name); {
 		case stale:
 			p.Skipped = "builds stale"

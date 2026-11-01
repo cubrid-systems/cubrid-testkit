@@ -112,6 +112,23 @@ func TestOverlapBindsInAnyOrder(t *testing.T) {
 	}
 }
 
+// cases.<name> narrows its pair wherever the file puts the two, as overlap.<name>
+// does: a second pair that runs a few cases only.
+func TestCasesNarrowAPairInAnyOrder(t *testing.T) {
+	suite := copySuite(t)
+	c, err := ReadConf(writeConf(t, suite, "cases.dev = storage.*, txn.commit_single", "pair.dev = develop-HEAD ; develop-prev"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Pairs) != 2 || c.Pairs[0].Cases != nil || strings.Join(c.Pairs[1].Cases, ",") != "storage.*,txn.commit_single" {
+		t.Errorf("pairs = %+v", c.Pairs)
+	}
+	_, err = ReadConf(writeConf(t, suite, "pair.develop = develop-HEAD", "cases.develop = txn.*"))
+	if err == nil || strings.Contains(err.Error(), "has no pair") {
+		t.Errorf("a broken pair blamed its cases: %v", err)
+	}
+}
+
 // FR-25 (2026-10-06): delivery is the hub's dashboard, so neither mode needs
 // a mail address or a webhook; the keys are accepted for the later phase.
 func TestNeitherModeNeedsSomewhereToSend(t *testing.T) {
@@ -149,6 +166,10 @@ func TestConfRefusalsNameTheKey(t *testing.T) {
 		{"a conbench url with no scheme", []string{"conbench.url = 100.118.51.99:5000"}, "conbench.url is not a URL"},
 		{"a tolerance of infinity", []string{"canary_tolerance = inf"}, "canary_tolerance must be a number above 0"},
 		{"a pair with no name", []string{"pair. = a ; b"}, "pair. has no name"},
+		{"cases with no pair", []string{"cases.feature = txn.*"}, "cases.feature has no pair.feature"},
+		{"cases that are empty", []string{"cases.develop ="}, "cases.develop is empty"},
+		{"cases with a broken glob", []string{"cases.develop = txn.[, lib.*"}, `cases.develop has "txn.[", which is not a case-id glob`},
+		{"cases with an empty glob", []string{"cases.develop = txn.*,"}, `cases.develop has "", which is not a case-id glob`},
 	}
 	suite := copySuite(t)
 	for _, c := range cases {

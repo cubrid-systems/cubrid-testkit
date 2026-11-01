@@ -120,10 +120,22 @@ func validateConf(path string, stderr io.Writer) error {
 	}
 	p := &Problems{Path: path}
 	s, suiteErr := LoadSuite(c.Suite)
+	pairs := map[string]bool{}
+	for _, pr := range c.Pairs {
+		pairs[pr.Name] = true
+	}
 	if suiteErr == nil {
 		for _, id := range c.Canaries {
-			if s.Case(id) == nil {
+			switch cs := s.Case(id); {
+			case cs == nil:
 				p.add("canary %s is not a case in %s", id, c.Suite)
+			case len(cs.Pairs) > 0:
+				p.add("canary %s runs only in pair %s; a canary gates every pair", id, strings.Join(cs.Pairs, ", "))
+			}
+		}
+		for _, pr := range c.Pairs {
+			if len(pr.Cases) > 0 && len(selectCases(s, pr.Name, pr.Cases, "")) == 0 {
+				p.add("cases.%s = %s selects no case that may run in pair %s", pr.Name, strings.Join(pr.Cases, ","), pr.Name)
 			}
 		}
 	}
@@ -136,26 +148,32 @@ func validateConf(path string, stderr io.Writer) error {
 			for _, l := range left {
 				fmt.Fprintf(stderr, "note: %s\n", l)
 			}
-			if suiteErr == nil {
-				for _, b := range all {
-					if countSelected(s, b) == 0 {
-						p.add("%s line %d: %s selects no case with cases=%s", c.Branches, b.Line, b.Name, strings.Join(b.Cases, ","))
-					}
+			for _, b := range all {
+				pairs[b.Name] = true
+				if suiteErr == nil && len(selectCases(s, b.Name, b.Cases, "")) == 0 {
+					p.add("%s line %d: %s selects no case with cases=%s", c.Branches, b.Line, b.Name, strings.Join(b.Cases, ","))
 				}
 			}
 		}
 	}
-	return errors.Join(suiteErr, branchErr, p.err())
-}
-
-func countSelected(s *Suite, b Branch) int {
-	n := 0
-	for _, c := range s.Cases {
-		if b.Selects(c.ID) {
-			n++
+	// A case for a pair this conf does not have yet is not a mistake of the
+	// conf: the case can land before the pair does. It runs nowhere until then.
+	if suiteErr == nil && branchErr == nil {
+		for _, cs := range s.Cases {
+			if len(cs.Pairs) == 0 {
+				continue
+			}
+			var known bool
+			for _, name := range cs.Pairs {
+				known = known || pairs[name]
+			}
+			if !known {
+				fmt.Fprintf(stderr, "note: %s runs only in pair %s, which %s does not have: it runs in no pair\n",
+					cs.ID, strings.Join(cs.Pairs, ", "), path)
+			}
 		}
 	}
-	return n
+	return errors.Join(suiteErr, branchErr, p.err())
 }
 
 // list prints what the session would consider: one line per case, with the

@@ -306,7 +306,7 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			p.Skipped = "debug build: " + d
 			continue
 		}
-		p.selected = selectCases(suite, p.branch, s.Only)
+		p.selected = selectCases(suite, p.Name, p.cases, s.Only)
 		// The pair gate's estimate: the newest earlier time it ran cases in.
 		if tp, id := timedPair(s.runs, s.SessionID, p.Name); tp != nil {
 			p.earlier = timeOf(tp, "session "+id)

@@ -625,3 +625,36 @@ func TestTimedPairSkipsRecordsWithoutTime(t *testing.T) {
 		t.Errorf("a pair never run: %+v", p)
 	}
 }
+
+// A case that names its pairs runs in those alone; a pair's globs narrow what
+// may run in it, and --only narrows that.
+func TestSelectCasesHonoursPairsAndGlobs(t *testing.T) {
+	root := copySuite(t)
+	rewrite(t, filepath.Join(caseDir(root, "txn.commit_single"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"dev"} })
+	s, err := LoadSuite(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := func(cs []*Case) string {
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := ids(selectCases(s, "develop", nil, "")); strings.Contains(got, "txn.commit_single") || got == "" {
+		t.Errorf("develop runs %q", got)
+	}
+	if got := ids(selectCases(s, "dev", nil, "")); !strings.Contains(got, "txn.commit_single") || got != ids(s.Cases) {
+		t.Errorf("dev runs %q", got)
+	}
+	if got := ids(selectCases(s, "dev", []string{"txn.*"}, "")); got != "txn.commit_single" {
+		t.Errorf("dev with txn.* runs %q", got)
+	}
+	if got := ids(selectCases(s, "develop", []string{"txn.*"}, "")); got != "" {
+		t.Errorf("develop with txn.* runs %q", got)
+	}
+	if got := ids(selectCases(s, "dev", []string{"txn.*", "lib.*"}, "lib.*")); got != "lib.backupdb" {
+		t.Errorf("dev with --only lib.* runs %q", got)
+	}
+}

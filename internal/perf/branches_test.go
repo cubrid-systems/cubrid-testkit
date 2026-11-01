@@ -33,7 +33,7 @@ func TestBranchesReadTheRegistrations(t *testing.T) {
 		t.Error("cases= does not select by glob")
 	}
 	park := all[1]
-	if park.Until.Format("2006-01-02") != "2026-11-30" || !matchCases(park.Cases, "anything.at_all") {
+	if park.Until.Format("2006-01-02") != "2099-12-31" || !matchCases(park.Cases, "anything.at_all") {
 		t.Errorf("second = %+v", park)
 	}
 	// A line without repo= is on CUBRID/cubrid.

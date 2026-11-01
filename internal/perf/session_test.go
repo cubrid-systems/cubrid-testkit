@@ -625,3 +625,112 @@ func TestTimedPairSkipsRecordsWithoutTime(t *testing.T) {
 		t.Errorf("a pair never run: %+v", p)
 	}
 }
+
+// A case that names its pairs runs in those alone; a pair's globs narrow what
+// may run in it, and --only narrows that.
+func TestSelectCasesHonoursPairsAndGlobs(t *testing.T) {
+	root := copySuite(t)
+	rewrite(t, filepath.Join(caseDir(root, "txn.commit_single"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"dev"} })
+	s, err := LoadSuite(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := func(cs []*Case) string {
+		var out []string
+		for _, c := range cs {
+			out = append(out, c.ID)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := ids(selectCases(s, "develop", nil, "")); strings.Contains(got, "txn.commit_single") || got == "" {
+		t.Errorf("develop runs %q", got)
+	}
+	if got := ids(selectCases(s, "dev", nil, "")); !strings.Contains(got, "txn.commit_single") || got != ids(s.Cases) {
+		t.Errorf("dev runs %q", got)
+	}
+	if got := ids(selectCases(s, "dev", []string{"txn.*"}, "")); got != "txn.commit_single" {
+		t.Errorf("dev with txn.* runs %q", got)
+	}
+	if got := ids(selectCases(s, "develop", []string{"txn.*"}, "")); got != "" {
+		t.Errorf("develop with txn.* runs %q", got)
+	}
+	if got := ids(selectCases(s, "dev", []string{"txn.*", "lib.*"}, "lib.*")); got != "lib.backupdb" {
+		t.Errorf("dev with --only lib.* runs %q", got)
+	}
+}
+
+// The session's wiring of the pair's cases (FR-1, §7.5): each pair plans the
+// cases that may run in it and its globs select -- a conf pair's cases.<pair>,
+// a registration's cases= -- and a pair left with none is skipped, not stood up.
+func TestSessionPlansEachPairsCases(t *testing.T) {
+	dir := t.TempDir()
+	suite := copySuite(t)
+	rewrite(t, filepath.Join(caseDir(suite, "storage.bulk_update"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"dev"} })
+	tgt := fakeBuild(t, filepath.Join(dir, "develop-9fc1a2b"), "9fc1a2b000", "RelWithDebInfo")
+	ref := fakeBuild(t, filepath.Join(dir, "11.4.6-0e7d3c1"), "0e7d3c1000", "RelWithDebInfo")
+	manifest := filepath.Join(dir, "builds.json")
+	side := func(b string) ManifestBuild { return ManifestBuild{Ref: b, Build: b} }
+	writeManifest(t, manifest, time.Now(), map[string]*ManifestPair{
+		"CBRD-27238_escalation": {Target: side(tgt), Reference: side(ref)},
+		"feature/dwb-rework":    {Target: side(tgt), Reference: side(ref)},
+	})
+	conf := strings.Join([]string{
+		"pair.local = " + tgt + " ; " + ref,
+		"pair.dev = " + tgt + " ; " + ref,
+		"cases.dev = storage.*",
+		"pair.none = " + tgt + " ; " + ref,
+		"cases.none = storage.*",
+		"suite = " + suite,
+		"branches = " + filepath.Join(suite, "branches.conf"),
+		"builds = " + dir,
+		"builds.manifest = " + manifest,
+		"canaries = txn.commit_single, lib.backupdb",
+		"canary_tolerance = 0.05",
+		"interleave = case",
+		"session_budget_s = 187200",
+		"csb = /nonexistent/csb",
+		"csb_home = " + filepath.Join(dir, "csb"),
+		"client_image = localhost/perf-client:none",
+		"report.mode = dry",
+	}, "\n") + "\n"
+	confPath := filepath.Join(dir, "perf.conf")
+	if err := os.WriteFile(confPath, []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	code, _, errs := run("session", "-c", confPath, "--dry-run", "--out", out, "--id", "20261107_perf-weekly")
+	if code != ExitOK {
+		t.Fatalf("code=%d\n%s", code, errs)
+	}
+	for _, want := range []string{
+		"pair local: 3 case(s)",                 // every case but the one for dev
+		"pair dev: 1 case(s)",                   // cases.dev, and the case names it
+		"pair none: skipped (no case selected)", // cases.none selects only dev's case
+		"pair CBRD-27238_escalation: 1 case(s)", // cases=txn.*,storage.heap_*
+		"pair feature/dwb-rework: 3 case(s)",    // no cases=: every case but dev's
+	} {
+		if !strings.Contains(errs, want) {
+			t.Errorf("the plan does not say %q:\n%s", want, errs)
+		}
+	}
+	// A canary that names pairs is refused at the start, as validate does.
+	rewrite(t, filepath.Join(caseDir(suite, "txn.commit_single"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"local"} })
+	code, _, errs = run("session", "-c", confPath, "--dry-run", "--out", out)
+	if code != ExitRefused || !strings.Contains(errs, "canary txn.commit_single runs only in pair local; a canary gates every pair") {
+		t.Errorf("code=%d\n%s", code, errs)
+	}
+}
+
+// Newest first, a same-day rerun's -N compared as a number.
+func TestPreviousSessionsOrderReruns(t *testing.T) {
+	root := t.TempDir()
+	for _, id := range []string{"20261024_perf-weekly", "20261031_perf-weekly", "20261031_perf-weekly-2", "20261031_perf-weekly-10", "20261031_perf-exp-b1"} {
+		if err := os.MkdirAll(filepath.Join(root, id), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := strings.Join(previousSessions(root, "20261031_perf-weekly-2"), " ")
+	if want := "20261031_perf-weekly-10 20261031_perf-weekly 20261024_perf-weekly"; got != want {
+		t.Errorf("previousSessions = %q, want %q", got, want)
+	}
+}

@@ -65,12 +65,13 @@ func seedFrom(s string) int64 {
 	return h
 }
 
-// selectCases is the suite's cases a pair runs A/B: the registration's
-// cases= when it has one, narrowed by --only.
-func selectCases(s *Suite, b *Branch, only string) []*Case {
+// selectCases is the suite's cases a pair runs A/B: those that may run in
+// the pair (Case.Pairs), on its globs when it has some -- a registration's
+// cases=, perf.conf's cases.<pair> -- narrowed by --only.
+func selectCases(s *Suite, pair string, globs []string, only string) []*Case {
 	var out []*Case
 	for _, c := range s.Cases {
-		if b != nil && !b.Selects(c.ID) {
+		if !c.RunsIn(pair) || !matchCases(globs, c.ID) {
 			continue
 		}
 		if only != "" {
@@ -81,6 +82,15 @@ func selectCases(s *Suite, b *Branch, only string) []*Case {
 		out = append(out, c)
 	}
 	return out
+}
+
+// canaryPairs says what is wrong with a canary that names pairs: a canary
+// gates every pair, so it has to be one every pair can run.
+func canaryPairs(c *Case) string {
+	if len(c.Pairs) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("canary %s runs only in pair %s; a canary gates every pair", c.ID, strings.Join(c.Pairs, ", "))
 }
 
 // Bounds (§5.9), all upper: the time a thing takes when every pass runs to

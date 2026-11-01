@@ -29,11 +29,11 @@ func TestBranchesReadTheRegistrations(t *testing.T) {
 	if kim.Name != "CBRD-27238_escalation" || kim.Repo != "cubrid-systems/cubrid" || kim.Owner != "kim" || len(kim.Cases) != 2 || !kim.Until.IsZero() {
 		t.Errorf("first = %+v", kim)
 	}
-	if !kim.Selects("txn.commit_single") || kim.Selects("lib.backupdb") || !kim.Selects("storage.heap_scan") {
+	if !matchCases(kim.Cases, "txn.commit_single") || matchCases(kim.Cases, "lib.backupdb") || !matchCases(kim.Cases, "storage.heap_scan") {
 		t.Error("cases= does not select by glob")
 	}
 	park := all[1]
-	if park.Until.Format("2006-01-02") != "2026-11-30" || !park.Selects("anything.at_all") {
+	if park.Until.Format("2006-01-02") != "2099-12-31" || !matchCases(park.Cases, "anything.at_all") {
 		t.Errorf("second = %+v", park)
 	}
 	// A line without repo= is on CUBRID/cubrid.

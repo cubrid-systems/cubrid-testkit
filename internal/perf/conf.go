@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +21,9 @@ type Pair struct {
 	Target    string // an install tree, or a symbolic name the build step resolves
 	Reference string
 	Overlap   string
+	// Cases is cases.<name>: case-id globs the pair runs, as a registration's
+	// cases= is; empty means every case that may run in the pair.
+	Cases []string
 }
 
 // Conf is perf.conf: the same flat properties every other testkit conf is,
@@ -62,7 +66,7 @@ var (
 	Interleaves = []string{"case"}
 	ReportModes = []string{"dry", "team"}
 
-	// A perf.conf key is one of these, or pair.<name> / overlap.<name>.
+	// A perf.conf key is one of these, or pair.<name> / overlap.<name> / cases.<name>.
 	confRequired = []string{"suite", "builds", "builds.manifest", "canaries", "canary_tolerance", "interleave",
 		"session_budget_s", "csb", "csb_home", "client_image", "report.mode"}
 	confOptional = []string{"branches", "branches.max", "memory_cap", "disk_min_gb", "cpuset.server", "cpuset.client",
@@ -119,7 +123,7 @@ func ReadConf(file string) (*Conf, error) {
 				continue
 			}
 			c.Pairs = append(c.Pairs, Pair{Name: name, Target: target, Reference: ref})
-		case strings.HasPrefix(k, "overlap."):
+		case strings.HasPrefix(k, "overlap."), strings.HasPrefix(k, "cases."):
 			// handled after the pairs, whatever order the file has them in
 		case !known[k]:
 			p.add("unknown key %s", k)
@@ -142,6 +146,29 @@ func ReadConf(file string) (*Conf, error) {
 			p.add("%s is empty", k)
 		default:
 			c.Pairs[i].Overlap = v
+		}
+	}
+	for _, k := range cfg.Keys() {
+		if !strings.HasPrefix(k, "cases.") {
+			continue
+		}
+		name, v := strings.TrimPrefix(k, "cases."), strings.TrimSpace(cfg.GetOr(k, ""))
+		i := indexPair(c.Pairs, name)
+		switch {
+		case broken[name]:
+		case i < 0:
+			p.add("%s has no pair.%s to narrow", k, name)
+		case v == "":
+			p.add("%s is empty; leave it out to run every case", k)
+		default:
+			for _, g := range strings.Split(v, ",") {
+				g = strings.TrimSpace(g)
+				if _, err := path.Match(g, ""); g == "" || err != nil {
+					p.add("%s has %q, which is not a case-id glob", k, g)
+					continue
+				}
+				c.Pairs[i].Cases = append(c.Pairs[i].Cases, g)
+			}
 		}
 	}
 

@@ -76,6 +76,55 @@ func TestValidateConfReadsWhatItPointsAt(t *testing.T) {
 	}
 }
 
+// cases.<pair> must select a case that may run in the pair; a case for a
+// pair the conf does not have yet is a note, so the case can land first.
+func TestValidateConfChecksPairCases(t *testing.T) {
+	suite := copySuite(t)
+	code, _, errs := run("validate", writeConf(t, suite, "cases.develop = nothing.*"))
+	if code != ExitRefused || !strings.Contains(errs, "cases.develop = nothing.* selects no case that may run in pair develop") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	rewrite(t, filepath.Join(caseDir(suite, "storage.bulk_update"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"dev"} })
+	code, _, errs = run("validate", writeConf(t, suite))
+	if code != ExitOK || !strings.Contains(errs, "note: storage.bulk_update names pair dev, which") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	// The pair is there and its globs leave the case out: it would never run.
+	code, _, errs = run("validate", writeConf(t, suite, "pair.dev = develop-HEAD ; develop-prev", "cases.dev = storage.*, lib.*"))
+	if code != ExitOK {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	rewrite(t, filepath.Join(caseDir(suite, "lib.backupdb"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"dev", "dve"} })
+	code, _, errs = run("validate", writeConf(t, suite, "pair.dev = develop-HEAD ; develop-prev", "cases.dev = storage.*"))
+	if code != ExitRefused || !strings.Contains(errs, "lib.backupdb names pair dev, whose cases.dev does not select it") ||
+		!strings.Contains(errs, "note: lib.backupdb names pair dve, which") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	rewrite(t, filepath.Join(caseDir(suite, "lib.backupdb"), "case.json"), func(m map[string]any) { delete(m, "pairs") })
+	// A registration that is no longer active is no pair to name.
+	rewrite(t, filepath.Join(caseDir(suite, "cdc.extract_rate"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"old/expired"} })
+	code, _, errs = run("validate", writeConf(t, suite))
+	if !strings.Contains(errs, "note: cdc.extract_rate names pair old/expired, which") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	rewrite(t, filepath.Join(caseDir(suite, "cdc.extract_rate"), "case.json"), func(m map[string]any) { delete(m, "pairs") })
+	// The develop pair cannot run it: cases.develop = storage.* selects nothing.
+	code, _, errs = run("validate", writeConf(t, suite, "cases.develop = storage.*"))
+	if code != ExitRefused || !strings.Contains(errs, "cases.develop = storage.* selects no case") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	code, _, errs = run("validate", writeConf(t, suite, "pair.dev = develop-HEAD ; develop-prev", "cases.dev = storage.*"))
+	if code != ExitOK || strings.Contains(errs, "runs in no pair") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	// A canary gates every pair, so it cannot be one pair's alone.
+	rewrite(t, filepath.Join(caseDir(suite, "txn.commit_single"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"develop"} })
+	code, _, errs = run("validate", writeConf(t, suite))
+	if code != ExitRefused || !strings.Contains(errs, "canary txn.commit_single runs only in pair develop; a canary gates every pair") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+}
+
 func TestListPrintsTheCasesAndTheBound(t *testing.T) {
 	suite := copySuite(t)
 	for _, args := range [][]string{{"list", "--suite", suite}, {"list", "-c", writeConf(t, suite)}} {

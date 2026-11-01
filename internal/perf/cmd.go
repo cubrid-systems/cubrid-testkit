@@ -120,10 +120,27 @@ func validateConf(path string, stderr io.Writer) error {
 	}
 	p := &Problems{Path: path}
 	s, suiteErr := LoadSuite(c.Suite)
+	// Each pair a case may name, with its globs and where they are written.
+	type named struct {
+		globs []string
+		where string
+	}
+	pairs := map[string]named{}
+	for _, pr := range c.Pairs {
+		pairs[pr.Name] = named{pr.Cases, "cases." + pr.Name}
+	}
 	if suiteErr == nil {
 		for _, id := range c.Canaries {
-			if s.Case(id) == nil {
+			switch cs := s.Case(id); {
+			case cs == nil:
 				p.add("canary %s is not a case in %s", id, c.Suite)
+			case canaryPairs(cs) != "":
+				p.add("%s", canaryPairs(cs))
+			}
+		}
+		for _, pr := range c.Pairs {
+			if len(pr.Cases) > 0 && len(selectCases(s, pr.Name, pr.Cases, "")) == 0 {
+				p.add("cases.%s = %s selects no case that may run in pair %s", pr.Name, strings.Join(pr.Cases, ","), pr.Name)
 			}
 		}
 	}
@@ -132,30 +149,38 @@ func validateConf(path string, stderr io.Writer) error {
 		all, err := ReadBranches(c.Branches)
 		branchErr = err
 		if err == nil {
-			_, left := Active(all, c.BranchesMax, time.Now())
+			active, left := Active(all, c.BranchesMax, time.Now())
 			for _, l := range left {
 				fmt.Fprintf(stderr, "note: %s\n", l)
 			}
-			if suiteErr == nil {
-				for _, b := range all {
-					if countSelected(s, b) == 0 {
-						p.add("%s line %d: %s selects no case with cases=%s", c.Branches, b.Line, b.Name, strings.Join(b.Cases, ","))
-					}
+			for _, b := range active {
+				pairs[b.Name] = named{b.Cases, fmt.Sprintf("cases= (%s line %d)", c.Branches, b.Line)}
+			}
+			for _, b := range all {
+				if suiteErr == nil && len(selectCases(s, b.Name, b.Cases, "")) == 0 {
+					p.add("%s line %d: %s selects no case that may run in it with cases=%s", c.Branches, b.Line, b.Name, strings.Join(b.Cases, ","))
+				}
+			}
+		}
+	}
+	// A case that names a pair has to be selected there, or it never runs
+	// in it. A name that is no pair of the conf and no active registration
+	// is a note, not a mistake: the case can land before its pair does, and
+	// does not run there until then.
+	if suiteErr == nil && branchErr == nil {
+		for _, cs := range s.Cases {
+			for _, name := range cs.Pairs {
+				switch n, ok := pairs[name]; {
+				case !ok:
+					fmt.Fprintf(stderr, "note: %s names pair %s, which %s does not have and no active registration is: it does not run there\n",
+						cs.ID, name, path)
+				case !matchCases(n.globs, cs.ID):
+					p.add("%s names pair %s, whose %s does not select it: it never runs there", cs.ID, name, n.where)
 				}
 			}
 		}
 	}
 	return errors.Join(suiteErr, branchErr, p.err())
-}
-
-func countSelected(s *Suite, b Branch) int {
-	n := 0
-	for _, c := range s.Cases {
-		if b.Selects(c.ID) {
-			n++
-		}
-	}
-	return n
 }
 
 // list prints what the session would consider: one line per case, with the

@@ -84,6 +84,15 @@ func selectCases(s *Suite, pair string, globs []string, only string) []*Case {
 	return out
 }
 
+// canaryPairs says what is wrong with a canary that names pairs: a canary
+// gates every pair, so it has to be one every pair can run.
+func canaryPairs(c *Case) string {
+	if len(c.Pairs) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("canary %s runs only in pair %s; a canary gates every pair", c.ID, strings.Join(c.Pairs, ", "))
+}
+
 // Bounds (§5.9), all upper: the time a thing takes when every pass runs to
 // its budget. clock.fits compares them, or pairEstimate, with what is left.
 const (

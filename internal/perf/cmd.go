@@ -120,17 +120,22 @@ func validateConf(path string, stderr io.Writer) error {
 	}
 	p := &Problems{Path: path}
 	s, suiteErr := LoadSuite(c.Suite)
-	pairs := map[string]bool{}
+	// Each pair a case may name, with its globs and where they are written.
+	type named struct {
+		globs []string
+		where string
+	}
+	pairs := map[string]named{}
 	for _, pr := range c.Pairs {
-		pairs[pr.Name] = true
+		pairs[pr.Name] = named{pr.Cases, "cases." + pr.Name}
 	}
 	if suiteErr == nil {
 		for _, id := range c.Canaries {
 			switch cs := s.Case(id); {
 			case cs == nil:
 				p.add("canary %s is not a case in %s", id, c.Suite)
-			case len(cs.Pairs) > 0:
-				p.add("canary %s runs only in pair %s; a canary gates every pair", id, strings.Join(cs.Pairs, ", "))
+			case canaryPairs(cs) != "":
+				p.add("%s", canaryPairs(cs))
 			}
 		}
 		for _, pr := range c.Pairs {
@@ -144,32 +149,34 @@ func validateConf(path string, stderr io.Writer) error {
 		all, err := ReadBranches(c.Branches)
 		branchErr = err
 		if err == nil {
-			_, left := Active(all, c.BranchesMax, time.Now())
+			active, left := Active(all, c.BranchesMax, time.Now())
 			for _, l := range left {
 				fmt.Fprintf(stderr, "note: %s\n", l)
 			}
+			for _, b := range active {
+				pairs[b.Name] = named{b.Cases, fmt.Sprintf("cases= (%s line %d)", c.Branches, b.Line)}
+			}
 			for _, b := range all {
-				pairs[b.Name] = true
 				if suiteErr == nil && len(selectCases(s, b.Name, b.Cases, "")) == 0 {
-					p.add("%s line %d: %s selects no case with cases=%s", c.Branches, b.Line, b.Name, strings.Join(b.Cases, ","))
+					p.add("%s line %d: %s selects no case that may run in it with cases=%s", c.Branches, b.Line, b.Name, strings.Join(b.Cases, ","))
 				}
 			}
 		}
 	}
-	// A case for a pair this conf does not have yet is not a mistake of the
-	// conf: the case can land before the pair does. It runs nowhere until then.
+	// A case that names a pair has to be selected there, or it never runs
+	// in it. A name that is no pair of the conf and no active registration
+	// is a note, not a mistake: the case can land before its pair does, and
+	// does not run there until then.
 	if suiteErr == nil && branchErr == nil {
 		for _, cs := range s.Cases {
-			if len(cs.Pairs) == 0 {
-				continue
-			}
-			var known bool
 			for _, name := range cs.Pairs {
-				known = known || pairs[name]
-			}
-			if !known {
-				fmt.Fprintf(stderr, "note: %s runs only in pair %s, which %s does not have: it runs in no pair\n",
-					cs.ID, strings.Join(cs.Pairs, ", "), path)
+				switch n, ok := pairs[name]; {
+				case !ok:
+					fmt.Fprintf(stderr, "note: %s names pair %s, which %s does not have and no active registration is: it does not run there\n",
+						cs.ID, name, path)
+				case !matchCases(n.globs, cs.ID):
+					p.add("%s names pair %s, whose %s does not select it: it never runs there", cs.ID, name, n.where)
+				}
 			}
 		}
 	}

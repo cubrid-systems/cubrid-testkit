@@ -86,9 +86,28 @@ func TestValidateConfChecksPairCases(t *testing.T) {
 	}
 	rewrite(t, filepath.Join(caseDir(suite, "storage.bulk_update"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"dev"} })
 	code, _, errs = run("validate", writeConf(t, suite))
-	if code != ExitOK || !strings.Contains(errs, "note: storage.bulk_update runs only in pair dev, which") {
+	if code != ExitOK || !strings.Contains(errs, "note: storage.bulk_update names pair dev, which") {
 		t.Errorf("code=%d err=%q", code, errs)
 	}
+	// The pair is there and its globs leave the case out: it would never run.
+	code, _, errs = run("validate", writeConf(t, suite, "pair.dev = develop-HEAD ; develop-prev", "cases.dev = storage.*, lib.*"))
+	if code != ExitOK {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	rewrite(t, filepath.Join(caseDir(suite, "lib.backupdb"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"dev", "dve"} })
+	code, _, errs = run("validate", writeConf(t, suite, "pair.dev = develop-HEAD ; develop-prev", "cases.dev = storage.*"))
+	if code != ExitRefused || !strings.Contains(errs, "lib.backupdb names pair dev, whose cases.dev does not select it") ||
+		!strings.Contains(errs, "note: lib.backupdb names pair dve, which") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	rewrite(t, filepath.Join(caseDir(suite, "lib.backupdb"), "case.json"), func(m map[string]any) { delete(m, "pairs") })
+	// A registration that is no longer active is no pair to name.
+	rewrite(t, filepath.Join(caseDir(suite, "cdc.extract_rate"), "case.json"), func(m map[string]any) { m["pairs"] = []string{"old/expired"} })
+	code, _, errs = run("validate", writeConf(t, suite))
+	if !strings.Contains(errs, "note: cdc.extract_rate names pair old/expired, which") {
+		t.Errorf("code=%d err=%q", code, errs)
+	}
+	rewrite(t, filepath.Join(caseDir(suite, "cdc.extract_rate"), "case.json"), func(m map[string]any) { delete(m, "pairs") })
 	// The develop pair cannot run it: cases.develop = storage.* selects nothing.
 	code, _, errs = run("validate", writeConf(t, suite, "cases.develop = storage.*"))
 	if code != ExitRefused || !strings.Contains(errs, "cases.develop = storage.* selects no case") {

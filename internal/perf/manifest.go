@@ -312,8 +312,8 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 		}
 	}
 	oneOf(p, "background", c.Background, Backgrounds)
-	if _, ok := rawKey(raw, "pairs"); ok && len(c.Pairs) == 0 {
-		p.add("pairs is empty; leave it out to run in every pair")
+	if hasKey(raw, "pairs") && len(c.Pairs) == 0 {
+		p.add("pairs is empty or null; leave it out to run in every pair")
 	}
 	for i, name := range c.Pairs {
 		switch {
@@ -657,6 +657,16 @@ func presence(p *Problems, raw []byte, at string, required, optional []string) b
 		p.add("unknown key %s", strings.Join(unknown, ", "))
 	}
 	return len(missing) == 0 && len(unknown) == 0
+}
+
+// hasKey says whether the object has the key at all, null included.
+func hasKey(raw []byte, key string) bool {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(raw, &keys) != nil {
+		return false
+	}
+	_, ok := keys[key]
+	return ok
 }
 
 func rawKey(raw []byte, key string) (json.RawMessage, bool) {

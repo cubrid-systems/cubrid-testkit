@@ -321,8 +321,25 @@ func previousSessions(root, selfID string) []string {
 		}
 		ids = append(ids, e.Name())
 	}
-	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
+	// Newest first: by day, then a same-day rerun's -N as a number, so -10
+	// comes after -2 (the build step's develop-prev orders them the same way).
+	sort.Slice(ids, func(i, j int) bool {
+		di, ni := runOrder(ids[i])
+		dj, nj := runOrder(ids[j])
+		if di != dj {
+			return di > dj
+		}
+		return ni > nj
+	})
 	return ids
+}
+
+// runOrder splits a run id <day>_perf-weekly[-N] into its day and N (0 for
+// the first run of the day).
+func runOrder(id string) (string, int) {
+	day, rest, _ := strings.Cut(id, "_perf-weekly")
+	n, _ := strconv.Atoi(strings.TrimPrefix(rest, "-"))
+	return day, n
 }
 
 func readSessionPairs(root, id string) []*SessionPair {

@@ -219,6 +219,10 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			fmt.Fprintf(s.Log, "%s: canary %s is not a case in %s\n", confPath, id, c.Suite)
 			return ExitRefused
 		}
+		if msg := canaryPairs(cc); msg != "" {
+			fmt.Fprintf(s.Log, "%s: %s\n", confPath, msg)
+			return ExitRefused
+		}
 		canaries = append(canaries, cc)
 	}
 	var active []Branch
@@ -307,6 +311,11 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 			continue
 		}
 		p.selected = selectCases(suite, p.Name, p.cases, s.Only)
+		if len(p.selected) == 0 {
+			// Its canaries would stand up two clusters to measure nothing.
+			p.Skipped = "no case selected"
+			continue
+		}
 		// The pair gate's estimate: the newest earlier time it ran cases in.
 		if tp, id := timedPair(s.runs, s.SessionID, p.Name); tp != nil {
 			p.earlier = timeOf(tp, "session "+id)

@@ -8,7 +8,9 @@
   `docs/project/evidence/ha/ha-apply-stress-and-the-heap-only-row.md`). 뒤쪽 공백 조건도 충족했다
   (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-trailing-space.md`). `eb31453ff` 의 일곱도
   충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-reduced-keys.md`). `cf8955a91` 의
-  둘도 충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-binary-nul.md`). 셸 프로토타입은
+  둘도 충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-binary-nul.md`). M3(`restart`)도
+  구현됐고 §4 의 완료 조건을 충족했다 (2026-11-01,
+  `docs/project/evidence/ha/ha-apply-restart-and-the-applied-tx-marker.md`). 셸 프로토타입은
   `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
 - **Date:** 2026-10-30
 - **Trigger:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), 구현 CBRD-27508 / CUBRID/cubrid #8052 —
@@ -66,6 +68,13 @@ writeset 이 의존성 하나를 놓치면, 슬레이브는 뒤의 트랜잭션�
   수열). 끼어드는 순서는 실행마다 다르고 seed 가 재현하지 않는다. `--compare-only` 는 작업 부하 없이
   쌍에 남은 표를 비교만 한다. 손상을 남긴 쌍, 멈춘 실행, checkdb 뒤의 표를 지우지 않고 다시 볼 때
   쓴다.
+- `restart` — 부하 중에 슬레이브의 applier 를 죽였다 살려도 커밋이 두 번 적용되지 않는가. 클라이언트마다
+  자기 키를 INSERT 해 커밋하고, 다음 트랜잭션에서 그 키를 옮겨 커밋하기를 되풀이한다. 그동안
+  `--kill-every` 마다 슬레이브의 `cub_admin applylogdb` 를 `kill -9` 하고, heartbeat 가 그것을 다시
+  띄운다. 워커는 coordinator 가 적용 위치를 저장하기 전에 자기 연결로 커밋하므로, 다시 뜬 applier 는
+  이미 적용된 커밋을 만난다. 그것을 다시 적용하면 옮긴 키가 INSERT 로 되살아난다(#8052 `72650ce0d`).
+  `stress` 의 무작위 연산에 kill 을 더한 실행은 marker 이전 head 에서도 same 이었으므로, 이 모양의
+  부하를 따로 둔다.
 - `list` — 패턴 목록과 각 패턴이 공유하는 키.
 
 마커 대기 검사는 동사로 두지 않는다. live 테스트가 이미 그것을 고정한다(F6).
@@ -99,6 +108,26 @@ writeset 이 의존성 하나를 놓치면, 슬레이브는 뒤의 트랜잭션�
   클라이언트가 있으면(접속 실패 등) 실행의 실패다. 쓰이지 않은 쌍도 같게 읽히기 때문이다.
 - `--compare-only` 의 비교는 실행 끝의 비교와 같되 `fail_counter` 는 보지 않는다(전과 후가 없다).
   슬레이브를 기다리는 마커 표 하나를 마스터에 만들고 지운다.
+- `restart` 의 판정도 실행마다 하나다. **missed**(applier 가 실패함: `fail_counter` 가 움직였거나
+  슬레이브의 applier 로그에 -670 이 늘었음. 또는 따라온 슬레이브의 표가 마스터와 다름: 행 수, 키의 합,
+  옮기지 않은 키 수), **inconclusive**(실패 없이 슬레이브가 끝의 마커를 5 분 안에 보이지 못함. 뒤처진
+  슬레이브의 옮기지 않은 키는 되살아난 키인지 아직 적용하지 않은 키인지 가릴 수 없다. 또는 죽일
+  applier 가 있었던 kill 이 없음. 또는 죽이기 직전에 저장된 적용 위치보다 위의 `ha_applied_tx_marker`
+  가 1 행 이상이었던 kill 이 없음), **held**(그 밖). marker 표가 없는 head 는 held 가 될 수 없다: 실패가
+  있거나 따라온 슬레이브의 표가 다르면 missed, 아니면 inconclusive 다. `fail_counter` 는 적용 위치 저장의 실패에도 움직이고,
+  그것도 missed 로 둔다. 클라이언트를 끊은 실행도 판정한다. 끊긴 클라이언트는 덜 썼을 뿐이다.
+- 실행 중에 슬레이브의 applier 로그에서 센 시작 횟수나 -670 수가 줄었으면, 로그가 회전하며 줄을 잃은
+  것이다. 그때 시작 횟수는 알 수 없다. 그래도 -670 이 늘었으면 적어도 그만큼은 실행 중에 쓰였으므로
+  missed 다. 원장에는 그 증가를 하한으로 쓴다. 늘지 않았으면 -670 이 없었다고 말할 수 없으므로 그
+  실행은 held 가 될 수 없다. `fail_counter` 로도 이를 메울 수 없다. `fail_counter` 는 적용 위치와 함께
+  저장되고 시작할 때 저장된 값으로 돌아가므로, 다음 저장 전에 kill 이 오면 마지막 저장 뒤에 센 실패는
+  사라진다.
+- 회전은 로그가 `error_log_size`(기본 512 MB)를 넘으면 `.bak` 을 지우고 로그를 그 이름으로 옮긴다.
+  넘었는지는 쓸 때와, applier 가 뜰 때마다 로그를 열 때 본다. 지운 `.bak` 의 시작 줄과 -670 줄이 둘 다
+  실행이 더한 것보다 많지 않으면 두 수가 줄지 않으므로, 그 회전은 보이지 않는다. 판정을 그르치는 것은
+  지운 -670 줄이 실행이 더한 -670 줄과 같은 수일 때뿐이다. 그때 증가는 0 이고 held 가 될 수 있다.
+  inode 로도 가릴 수 없다. 새 로그가 지운 `.bak` 의 inode 를 다시 받을 수 있기 때문이다(가짜 쌍의
+  테스트에서 그랬다).
 - 종료 코드는 실행이 끝났는지만 말한다(`ha_repl` 과 같다). 판정은 원장에 있다. 슬레이브가 멈추면
   그 패턴의 행을 쓴 뒤 실행을 끝낸다(뒤의 패턴이 남았으면 종료 코드 1). 뒤의 패턴은 모두 그 슬레이브를
   기다리는 것으로 시작한다.
@@ -176,6 +205,13 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   다르게 읽힌 표의 양쪽 읽기. 쌍을 직접 세운 실행은 쌍과 함께 작업 디렉터리를 지우기 때문이다. 그
   디렉터리에 이미 파일이 있으면 쌍을 건드리기 전에 거부한다. 다른 실행의 것을 이번 실행의 것으로
   읽게 되고, 지울 권한도 이 실행에 없다.
+- `restart` 의 원장도 실행 하나에 한 행이다: 마스터 오류 수, 클라이언트를 끊었는지, kill 수, 그중
+  저장된 적용 위치보다 위의 marker 가 있던 kill 수(marker 표가 없으면 `-`)와 한 kill 이 본 그 marker 의
+  최대값, applier 로그가 말하는 시작 횟수, 두 노드의 행 수, 키의 합 비교, 옮기지 않은 키 수(마스터/
+  슬레이브), `fail_counter` 변화, applier 로그의 -670 증가, 슬레이브가 따라왔는지, 판정. 로그가 줄을
+  잃었으면 시작 횟수는 `-` 를 쓰고, -670 수가 늘었으면 그 증가를 하한으로, 아니면 `-` 를 쓴다. 첫 줄은 클러스터, 빌드, 두
+  설정값에 클라이언트 수, 반복 수, kill 간격, timeout 을 더한다. 클라이언트의 스크립트와 로그는
+  `stress` 처럼 원장 옆에 남긴다.
 
 ### 3-7. Go 만
 
@@ -195,7 +231,8 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   `ignore_trailing_space` 를 켠 쌍에서 #8052 `61ee0944a` 가 missed, `17aae152e` 를 담은 `3fb54e549` 가 held 이다.
   `eb31453ff` 의 일곱(§3-4)은 `3fb54e549` 가 missed, `eb31453ff` 를 담은 `fb1636c34` 가 held 이다.
   `cf8955a91` 의 둘(§3-4)은 `ignore_trailing_space` 를 끈 쌍에서 `fb1636c34` 가 missed,
-  `cf8955a91` 을 담은 `b984637bb` 가 held 이다.
+  `cf8955a91` 을 담은 `b984637bb` 가 held 이다. **M3** — `restart`. 완료 조건은 applied-tx marker 를
+  들여온 `72650ce0d` 의 부모 `19e83a5d9` 에서 missed, `b984637bb` 에서 held 다.
 
 ## 5. 기각한 대안
 

@@ -14,6 +14,14 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-restart-and-the-applied-tx-marker](ha-apply-restart-and-the-applied-tx-marker.md) —
+  **2026-11-01.** `testkit ha-apply restart`, M3: clients insert keys of their own and move each in
+  the next transaction while the slave's applier is killed every 5 seconds. On #8052 `19e83a5d9`,
+  before the applied-tx marker of `72650ce0d`, the restarted applier applied commits again: keys came
+  back, their moves failed with -670, and the slave ended with 111 rows the master does not have (a
+  prototype run, read later) or failed 80 times (the command). On `b984637bb` 43 kills, each with
+  markers to skip, left the pair the same. `stress` with the same kills was the same on both heads.
+
 - [ha-apply-and-the-binary-nul](ha-apply-and-the-binary-nul.md) — **2026-11-01.**
   `testkit ha-apply pairs` against #8052 `cf8955a91`, which hashes a string under the binary
   collation with its trailing NULs cut, as the index compares it. A VARCHAR `COLLATE binary` and the

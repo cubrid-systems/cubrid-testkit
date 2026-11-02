@@ -26,14 +26,16 @@ const usage = `usage:
   testkit ha-apply list
   testkit ha-apply pairs (--build DIR | --cluster NAME) [options] [pattern...]
   testkit ha-apply stress (--build DIR | --cluster NAME) [options]
+  testkit ha-apply restart (--build DIR | --cluster NAME) [options]
 
-options of both:
+options of all three:
   --build DIR      stand an HA pair up from this install tree, and take it down after
   --cluster NAME   use this csb pair instead; it needs a client node c1
   --workers N      ha_apply_worker_count of a pair it stands up (default 4)
   --history N      ha_writeset_history_size of a pair it stands up (default: the engine's)
-  --ledger FILE    where the ledger goes (default ha-apply-<verb>-<time>.tsv); stress
-                   keeps the clients' files and any differing reads in FILE minus .tsv, plus .d
+  --ledger FILE    where the ledger goes (default ha-apply-<verb>-<time>.tsv); stress and
+                   restart keep the clients' files (stress: and any differing reads) in FILE
+                   minus .tsv, plus .d
   --keep           keep the pair it stood up
 
 pairs options:
@@ -49,6 +51,12 @@ stress options:
   --ballast N      rows a slow transaction inserts first, at most 10000 (default 3000)
   --timeout D      how long the clients may take before they are stopped, 1s at least (default 30m)
   --compare-only   no workload: compare the tables an earlier run left (--cluster only)
+
+restart options:
+  --clients N      clients at once, at most 20 (default 8)
+  --iters N        keys a client inserts and then moves, at most 100000 (default 3000)
+  --kill-every D   time between two kills of the slave's applier, 1s at least (default 5s)
+  --timeout D      how long the clients may take before they are stopped, 1s at least (default 30m)
 `
 
 // maxRounds keeps every pattern's keys apart: tz0/tz9 write a round as
@@ -72,6 +80,8 @@ func Main(args []string, stdout, stderr io.Writer) int {
 		return pairs(args[1:], stdout, stderr)
 	case "stress":
 		return stress(args[1:], stdout, stderr)
+	case "restart":
+		return restart(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -507,6 +517,124 @@ func stress(args []string, stdout, stderr io.Writer) int {
 		v := JudgeStress(o)
 		fmt.Fprintln(stdout, stressLine(o, v))
 		stressRow(f, o, v)
+	}
+	if cerr := f.Close(); cerr != nil {
+		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, cerr)
+		code = 1
+	}
+	if _, err := os.Stat(c.Save); err == nil {
+		fmt.Fprintf(stderr, "ha-apply: ledger %s, files %s\n", a.ledger, c.Save)
+	} else {
+		fmt.Fprintf(stderr, "ha-apply: ledger %s\n", a.ledger)
+	}
+	return code
+}
+
+type restartArgs struct {
+	pairOpts
+	cfg RestartConfig
+}
+
+// The client node runs one csql per client; 20 is about stress's 21, not a
+// limit of the keys, which stay under restartMove whatever the cap. 100,000
+// iterations are about 10 MB of SQL a client, made in memory.
+const (
+	maxRestartClients = 20
+	maxRestartIters   = 100000
+)
+
+func parseRestart(args []string, stderr io.Writer) (*restartArgs, error) {
+	fs := flag.NewFlagSet("ha-apply restart", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	a := &restartArgs{}
+	pairFlags(fs, &a.pairOpts)
+	c := &a.cfg
+	fs.IntVar(&c.Clients, "clients", 8, "")
+	fs.IntVar(&c.Iters, "iters", 3000, "")
+	fs.DurationVar(&c.KillEvery, "kill-every", 5*time.Second, "")
+	fs.DurationVar(&c.Timeout, "timeout", 30*time.Minute, "")
+	fs.Usage = func() { fmt.Fprint(stderr, usage) }
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	if fs.NArg() > 0 {
+		return nil, fmt.Errorf("restart takes no patterns: %s", strings.Join(fs.Args(), " "))
+	}
+	if err := a.check(fs, "restart"); err != nil {
+		return nil, err
+	}
+	switch {
+	case c.Clients < 1 || c.Clients > maxRestartClients:
+		return nil, fmt.Errorf("--clients must be 1 to %d", maxRestartClients)
+	case c.Iters < 1 || c.Iters > maxRestartIters:
+		return nil, fmt.Errorf("--iters must be 1 to %d", maxRestartIters)
+	case c.KillEvery < time.Second:
+		return nil, fmt.Errorf("--kill-every must be 1s at least")
+	case c.Timeout < time.Second:
+		return nil, fmt.Errorf("--timeout must be 1s at least")
+	}
+	return a, nil
+}
+
+func restart(args []string, stdout, stderr io.Writer) int {
+	a, err := parseRestart(args, stderr)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		fmt.Fprintf(stderr, "ha-apply restart: %v\n", err)
+		return 2
+	}
+	save := strings.TrimSuffix(a.ledger, ".tsv") + ".d"
+	if entries, err := os.ReadDir(save); err == nil && len(entries) > 0 {
+		fmt.Fprintf(stderr, "ha-apply: %s already holds files; give another --ledger\n", save)
+		return 1
+	}
+	f, start, drop, err := ledgerFile(a.ledger)
+	if err != nil {
+		fmt.Fprintf(stderr, "ha-apply: %v\n", err)
+		return 1
+	}
+	headWritten := false
+	defer func() {
+		if !headWritten {
+			drop()
+		}
+	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	s, teardown, err := openPair(ctx, stop, a.pairOpts, "restart", stderr)
+	defer teardown()
+	if err != nil {
+		fmt.Fprintf(stderr, "ha-apply: %v\n", err)
+		return 1
+	}
+
+	c := a.cfg
+	meta := append(s.meta(ctx), fmt.Sprintf("clients=%d", c.Clients), fmt.Sprintf("iters=%d", c.Iters),
+		"kill_every="+c.KillEvery.String(), "timeout="+c.Timeout.String())
+	if err := start(); err != nil {
+		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "# %s\n", strings.Join(meta, " "))
+	restartHead(f, meta)
+	headWritten = true
+
+	dir := filepath.Join("ha-apply", "restart")
+	c.Host = filepath.Join(sandbox.WorkDir(s.cli.Cluster), dir)
+	c.Node = "/work/" + filepath.ToSlash(dir)
+	c.Save = save
+	r := &Runner{Pair: s.pair, Client: s.client, Log: stderr, BarrierFor: barrierFor}
+	code := 0
+	o, err := r.Restart(ctx, c)
+	if err != nil {
+		fmt.Fprintf(stderr, "ha-apply: restart: %v\n", err)
+		code = 1
+	} else {
+		v := JudgeRestart(o)
+		fmt.Fprintln(stdout, restartLine(o, v))
+		restartRow(f, o, v)
 	}
 	if cerr := f.Close(); cerr != nil {
 		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, cerr)

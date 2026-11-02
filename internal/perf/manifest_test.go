@@ -123,6 +123,14 @@ func TestAnHAUtilityMayRunOnTheSlave(t *testing.T) {
 	if n := utilityNode(&Side{N1: sandbox.NewNode(nil, "n1"), N2: sandbox.NewNode(nil, "n2")}, c); n.Name != "n2" {
 		t.Errorf("the utility runs on %s, want n2", n.Name)
 	}
+	// A failover case runs on the master, with no client.node.
+	rewrite(t, filepath.Join(dir, "case.json"), func(m map[string]any) {
+		m["failover"] = true
+		m["client"] = map[string]any{"argv": []string{"bash", "fo.sh"}, "ops": 1}
+	})
+	if c, err = ReadCase(dir); err != nil || !c.Failover {
+		t.Errorf("a failover case: %v, failover=%v", err, c != nil && c.Failover)
+	}
 }
 
 // The Spec's list of what validate refuses (§7.2), one case each, and the
@@ -184,6 +192,16 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 			m["topology"] = "ha"
 			m["cold"] = true
 		}, "cold must be false for topology ha"},
+		{"a failover on a single cluster", "lib.backupdb", func(m map[string]any) { m["failover"] = true }, "failover needs topology ha"},
+		{"a failover through jdbc", "txn.commit_single", func(m map[string]any) {
+			m["topology"] = "ha"
+			m["failover"] = true
+		}, "failover needs the utility driver"},
+		{"a failover on the slave", "lib.backupdb", func(m map[string]any) {
+			m["topology"] = "ha"
+			m["failover"] = true
+			m["client"] = map[string]any{"argv": []string{"bash", "fo.sh"}, "ops": 1, "node": "slave"}
+		}, "failover runs on the master"},
 		{"an HA case on a restored snapshot", "storage.bulk_update", func(m map[string]any) { m["topology"] = "ha" }, "topology ha needs a fixture whose reset leaves the server up"},
 		{"an HA case on a fixture bigger than csb's volume", "txn.commit_single", func(m map[string]any) { m["topology"] = "ha" }, "fixture narrow_1m asks for a 2G first volume"},
 		{"a conf key that is not a parameter name", "txn.commit_single", func(m map[string]any) {

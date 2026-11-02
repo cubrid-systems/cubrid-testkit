@@ -237,7 +237,7 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	}
 	if phase != "measure" {
 		if s.HA {
-			if err := r.haCheck(ctx, s); err != nil {
+			if err := r.haAfterPass(ctx, s, c); err != nil {
 				return p.null("ha: " + err.Error())
 			}
 		}
@@ -258,7 +258,7 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	// than it names; after the snapshots, so the check is outside them. A
 	// failover that also failed the client is said beside the client's reason.
 	if s.HA {
-		if err := r.haCheck(ctx, s); err != nil {
+		if err := r.haAfterPass(ctx, s, c); err != nil {
 			if reason != "" {
 				reason += "; "
 			}
@@ -338,6 +338,16 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		p.Missing[k] = v
 	}
 	return p
+}
+
+// haAfterPass is the HA side's state after a pass: n1 still the master, or,
+// for a case that fails the pair over, the pair settled again with the roles
+// followed (haSettle).
+func (r *Runner) haAfterPass(ctx context.Context, s *Side, c *Case) error {
+	if c.Failover {
+		return r.haSettle(ctx, s, 5*time.Minute)
+	}
+	return r.haCheck(ctx, s)
 }
 
 func (p *pass) null(reason string) *pass {

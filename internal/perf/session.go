@@ -617,11 +617,15 @@ func (ss *sides) all() []*Side {
 	return out
 }
 
-// frozen names the first side that could not be unpaused, or "".
+// frozen names the first side that could not be unpaused, or whose HA roles
+// a failover case left unrestored, or "".
 func (ss *sides) frozen() string {
 	for _, s := range ss.all() {
 		if s.frozen != nil {
 			return fmt.Sprintf("cluster: %s could not be unpaused: %v", s.Role, s.frozen)
+		}
+		if s.lost != nil {
+			return fmt.Sprintf("cluster: %s's HA roles were not restored: %v", s.Role, s.lost)
 		}
 	}
 	return ""
@@ -971,6 +975,8 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 			case !s.Clock.fits(time.Now(), caseBound(c)):
 				s.note("pair %s: %s left, %s needs %s; the rest is skipped (FR-5)", p.Name, s.Clock.left(time.Now()).Round(time.Minute), c.ID, caseBound(c).Round(time.Minute))
 				stop = "budget"
+			case t.lost != nil || ref.lost != nil:
+				broken = (&sides{t: t, r: ref}).frozen()
 			}
 		}
 		if stop != "" || broken != "" {
@@ -1008,6 +1014,15 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 				v = judge(c, cr, reps)
 			} else {
 				v.Why += "; no budget to re-measure"
+			}
+		}
+		if c.Failover {
+			// The master moved with every pass; the next case starts on n1.
+			for _, side := range []*Side{t, ref} {
+				if err := s.restoreN1(ctx, side); err != nil {
+					s.note("pair %s: %s: %v", p.Name, c.ID, err)
+					side.lost = err
+				}
 			}
 		}
 		for _, ps := range cr.Passes {

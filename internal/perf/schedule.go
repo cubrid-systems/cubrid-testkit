@@ -124,6 +124,9 @@ func caseBound(c *Case) time.Duration {
 	if c.Topology == TopologyHA {
 		per += haPassAllowance
 	}
+	if c.Failover {
+		per += failoverAllowance
+	}
 	return time.Duration(passes)*per + fixtureSwitchBound
 }
 
@@ -136,6 +139,10 @@ const deferCheckpointAllowance = time.Minute
 // reset, and the role checks; on the hub they took about a second together.
 const haPassAllowance = 30 * time.Second
 
+// failoverAllowance is what a failover pass adds: the killed node started
+// again (csb node start took 16 s on the hub) and the pair settled.
+const failoverAllowance = time.Minute
+
 func remeasureBound(c *Case) time.Duration {
 	per := time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second
 	if c.Background == "defer" {
@@ -143,6 +150,9 @@ func remeasureBound(c *Case) time.Duration {
 	}
 	if c.Topology == TopologyHA {
 		per += haPassAllowance
+	}
+	if c.Failover {
+		per += failoverAllowance
 	}
 	return time.Duration(remeasurePairs*2) * per
 }

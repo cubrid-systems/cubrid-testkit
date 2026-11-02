@@ -247,24 +247,55 @@ func TestCopyModesReadsEachCopylogdb(t *testing.T) {
 	}
 }
 
-// The role check reads csb ha status: n1 the one active node, and nothing
-// else.
-func TestActiveIsN1(t *testing.T) {
+// The role check reads csb ha status: the node N1 names the one active
+// node, and nothing else.
+func TestActiveIs(t *testing.T) {
 	node := func(name, role string) sandbox.NodeHealth { return sandbox.NodeHealth{Name: name, Role: role} }
 	const cl = "pf-20261102-0000-t"
 	for _, c := range []struct {
 		name  string
+		want  string
 		nodes []sandbox.NodeHealth
 		ok    bool
 	}{
-		{"n1 active", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "standby"), node(cl+"-c1", "unknown")}, true},
-		{"failed over", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, false},
-		{"no active", []sandbox.NodeHealth{node(cl+"-n1", "to_be_active"), node(cl+"-n2", "standby")}, false},
-		{"two actives", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "active")}, false},
+		{"n1 active", "n1", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "standby"), node(cl+"-c1", "unknown")}, true},
+		{"failed over", "n1", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, false},
+		{"failed over, followed", "n2", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, true},
+		{"no active", "n1", []sandbox.NodeHealth{node(cl+"-n1", "to_be_active"), node(cl+"-n2", "standby")}, false},
+		{"two actives", "n1", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "active")}, false},
 	} {
-		if err := activeIsN1(c.nodes, cl); (err == nil) != c.ok {
+		if err := activeIs(c.nodes, cl, c.want); (err == nil) != c.ok {
 			t.Errorf("%s: %v", c.name, err)
 		}
+	}
+}
+
+// After a failover pass: the database nodes sorted by role, the client left
+// out, a node changing roles waited for rather than started; and a swap
+// makes N1 the master and points the replication wait the same way.
+func TestHARolesAndTheSwap(t *testing.T) {
+	node := func(name, role string) sandbox.NodeHealth { return sandbox.NodeHealth{Name: name, Role: role} }
+	const cl = "pf-20261102-0000-t"
+	act, stb, down := haRoles([]sandbox.NodeHealth{node(cl+"-n1", "unknown"), node(cl+"-n2", "active"), node(cl+"-c1", "unknown")}, cl)
+	if strings.Join(act, ",") != cl+"-n2" || len(stb) != 0 || strings.Join(down, ",") != cl+"-n1" {
+		t.Errorf("a killed master: active %v standby %v down %v", act, stb, down)
+	}
+	act, stb, down = haRoles([]sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "to_be_active")}, cl)
+	if len(act) != 0 || len(stb) != 1 || len(down) != 0 {
+		t.Errorf("a promotion under way: active %v standby %v down %v", act, stb, down)
+	}
+	s := &Side{Name: cl, HA: true, N1: sandbox.NewNode(nil, "n1"), N2: sandbox.NewNode(nil, "n2"), pair: &sandbox.Pair{Master: cl + "-n1", Slaves: []string{cl + "-n2"}}}
+	swapRoles(s)
+	if s.N1.Name != "n2" || s.N2.Name != "n1" || s.pair.Master != cl+"-n2" || strings.Join(s.pair.Slaves, ",") != cl+"-n1" {
+		t.Errorf("after the swap: N1 %s N2 %s pair %s %v", s.N1.Name, s.N2.Name, s.pair.Master, s.pair.Slaves)
+	}
+	swapRoles(s)
+	if s.N1.Name != "n1" || s.pair.Master != cl+"-n1" {
+		t.Errorf("after the swap back: N1 %s pair %s", s.N1.Name, s.pair.Master)
+	}
+	r := &Runner{Log: io.Discard}
+	if err := r.restoreN1(context.Background(), s); err != nil {
+		t.Errorf("restoreN1 with n1 the master: %v", err)
 	}
 }
 
@@ -272,6 +303,10 @@ func TestBudgetBoundsAndTheClock(t *testing.T) {
 	c := &Case{ID: "x.y", Warmup: 1, Repeats: 5, BudgetS: 120, WarmS: 10}
 	if got := caseBound(c); got != 6*2*(120+10+60)*time.Second+fixtureSwitchBound {
 		t.Errorf("caseBound = %s", got)
+	}
+	fo := &Case{ID: "ha.fo", Topology: TopologyHA, Failover: true, Warmup: 1, Repeats: 5, BudgetS: 60}
+	if got := caseBound(fo); got != 6*2*(60+60)*time.Second+6*2*(haPassAllowance+failoverAllowance)+fixtureSwitchBound {
+		t.Errorf("caseBound of a failover case = %s", got)
 	}
 	if got := remeasureBound(c); got != 5*2*(130+60)*time.Second {
 		t.Errorf("remeasureBound = %s", got)

@@ -83,7 +83,11 @@ master 에 적재해 복제하고 스냅샷은 만들지 않으며, 이런 케�
 `n1` 이 유일한 active 노드인지는 pair 를 만들 때, 케이스마다, 패스가 끝날 때마다 `csb ha status` 로
 확인한다. pair 를 만들 때는 copylogdb 가 케이스가 정한 `ha_copy_sync_mode` 로 도는지도 본다(cluster-sandbox
 #15 이전의 csb 는 이 키를 버렸다). `utility` 케이스는 `client.argv` 와 `client.prepare` 를 slave 에서 돌릴 수 있다
-(`client.node: "slave"`). guard 3 단계는 데이터베이스 컨테이너 둘을 모두 세고, 메모리 검사는 한 쪽에 서버
+(`client.node: "slave"`). `"failover": true` 인 케이스는 pair 의
+master 를 죽인다(`ha.failover`). 러너는 그 케이스의 패스가 끝날 때마다 죽은 노드를 slave 로 다시 띄우고
+(`csb node start`), active 하나와 standby 하나가 될 때까지 기다린 뒤 `N1` 이 master 를 따르게 한다. 그래서
+다음 패스는 다른 노드를 죽인다. 케이스가 끝나면 `n1` 을 master 로 되돌리고(`csb ha failback`), 되돌리지 못한
+쪽은 그 그룹을 멈춘다. guard 3 단계는 데이터베이스 컨테이너 둘을 모두 세고, 메모리 검사는 한 쪽에 서버
 둘로 센다.
 
 `testkit perf session -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>] [--out <dir>]

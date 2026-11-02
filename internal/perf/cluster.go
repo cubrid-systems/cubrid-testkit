@@ -61,6 +61,10 @@ type Side struct {
 	// frozen is set when the side could not be unpaused: every exec into
 	// it would wait for its timeout, so the pair stops (Design §11).
 	frozen error
+	// lost is set when a failover case left the side's HA roles where
+	// restoreN1 could not put them back: the cases after it would time the
+	// wrong node, so the group stops (sides.frozen).
+	lost error
 	// params is the parameters the cluster's server runs with, and the
 	// client-only ones a client on its node loads (recordParams); nil when
 	// they could not be read.
@@ -226,9 +230,10 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 	return s, nil
 }
 
-// haCheck says whether an HA side's pair still has n1 as its one active
-// node. Every step reads the master as n1 and the slave as n2, so a pair
-// that failed over, or has not settled, would have a pass time the wrong
+// haCheck says whether an HA side's pair still has N1 as its one active
+// node. Every step reads the master as N1 and the slave as N2 -- n1 and n2,
+// unless a failover case moved the master (haSettle) -- so a pair that
+// failed over unasked, or has not settled, would have a pass time the wrong
 // node.
 // A call csb could not answer is asked again, twice, each try bounded at 20 s
 // (a hung csb would otherwise hold each for the CLI's two minutes while the
@@ -250,8 +255,109 @@ func (r *Runner) haCheck(ctx context.Context, s *Side) error {
 	if err != nil {
 		return fmt.Errorf("%s: ha status: %w", s.Role, err)
 	}
-	if err := activeIsN1(nodes, s.Name); err != nil {
+	if err := activeIs(nodes, s.Name, s.N1.Name); err != nil {
 		return fmt.Errorf("%s: %w", s.Role, err)
+	}
+	return nil
+}
+
+// haSettle brings back an HA side whose case failed it over (Case.Failover):
+// one active node and one standby again, the node the case killed started as
+// the slave (csb node start: the service cycled, the heartbeat started, a log
+// the crash left short recopied), and N1 and N2 following the roles, so every
+// later step reads the master as N1. A node that is neither active nor
+// standby nor on its way to either is started once; the wait is bounded.
+func (r *Runner) haSettle(ctx context.Context, s *Side, bound time.Duration) error {
+	deadline := time.Now().Add(bound)
+	started := map[string]bool{}
+	cli := *s.CLI
+	cli.Timeout = 20 * time.Second
+	last := ""
+	for {
+		nodes, err := cli.HAStatus(ctx)
+		if err != nil {
+			last = err.Error()
+		} else {
+			act, stb, down := haRoles(nodes, s.Name)
+			last = fmt.Sprintf("active %v, standby %v, down %v", act, stb, down)
+			switch {
+			case len(act) > 1:
+				return fmt.Errorf("%s: %s has two active nodes %v", s.Role, s.Name, act)
+			case len(act) == 1 && len(stb) == 1:
+				if act[0] != s.Name+"-"+s.N1.Name {
+					swapRoles(s)
+					r.logf("%s: %s's master is %s now", s.Role, s.Name, act[0])
+				}
+				return nil
+			}
+			for _, n := range down {
+				if started[n] {
+					continue
+				}
+				started[n] = true
+				r.logf("%s: starting %s again (csb node start)", s.Role, n)
+				if err := cli.NodeStart(ctx, n); err != nil {
+					r.logf("%s: csb node start %s: %v", s.Role, n, err)
+				}
+			}
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return fmt.Errorf("%s: %s did not settle to one active node and one standby in %s: %s", s.Role, s.Name, bound, last)
+		}
+		if sleepCtx(ctx, 2*time.Second) != nil {
+			return fmt.Errorf("%s: %s did not settle: %s", s.Role, s.Name, last)
+		}
+	}
+}
+
+// haRoles sorts a cluster's database nodes by what csb ha status says of
+// them: active, standby, and down -- a node whose server answers nothing
+// (unknown), which csb node start brings back. A node changing roles
+// (to_be_active, to_be_standby) is in none and is waited for.
+func haRoles(nodes []sandbox.NodeHealth, cluster string) (active, standby, down []string) {
+	for _, n := range nodes {
+		if !strings.HasPrefix(n.Name, cluster+"-n") {
+			continue // a client node has no role
+		}
+		switch strings.ToLower(n.Role) {
+		case "active":
+			active = append(active, n.Name)
+		case "standby":
+			standby = append(standby, n.Name)
+		case "", "unknown":
+			down = append(down, n.Name)
+		}
+	}
+	return active, standby, down
+}
+
+// swapRoles makes N1 the node that is master now and N2 its slave, and the
+// pair the replication wait writes through the same.
+func swapRoles(s *Side) {
+	s.N1, s.N2 = s.N2, s.N1
+	if s.pair != nil {
+		p := *s.pair
+		p.Master, p.Slaves = s.Name+"-"+s.N1.Name, []string{s.Name + "-" + s.N2.Name}
+		s.pair = &p
+	}
+}
+
+// restoreN1 puts n1 back as the master of an HA side a failover case left on
+// n2 (csb ha failback), so the next case starts where every case does. A side
+// it cannot restore is lost: the cases after it would time the wrong node.
+func (r *Runner) restoreN1(ctx context.Context, s *Side) error {
+	if s == nil || !s.HA || s.N1.Name == "n1" {
+		return nil
+	}
+	r.logf("%s: putting %s-n1 back as master (csb ha failback)", s.Role, s.Name)
+	if err := s.CLI.Failback(ctx, s.Name+"-n1"); err != nil {
+		r.logf("%s: csb ha failback: %v", s.Role, err)
+	}
+	if err := r.haSettle(ctx, s, 5*time.Minute); err != nil {
+		return err
+	}
+	if s.N1.Name != "n1" {
+		return fmt.Errorf("%s: %s-n1 is not the master after the failback", s.Role, s.Name)
 	}
 	return nil
 }
@@ -322,10 +428,11 @@ func copyModes(ps string) []string {
 	return out
 }
 
-// activeIsN1 is haCheck's reading of csb ha status: n1 the one active node.
-func activeIsN1(nodes []sandbox.NodeHealth, cluster string) error {
-	if act := sandbox.Actives(nodes); len(act) != 1 || act[0] != cluster+"-n1" {
-		return fmt.Errorf("the active node of %s is %v, not %s-n1: the pair failed over or has not settled", cluster, act, cluster)
+// activeIs is haCheck's reading of csb ha status: node (n1, or n2 after a
+// failover case moved the master) the one active node.
+func activeIs(nodes []sandbox.NodeHealth, cluster, node string) error {
+	if act := sandbox.Actives(nodes); len(act) != 1 || act[0] != cluster+"-"+node {
+		return fmt.Errorf("the active node of %s is %v, not %s-%s: the pair failed over or has not settled", cluster, act, cluster, node)
 	}
 	return nil
 }

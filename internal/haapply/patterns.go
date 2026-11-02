@@ -248,6 +248,33 @@ var Catalog = []Pattern{
 				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, 'Key %d');", p, r, r),
 			}
 		}},
+	// The binary collation compares raw bytes and ignores only trailing NULs
+	// (lang_fastcmp_binary), so 'Key<r>' and the same with a NUL after it are
+	// one key. eb31453ff hashed that NUL as a space, kept wherever trailing
+	// spaces count; #8052 cf8955a91 cuts it as the index does.
+	{Name: "bin_nul", Shares: "VARCHAR COLLATE binary UNIQUE: a trailing NUL",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE t_%s (id INT PRIMARY KEY, s VARCHAR(20) COLLATE binary UNIQUE);", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				Pre: fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2, 'Key%d' || CHR(0));", p, r, r),
+				T1:  fmt.Sprintf("DELETE FROM t_%s WHERE id = %d * 2;", p, r),
+				T2:  fmt.Sprintf("INSERT INTO t_%s VALUES (%d * 2 + 1, 'Key%d');", p, r, r),
+			}
+		}},
+	{Name: "fk_bin_nul", Shares: "FK VARCHAR COLLATE binary: parent with a trailing NUL, child without",
+		Setup: func(p string) string {
+			return fmt.Sprintf("CREATE TABLE parent_%[1]s (s VARCHAR(20) COLLATE binary PRIMARY KEY); "+
+				"CREATE TABLE child_%[1]s (c INT PRIMARY KEY, s VARCHAR(20) COLLATE binary, "+
+				"CONSTRAINT fk_%[1]s FOREIGN KEY (s) REFERENCES parent_%[1]s (s));", p)
+		},
+		Round: func(p string, r int) Round {
+			return Round{
+				T1: fmt.Sprintf("INSERT INTO parent_%s VALUES ('Key%d' || CHR(0));", p, r),
+				T2: fmt.Sprintf("INSERT INTO child_%s VALUES (%d, 'Key%d');", p, r, r),
+			}
+		}},
 
 	{Name: "pk_update", Shares: "PK", Setup: pk,
 		Round: func(p string, r int) Round {

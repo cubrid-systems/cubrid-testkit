@@ -7,7 +7,8 @@
   missed 는 없었다. M2(`stress`)도 구현됐고 §4 의 완료 조건을 충족했다 (2026-10-30,
   `docs/project/evidence/ha/ha-apply-stress-and-the-heap-only-row.md`). 뒤쪽 공백 조건도 충족했다
   (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-trailing-space.md`). `eb31453ff` 의 일곱도
-  충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-reduced-keys.md`). 셸 프로토타입은
+  충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-reduced-keys.md`). `cf8955a91` 의
+  둘도 충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-binary-nul.md`). 셸 프로토타입은
   `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
 - **Date:** 2026-10-30
 - **Trigger:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), 구현 CBRD-27508 / CUBRID/cubrid #8052 —
@@ -132,6 +133,13 @@ org JIRA 에서 `ignore_trailing_space` 옵션을 없애자는 논의가 있다(
 와 FK 에서 한 키로 본다. 인덱스는 NaN 을 모든 키와 같다고 보므로 `dbl_nan` 의 표는 한 번에 한 행만
 갖는다. 새 head 는 NaN 을 쓴 트랜잭션을 커밋 순서로 적용한다(fallback).
 
+#8052 `cf8955a91` 뒤에 둘을 더해 35 개다. `cf8955a91` 은 `eb31453ff` 를 고쳐 올린 커밋이고, 다른 점은
+binary collation 에서 문자열 끝의 NUL 을 잘라 해시한다는 것 하나다. 두 패턴은 `COLLATE binary` 인
+VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 쓴다. binary collation 은 끝의 NUL
+만 무시하고, 끝의 공백은 무시하지 않으며, 문자열 안의 NUL 을 공백으로 보지도 않는다. `eb31453ff` 는
+그 NUL 을 공백으로 바꿔 해시했다. 그래서 뒤쪽 공백을 자르는 `ignore_trailing_space` 를 켠 쌍에서는
+두 값을 같게 해시했고, 끈 쌍(기본값)에서는 다르게 해시했다.
+
 ### 3-5. 클러스터
 
 - 기본은 명령이 쌍을 직접 세운다: `--preset ha --clients 1 --set-hidden ha_apply_worker_count=<N>`,
@@ -186,6 +194,8 @@ org JIRA 에서 `ignore_trailing_space` 옵션을 없애자는 논의가 있다(
   CBRD-27464 의 불일치를 낼 수 있으므로 이 조건에서 뺀다. 뒤쪽 공백 패턴 둘(§3-4)은
   `ignore_trailing_space` 를 켠 쌍에서 #8052 `61ee0944a` 가 missed, `17aae152e` 를 담은 `3fb54e549` 가 held 이다.
   `eb31453ff` 의 일곱(§3-4)은 `3fb54e549` 가 missed, `eb31453ff` 를 담은 `fb1636c34` 가 held 이다.
+  `cf8955a91` 의 둘(§3-4)은 `ignore_trailing_space` 를 끈 쌍에서 `fb1636c34` 가 missed,
+  `cf8955a91` 을 담은 `b984637bb` 가 held 이다.
 
 ## 5. 기각한 대안
 

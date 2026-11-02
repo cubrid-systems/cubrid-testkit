@@ -125,13 +125,17 @@ task 이름은 대소문자를 가리지 않는다. task 가 아닌 이름은 �
 뒤의 task 는 그대로 돈다. `CTP_HOME` 은 환경변수가 있으면 거기서, 없으면 바이너리의 부모
 디렉터리에서 온다.
 
-네 이름은 task 가 아니다. `testkit sizing [suite] [mode]` 는 이 머신이 한 번에 무엇을 돌릴지와
+여섯 이름은 task 가 아니다. `testkit sizing [suite] [mode]` 는 이 머신이 한 번에 무엇을 돌릴지와
 그렇게 정한 근거가 된 런들을 찍고, 아무것도 실행하지 않는다 ([아래](#사용법)).
 `testkit check-cases <scenario> [<init_path>]` 는 코퍼스를 읽어 **실패할 수 없는** 케이스를
 보고한다 — 철자가 틀린 `write_nok`, 파일을 자기 자신과 비교하는 것, 실패로 가는 경로가 아예
 없는 케이스 — 그리고 하나라도 찾으면 1 로 끝나므로 케이스 브랜치의 게이트로 쓸 수 있다.
 `isolation-ctl` 과 `isolation-ctl-install` 은 isolation 컨트롤러와 그 설치기로, 런이 스스로
 호출하며 [ADR-019](docs/project/adr/ADR-019-isolation-controller.md) 에 문서화돼 있다.
+`testkit perf` 와 `testkit ha-apply` 는 cluster-sandbox 클러스터를 몰 뿐 코퍼스를 돌리지 않으므로
+컨테인먼트 앞에서 갈린다. `perf` 는 주간 성능 회귀 러너이고
+([E11](docs/category/extensions/E11-perf-runner/requirements.ko.md), 사용법은 `testkit perf`),
+`ha-apply` 는 병렬 HA applier 를 검사한다 ([아래](#ha-apply--병렬-ha-applier-를-페어에-걸쳐)).
 
 `check-cases` 는 엔진도, 데이터베이스도, 컨테인먼트도 필요 없다 — 텍스트를 읽을 뿐이다. shell
 코퍼스 3,475 케이스에서 **철자가 틀린 판정 호출 일곱 개와 자기 비교 세 개**를, HA 코퍼스 373 개
@@ -187,6 +191,37 @@ sql 계열은 대신 CQT 자신의 기록을 쓴다 — `main.info`, `summary_in
 그대로 돌지 않은 케이스들이다. 패치 자체는
 [cubrid-testkit-patches](https://github.com/cubrid-systems/cubrid-testkit-patches) 에 있고(비공개),
 그 README 가 각각이 무엇을 위한 것인지 말한다.
+
+### `ha-apply` — 병렬 HA applier 를, 페어에 걸쳐
+
+`ha_apply_worker_count` 가 1 보다 큰 슬레이브는 트랜잭션을 여러 worker 로 적용하면서, 충돌하는
+것끼리의 순서만 지킨다 (CBRD-27459, CUBRID/cubrid #8052). `testkit ha-apply` 는 그 순서가 정말
+지켜지는지 묻는다. cluster-sandbox 로 HA 페어를 세우거나 이미 있는 페어를 쓰고, 페어의 클라이언트
+노드에서 마스터로 트랜잭션을 보낸 뒤 두 노드를 비교해 원장에 적는다.
+
+```bash
+export CSB_HOME=<csb 의 상태 디렉터리>  TESTKIT_CSB=<csb 경로>
+testkit ha-apply list
+testkit ha-apply pairs   --build <엔진 설치 디렉터리> [pattern...]
+testkit ha-apply stress  --cluster <클라이언트 노드 c1 이 있는 페어> --ops 0,1,2,3,4,9
+testkit ha-apply restart --cluster <클라이언트 노드 c1 이 있는 페어> --kill node
+testkit ha-apply -h
+```
+
+| 동사 | 묻는 것 | 판정 |
+|---|---|---|
+| `pairs` | writeset 이 서로 다르게 해시할 수 있는 키의 패턴마다, 의존하는 트랜잭션보다 먼저 적용되는 트랜잭션이 있는가 | 패턴마다 한 행: missed, held, inconclusive |
+| `stress` | 작은 키 공간 하나에 N 개 클라이언트를 돌린 뒤 두 노드가 같은가 | damaged, stalled, diverged, hung, same |
+| `restart` | 부하 중에 슬레이브의 applier 를 거듭 죽이거나(`--kill applier`, 기본값) 노드를 거듭 crash 시켜도(`--kill node`) 커밋이 두 번 적용되지 않는가 | missed, held, inconclusive |
+| `list` | 패턴 목록과 각 패턴이 공유하는 키 | — |
+
+`--build DIR` 은 설치 디렉터리로 페어를 세우고(`--workers`, 기본 4), `--keep` 이 없으면 끝에서
+지운다. `--cluster NAME` 은 클라이언트 노드 `c1` 이 있는 csb 페어를 쓴다. 종료 코드는 실행이
+끝났는지만 말하고, 무엇을 찾았는지는 말하지 않는다. 판정은 원장에 있다(`--ledger`, 기본값
+`ha-apply-<verb>-<time>.tsv`). `stress` 와 `restart` 는 클라이언트의 스크립트와 로그를 원장 옆에
+남긴다. 판정마다의 뜻은 [E12 요구사항](docs/category/extensions/E12-ha-apply/requirements.ko.md) 에,
+이렇게 만든 이유는 [ADR-EXT-012](docs/project/adr/ADR-EXT-012-ha-apply.md) 에, 동사마다 #8052 의
+head 들에서 완료 조건을 확인한 실행은 [`evidence/ha/`](docs/project/evidence/ha/README.md) 에 있다.
 
 ## 카테고리
 
@@ -336,7 +371,8 @@ internal/                cli · conf · registry · dispatch · runshell · exec
                          contain (슬롯마다 네임스페이스) · plan (케이스 소요시간) ·
                          patch (케이스별 패치) · sizing (슬롯 수를, 이 머신이 측정한 것에서) ·
                          coredump (죽은 서버의 스택과 그것이 스스로 쓴 크래시 리포트) ·
-                         ctl (isolation 컨트롤러) · status (진행 페이지)
+                         ctl (isolation 컨트롤러) · status (진행 페이지) · perf (`testkit perf`) ·
+                         haapply (`testkit ha-apply`)
 overrides/               이 런이 코퍼스와 다르게 하는 것
   patches/               상류가 받아줄 때까지 들고 있는 코퍼스 수정
   machine-exclusions/    이 머신이 돌릴 수 없는 케이스. 이유와 무엇이 끝내주는지를 각각 달고
@@ -375,6 +411,7 @@ docs/
 | sql 과 medium 을 돌리는 법 | [`category/sql/`](docs/category/sql/README.ko.md) |
 | isolation 을 돌리는 법 | [`category/isolation/`](docs/category/isolation/README.ko.md) |
 | HA 복제를 페어에 걸쳐 시험하는 법 | [`category/ha-repl/`](docs/category/ha-repl/README.ko.md) |
+| 병렬 HA applier 를 검사하는 법 | [`ha-apply`](#ha-apply--병렬-ha-applier-를-페어에-걸쳐) · [`category/extensions/E12-ha-apply/`](docs/category/extensions/E12-ha-apply/requirements.ko.md) |
 | 이 시스템이 무엇을 위한 것인지 | [`project/concept/north-star.md`](docs/project/concept/north-star.md) |
 | 절대 바뀌면 안 되는 것 | [`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) |
 | 무엇이 빠졌고 왜인지 | [`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md) |

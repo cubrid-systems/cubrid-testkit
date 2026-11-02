@@ -55,7 +55,10 @@ stress options:
 restart options:
   --clients N      clients at once, at most 20 (default 8)
   --iters N        keys a client inserts and then moves, at most 100000 (default 3000)
-  --kill-every D   time between two kills of the slave's applier, 1s at least (default 5s)
+  --kill WHAT      applier: kill -9 the slave's applier, which heartbeat starts again;
+                   node: crash the whole slave node while its applier runs, and start it
+                   again (default applier)
+  --kill-every D   time from the end of one kill to the next, 1s at least (default 5s)
   --timeout D      how long the clients may take before they are stopped, 1s at least (default 30m)
 `
 
@@ -65,6 +68,12 @@ const maxRounds = 999
 
 // barrierFor is how long the slave may take to apply a marker.
 const barrierFor = 5 * time.Minute
+
+// crashBarrierFor is barrierFor after a restart run that crashes the slave
+// node, which was slow to catch up: on #8052 b984637bb, 8 crashes under 8
+// clients x 6,000 keys left the slave 6.5 to 7 minutes behind when the
+// clients ended (evidence/ha/ha-apply-restart-and-a-crashed-slave.md).
+const crashBarrierFor = 20 * time.Minute
 
 // Main is the subcommand: exit 0 when the run finished, whatever its
 // verdicts; 1 when it could not run; 2 for a command it cannot read.
@@ -551,6 +560,7 @@ func parseRestart(args []string, stderr io.Writer) (*restartArgs, error) {
 	c := &a.cfg
 	fs.IntVar(&c.Clients, "clients", 8, "")
 	fs.IntVar(&c.Iters, "iters", 3000, "")
+	fs.StringVar(&c.Kill, "kill", KillApplier, "")
 	fs.DurationVar(&c.KillEvery, "kill-every", 5*time.Second, "")
 	fs.DurationVar(&c.Timeout, "timeout", 30*time.Minute, "")
 	fs.Usage = func() { fmt.Fprint(stderr, usage) }
@@ -568,6 +578,8 @@ func parseRestart(args []string, stderr io.Writer) (*restartArgs, error) {
 		return nil, fmt.Errorf("--clients must be 1 to %d", maxRestartClients)
 	case c.Iters < 1 || c.Iters > maxRestartIters:
 		return nil, fmt.Errorf("--iters must be 1 to %d", maxRestartIters)
+	case c.Kill != KillApplier && c.Kill != KillNode:
+		return nil, fmt.Errorf("--kill must be %s or %s", KillApplier, KillNode)
 	case c.KillEvery < time.Second:
 		return nil, fmt.Errorf("--kill-every must be 1s at least")
 	case c.Timeout < time.Second:
@@ -612,7 +624,7 @@ func restart(args []string, stdout, stderr io.Writer) int {
 
 	c := a.cfg
 	meta := append(s.meta(ctx), fmt.Sprintf("clients=%d", c.Clients), fmt.Sprintf("iters=%d", c.Iters),
-		"kill_every="+c.KillEvery.String(), "timeout="+c.Timeout.String())
+		"kill="+c.Kill, "kill_every="+c.KillEvery.String(), "timeout="+c.Timeout.String())
 	if err := start(); err != nil {
 		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, err)
 		return 1
@@ -626,6 +638,14 @@ func restart(args []string, stdout, stderr io.Writer) int {
 	c.Node = "/work/" + filepath.ToSlash(dir)
 	c.Save = save
 	r := &Runner{Pair: s.pair, Client: s.client, Log: stderr, BarrierFor: barrierFor}
+	if c.Kill == KillNode {
+		r.BarrierFor = crashBarrierFor
+	}
+	// The first interrupt stops the run, which still waits for a crash and
+	// its start under way (Runner.Restart). A second one ends testkit there,
+	// saying what that may leave; this stops before the teardown, so a
+	// second interrupt still reaches a teardown that hangs.
+	defer secondInterrupt(ctx, stderr, restartLeft(c.Kill, s.cli.Cluster, s.client.Name, c.Node, r.slave(), a.build != "" && !a.keep))()
 	code := 0
 	o, err := r.Restart(ctx, c)
 	if err != nil {
@@ -646,6 +666,68 @@ func restart(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "ha-apply: ledger %s\n", a.ledger)
 	}
 	return code
+}
+
+// restartLeft is what a restart run ended at once may leave, each with the
+// csb command that clears it: the clients, when a terminal's ^C also cut off
+// the csb that kills them; under --kill node a slave crashed and not started
+// again; and a pair the run stood up to take down at its end.
+func restartLeft(kill, cluster, client, node, slave string, stoodUp bool) []string {
+	left := []string{fmt.Sprintf("the clients on %s, if their kill was cut off: csb node exec --cluster %s %s -- %s",
+		client, cluster, client, shellQuote("kill -9 $(cat "+node+"/pids)"))}
+	if kill == KillNode {
+		left = append(left, fmt.Sprintf("%s down, if a crash was under way: csb node start --cluster %s %s", slave, cluster, slave))
+	}
+	if stoodUp {
+		left = append(left, fmt.Sprintf("the pair %s, which this run stood up: csb cluster destroy --cluster %s --purge", cluster, cluster))
+	}
+	return left
+}
+
+// secondInterrupt ends testkit at the second interrupt, the first having
+// stopped the run through ctx, after saying on stderr what it may leave. It
+// returns the function that stops it.
+func secondInterrupt(ctx context.Context, stderr io.Writer, left []string) func() {
+	// Read before the registration, so that an interrupt between the two is
+	// counted once, by ch.
+	n := 0
+	if ctx.Err() != nil {
+		n = 1
+	}
+	ch := make(chan os.Signal, 2)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case sig := <-ch:
+				if n++; n >= 2 {
+					fmt.Fprint(stderr, leftBehind(left))
+					code := 130
+					if s, ok := sig.(syscall.Signal); ok {
+						code = 128 + int(s)
+					}
+					exit(code)
+				}
+			}
+		}
+	}()
+	return func() {
+		signal.Stop(ch)
+		close(done)
+	}
+}
+
+// exit is os.Exit but in a test of secondInterrupt.
+var exit = os.Exit
+
+func leftBehind(left []string) string {
+	if len(left) == 0 {
+		return "ha-apply: a second interrupt; testkit ends now\n"
+	}
+	return "ha-apply: a second interrupt; testkit ends now, and may leave:\n  " + strings.Join(left, "\n  ") + "\n"
 }
 
 // stallFor is how long the slave may take to apply a round's T1 before it

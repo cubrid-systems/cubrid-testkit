@@ -582,7 +582,7 @@ engine-suite `feat/spatial-probes` 브랜치)에 귀속되며, 그 트랙이 재
 | E9 | 조건부 | **E5 선행** + SERVER_MODE in-process 기동(확인됨) + **E10** | extensions/E9-storage-fuzzing/ |
 | E10 | 즉시 후보 | — (엔진 변경 없음) | extensions/E10-xasl-fixtures/ |
 | E11 | 진행 중 — `run` M2 완료(2026-10-03), `session` M3 | cluster-sandbox #8~#12, 허브(M0) — 완료 | extensions/E11-perf-runner/ |
-| E12 | 진행 중 — ADR-EXT-012 제안(2026-10-30), M1 `pairs`·`list` | — | extensions/E12-ha-apply/ |
+| E12 | 진행 중 — ADR-EXT-012 제안(2026-10-30), M1 `pairs`·`list`, M2 `stress`, M3 `restart`(`--kill node` 포함) 완료(2026-11-02) | — | extensions/E12-ha-apply/ |
 
 근거: `survey/dbms-testing-ecosystem.md` (8축 분류, §11 카탈로그 확장 후보).
 

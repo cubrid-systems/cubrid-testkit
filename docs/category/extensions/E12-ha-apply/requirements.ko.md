@@ -4,7 +4,8 @@
 
 **출처:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), CBRD-27508 / CUBRID/cubrid #8052 (구현),
 `docs/project/evidence/ha/parallel-apply-*` 의 셸 프로토타입과 그 결과
-**상태:** incubating — **진행 중** (ADR-EXT-012 제안 2026-10-30, M1 은 `pairs` 와 `list`)
+**상태:** incubating — **진행 중** (ADR-EXT-012 제안 2026-10-30. M1 `pairs`·`list`, M2 `stress`, M3
+`restart` 가 구현되어 §5 를 충족했다)
 **축:** 새 오라클 — 슬레이브가 서로 의존하는 트랜잭션을 적용하는 순서
 
 ---
@@ -37,7 +38,7 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 |---|---|
 | `pairs` | 패턴마다 T1 은 ballast 를 쓴 뒤 키 하나를 쓰고, 그 뒤에 커밋되는 T2 는 그 키에 의존하며 witness 를 쓴다. T2 가 T1 보다 먼저 적용되는 일이 있는가? |
 | `stress` (M2) | 작은 키 공간 하나에 N 개 클라이언트가 결정적 부하를 건다. 두 노드가 같은 상태로 끝나는가 — PK 로 읽어서, heap 행 수로, 고아 행 없이, 적용 실패 없이? |
-| `restart` (M3) | 클라이언트마다 자기 키를 INSERT 하고 다음 트랜잭션에서 그 키를 옮기기를 되풀이하는 동안 슬레이브의 applier 를 거듭 죽인다. 다시 뜬 applier 가 이미 커밋된 트랜잭션을 한 번 더 적용하는가? |
+| `restart` (M3) | 클라이언트마다 자기 키를 INSERT 하고 다음 트랜잭션에서 그 키를 옮기기를 되풀이하는 동안 슬레이브의 applier 를 거듭 죽인다(`--kill node` 는 슬레이브 노드 전체를 crash 시키고 다시 띄운다). 다시 뜬 applier 가 이미 커밋된 트랜잭션을 한 번 더 적용하는가? |
 | `list` | 패턴 목록과 각 쌍이 공유하는 것. |
 
 패턴은 Go 안의 닫힌 목록이다. PK, UNIQUE, REVERSE UNIQUE, FK(단일·복합·CASCADE), savepoint, DDL,
@@ -81,8 +82,9 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 
 `restart` 실행의 판정도 하나다. **missed**(applier 가 실패했다: `fail_counter` 가 움직였거나 슬레이브의
 applier 로그에 -670 이 늘었다. 또는 따라온 슬레이브의 표가 마스터와 다르다: 행 수, 키의 합, 옮기지 않은
-키 수), **inconclusive**(실패 없이 슬레이브가 끝의 마커를 5 분 안에 보이지 못했다. 또는 죽일 applier 가
-있었던 kill 이 없다. 또는 죽이기 직전에 저장된 적용 위치보다 위의 `ha_applied_tx_marker` 가 1 행
+키 수), **inconclusive**(실패 없이 슬레이브가 끝의 마커를 5 분(`--kill node` 는 20 분) 안에 보이지
+못했다. 또는 죽일 applier 가 있었던 kill 이 없다(`--kill node` 는 applier 가 떠 있던 슬레이브의 crash).
+또는 죽이기 직전에 저장된 적용 위치보다 위의 `ha_applied_tx_marker` 가 1 행
 이상이었던 kill 이 없다), **held** 셋이다. marker 표가 없는 슬레이브는 held 가 될 수 없다. 실패가 있거나
 따라온 슬레이브의 표가 다르면 missed, 아니면 inconclusive 다. 실행 중에 applier 로그에서 센 시작 횟수나
 -670 수가 줄었으면(회전) 로그가 줄을 잃은 것이다. 그래도 -670 이 늘었으면 적어도 그만큼은 실행 중에 쓰였으므로
@@ -105,7 +107,7 @@ missed 다. 늘지 않았으면 그 실행은 -670 이 없었다고 말할 수 �
 - **binary collation 의 뒤쪽 NUL** (#8052 `cf8955a91` 뒤): `ignore_trailing_space` 를 끈 쌍에서 패턴
   둘이 `fb1636c34` 에서 **missed**, `b984637bb` 에서 **held** 다.
 - **M3** (`restart`): applied-tx marker 를 들여온 #8052 `72650ce0d` 의 부모 `19e83a5d9` 에서 실행이
-  **missed**, `b984637bb` 에서 **held** 다.
+  **missed**, `b984637bb` 에서 **held** 다. `--kill node` 도 그렇다.
 
 ## 6. 범위 밖
 

@@ -182,3 +182,34 @@ func (c *CLI) ClearFaults(ctx context.Context, selector string) ([]Fault, error)
 	}
 	return data.Cleared, nil
 }
+
+// CrashSlave and StartSlave are `csb node kill` and `csb node start` on slave
+// n, counting from zero. The kill is a crash: the node's CUBRID processes get
+// SIGKILL and the server does not flush. The start stops the service, starts
+// heartbeat, waits up to 45 seconds for the node to join, and recopies a
+// replication log the crash left short. As with a partition, csb owns what a
+// crash is; these name the verb. csb runs detached (CLI.Detach): a crash
+// followed by a start that ^C cut in between would leave the slave down.
+func (p *Pair) CrashSlave(ctx context.Context, n int) error {
+	name, err := p.slaveName(n)
+	if err != nil {
+		return err
+	}
+	_, err = p.detached().call(ctx, "node", "kill", name)
+	return err
+}
+
+func (p *Pair) StartSlave(ctx context.Context, n int) error {
+	name, err := p.slaveName(n)
+	if err != nil {
+		return err
+	}
+	_, err = p.detached().callLong(ctx, "node", "start", name)
+	return err
+}
+
+func (p *Pair) detached() *CLI {
+	c := *p.cli
+	c.Detach = true
+	return &c
+}

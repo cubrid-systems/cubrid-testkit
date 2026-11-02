@@ -439,9 +439,9 @@ func activeIs(nodes []sandbox.NodeHealth, cluster, node string) error {
 
 // waitSlave waits until the slave of an HA side shows a write made on the
 // master now, so a pass starts on a pair that holds one database and the
-// apply of the reset is over. The slave's applier is resumed first: a case
-// that stops it (ha.apply_insert) and is cut short leaves it stopped, and
-// every pass after would wait here to its bound. WaitForReplication drops
+// apply of the reset is over. The slave's copylogdb and applier are resumed
+// first: a case that stops them (ha.apply_insert, ha.catchup) and is cut short
+// leaves them stopped, and every pass after would wait here to its bound. WaitForReplication drops
 // its marker table as it returns, and the slave applies that DROP after: a
 // statement of milliseconds, which can land in the window of a case that
 // stops the applier before it.
@@ -449,9 +449,9 @@ func (r *Runner) waitSlave(ctx context.Context, s *Side, bound time.Duration) er
 	if s.pair == nil {
 		return fmt.Errorf("%s: %s was not described as an HA pair", s.Role, s.Name)
 	}
-	res, err := r.exec(ctx, s.N2, `pkill -CONT -f '^cub_admin applylogdb' || echo no-applylogdb`, time.Minute)
+	res, err := r.exec(ctx, s.N2, `pkill -CONT -f '^cub_admin copylogdb'; pkill -CONT -f '^cub_admin applylogdb' || echo no-applylogdb`, time.Minute)
 	if err != nil {
-		return fmt.Errorf("%s: resuming the slave's applier: %w", s.Role, err)
+		return fmt.Errorf("%s: resuming the slave's copy and applier: %w", s.Role, err)
 	}
 	if strings.Contains(res.Stdout, "no-applylogdb") {
 		r.logf("%s: no applylogdb on %s-n2 to resume; the wait for the slave can run to its bound", s.Role, s.Name)

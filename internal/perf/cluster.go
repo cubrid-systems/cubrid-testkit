@@ -313,7 +313,7 @@ func (r *Runner) haSettle(ctx context.Context, s *Side, bound time.Duration) err
 				err := cli.NodeStart(sctx, n.Name)
 				cancel()
 				if err != nil {
-					return fmt.Errorf("%s: csb node start %s: %w", s.Role, n.Name, err)
+					return fmt.Errorf("%s: csb node start %s, within the settle's %s: %w", s.Role, n.Name, bound, err)
 				}
 			}
 		}
@@ -360,7 +360,8 @@ func names(nodes []sandbox.NodeHealth) []string {
 }
 
 // registered is a node whose server the heartbeat has: registered_and_active
-// or _standby. A standby whose server is up and not registered has no applier.
+// or _standby. It says nothing of the standby's applier, which the slave wait
+// after the settle checks.
 func registered(n sandbox.NodeHealth) bool {
 	return strings.HasPrefix(n.ServerState, "registered_and_")
 }
@@ -397,6 +398,9 @@ func (r *Runner) restoreN1(ctx context.Context, s *Side) error {
 		}
 		if err := r.haSettle(ctx, s, 5*time.Minute); err != nil {
 			return err
+		}
+		if s.N1.Name != "n1" {
+			return fmt.Errorf("%s: %s-n1 is not the master after the failback", s.Role, s.Name)
 		}
 	}
 	if err := r.haCheck(ctx, s); err != nil {
@@ -483,8 +487,9 @@ func activeIs(nodes []sandbox.NodeHealth, cluster, node string) error {
 // waitSlave waits until the slave of an HA side shows a write made on the
 // master now, so a pass starts on a pair that holds one database and the
 // apply of the reset is over. The slave's copylogdb and applier are resumed
-// first: a case that stops them (ha.apply_insert, ha.catchup) and is cut short
-// leaves them stopped, and every pass after would wait here to its bound. WaitForReplication drops
+// first: a case that stops either (ha.apply_insert stops the applier) and is
+// cut short leaves it stopped, and every pass after would wait here to its
+// bound. WaitForReplication drops
 // its marker table as it returns, and the slave applies that DROP after: a
 // statement of milliseconds, which can land in the window of a case that
 // stops the applier before it.

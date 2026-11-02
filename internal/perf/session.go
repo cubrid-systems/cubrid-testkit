@@ -646,7 +646,7 @@ func (s *Session) dropLost(ss *sides, dir string) {
 		if *slot == nil || (*slot).lost == nil {
 			continue
 		}
-		s.note("%s", lostReason(*slot))
+		s.logf("destroying %s, whose HA roles were not restored", (*slot).Name)
 		s.keepLogs(*slot, dir)
 		if err := s.destroySide(*slot); err != nil {
 			s.note("teardown of a lost side: %v", err)

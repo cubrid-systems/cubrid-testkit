@@ -148,6 +148,46 @@ func TestConfGroupsFollowTheShuffledOrder(t *testing.T) {
 	}
 }
 
+// An HA pair holds the one database csb made, the fixture's: HA cases group
+// by fixture as well as conf, never with a single cluster, and the memory
+// check counts the slave's buffer too.
+func TestHACasesGroupByFixtureAndCountBothServers(t *testing.T) {
+	mk := func(id, topology, fixture string, conf map[string]string) *Case {
+		return &Case{ID: id, Topology: topology, Fixture: FixtureRef{Name: fixture, Version: 1}, Conf: conf}
+	}
+	cases := []*Case{
+		mk("txn.a", TopologySingle, "narrow_1m", map[string]string{"data_buffer_size": "3G"}),
+		mk("ha.b", TopologyHA, "ha_rep", map[string]string{"data_buffer_size": "3G"}),
+		mk("ha.c", TopologyHA, "ha_other", map[string]string{"data_buffer_size": "3G"}),
+		mk("ha.d", TopologyHA, "ha_rep", map[string]string{"data_buffer_size": "3G", "ha_copy_sync_mode": "async"}),
+		mk("ha.e", TopologyHA, "ha_rep", map[string]string{"data_buffer_size": "3G"}),
+	}
+	var keys []string
+	for _, g := range confGroups(cases) {
+		var ids []string
+		for _, c := range g.Cases {
+			ids = append(ids, c.ID)
+		}
+		keys = append(keys, g.Key+" "+strings.Join(ids, ","))
+	}
+	want := []string{
+		"data_buffer_size=3G txn.a",
+		"ha(ha_rep);data_buffer_size=3G ha.b,ha.e",
+		"ha(ha_other);data_buffer_size=3G ha.c",
+		"ha(ha_rep);data_buffer_size=3G;ha_copy_sync_mode=async ha.d",
+	}
+	if strings.Join(keys, "\n") != strings.Join(want, "\n") {
+		t.Errorf("groups:\n%s\nwant:\n%s", strings.Join(keys, "\n"), strings.Join(want, "\n"))
+	}
+	s := &Session{Conf: &Conf{MemoryCap: "8G"}}
+	if why := s.groupMemory(confGroup{Cases: cases[:1]}, false); why != "" {
+		t.Errorf("a single group of 2 × 3G under 8G was refused: %s", why)
+	}
+	if why := s.groupMemory(confGroup{Cases: cases[1:2]}, false); !strings.Contains(why, "4 × data_buffer_size=3G") {
+		t.Errorf("an HA group of 4 × 3G under 8G: %q", why)
+	}
+}
+
 func TestBudgetBoundsAndTheClock(t *testing.T) {
 	c := &Case{ID: "x.y", Warmup: 1, Repeats: 5, BudgetS: 120, WarmS: 10}
 	if got := caseBound(c); got != 6*2*(120+10+60)*time.Second+fixtureSwitchBound {

@@ -96,12 +96,26 @@ type JDBCClient struct {
 // after the runner's vacuum wait and before its snapshots of the server, so
 // it can leave the server in the state argv is timed from
 // (txn.restart_recovery: an open transaction to undo, which the vacuum wait
-// would otherwise wait on).
+// would otherwise wait on). Node is the node both run in: empty is the
+// database node (the master, in topology ha), slave the HA pair's other
+// one (ha.apply_insert stops and releases the slave's applier there).
 type UtilityClient struct {
 	Argv    []string `json:"argv"`
 	Ops     int      `json:"ops"`
 	Prepare []string `json:"prepare,omitempty"`
+	Node    string   `json:"node,omitempty"`
 }
+
+// The topologies a case can name: one database node, or an HA pair csb
+// stands up -- a master and a slave, each running its server under the
+// heartbeat, which also starts copylogdb and applylogdb.
+const (
+	TopologySingle = "single"
+	TopologyHA     = "ha"
+)
+
+// UtilityNodeSlave is the one value client.node takes.
+const UtilityNodeSlave = "slave"
 
 // CDCClient runs in the client container: a program linked to libcubridcs,
 // connected to the server directly.
@@ -133,8 +147,8 @@ type Fixture struct {
 // The closed vocabularies. A value outside one is a refusal that names it.
 var (
 	Grades      = []string{"A", "B", "C"}
-	Modules     = []string{"sql", "lib", "storage", "txn", "cdc"}
-	Topologies  = []string{"single"}
+	Modules     = []string{"sql", "lib", "storage", "txn", "cdc", "ha"}
+	Topologies  = []string{TopologySingle, TopologyHA}
 	Drivers     = []string{"jdbc", "utility", "cdc-api"}
 	Ops         = []string{"request", "row", "commit", "item", "connect", "run"}
 	Metrics     = []string{"ops_per_s", "latency_s", "elapsed_s"}
@@ -281,6 +295,19 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 		p.add("clients must be 1 or more for a %s client, got %d", c.Driver, c.Clients)
 	}
 	readClient(p, &c)
+	if c.Utility != nil && c.Utility.Node != "" {
+		switch {
+		case c.Utility.Node != UtilityNodeSlave:
+			p.add("client.node %q is not a node this runner knows: %s, or leave it out for the database node", c.Utility.Node, UtilityNodeSlave)
+		case c.Topology != TopologyHA:
+			p.add("client.node %s needs topology %s; a %s cluster has one database node", UtilityNodeSlave, TopologyHA, c.Topology)
+		}
+	}
+	// An HA server is the heartbeat's to start and stop: cubrid server
+	// start and stop refuse it ("The server was configured for HA.").
+	if c.Topology == TopologyHA && c.Cold {
+		p.add("cold must be false for topology %s: the cold sequence restarts the server, and the heartbeat owns an HA server", TopologyHA)
+	}
 	oneOf(p, "op", c.Op, Ops)
 	oneOf(p, "metric", c.Metric, Metrics)
 	if c.WarmS < 0 {
@@ -361,6 +388,9 @@ func checkFixtureUse(p *Problems, c *Case, f *Fixture) {
 	if f.Reset == ResetRestoreSnapshot && c.WarmS == 0 {
 		p.add("fixture %s restores a snapshot, which restarts the server; warm_s must be above 0", f.Name)
 	}
+	if f.Reset == ResetRestoreSnapshot && c.Topology == TopologyHA {
+		p.add("fixture %s restores a snapshot, which stops the server; topology %s needs a fixture whose reset leaves the server up", f.Name, TopologyHA)
+	}
 }
 
 // confText turns the conf object into the text cubrid.conf will carry. A
@@ -412,7 +442,7 @@ func readClient(p *Problems, c *Case) {
 		}
 		c.JDBC = &j
 	case "utility":
-		if !presence(p, c.Client, "client.", []string{"argv", "ops"}, []string{"prepare"}) {
+		if !presence(p, c.Client, "client.", []string{"argv", "ops"}, []string{"prepare", "node"}) {
 			return
 		}
 		var u UtilityClient

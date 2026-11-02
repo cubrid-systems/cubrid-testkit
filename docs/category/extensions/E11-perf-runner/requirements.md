@@ -78,6 +78,18 @@ statdump snapshots around each pass, the client's own report, the judgment, and 
 `counters.json`, the describe artifacts, `session.json`). The last line of standard output is the ratio.
 Nothing is published. The two cpusets are two flags because a CPU list has commas of its own.
 
+A case of topology `ha` runs on two HA pairs instead (`--preset ha`: a master `n1`, a slave `n2` and the
+client node). csb makes the pair's one database, so that database is the fixture's and HA cases group by
+fixture as well as by conf (`ha(<fixture>)` leads the conf key). The heartbeat owns both servers --
+`cubrid server start` and `stop` refuse them -- so the runner never stops or restarts one: the fixture is
+loaded on the master and replicated, no snapshot is taken, and `validate` refuses `cold` and a
+`restore_snapshot` fixture for such a case. After the fixture and after every pass's reset the runner waits
+until the slave shows a marker written on the master (`sandbox.Pair.WaitForReplication`), resuming the
+slave's applylogdb first; it checks with `csb ha status` that `n1` is the one active node when the pair is
+made, before every case and after every pass. A `utility` case may run its `client.argv` and
+`client.prepare` on the slave (`client.node: "slave"`). Guard stage 3 counts both database containers, and
+the memory check two servers a side.
+
 `testkit perf session -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>] [--out <dir>]
 [--deadline <RFC3339>] [--id <run-id>] [--keep]` is the weekly session (Design §5.1, M3): the conf, the
 suite and the registrations read and refused as one (exit 2), the builds taken from `builds.manifest`

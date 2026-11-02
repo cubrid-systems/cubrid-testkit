@@ -9,11 +9,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
 
 // dbName is the database a fixture lives in: one per fixture, so a restore
 // touches only that fixture's volumes (Spec §7.4).
-func dbName(f *Fixture) string { return "perf_" + f.Name }
+func dbName(f *Fixture) string { return fixtureDB(f.Name) }
+
+func fixtureDB(name string) string { return "perf_" + name }
 
 // hostDB is the host path of a side's /db.
 func (s *Side) hostDB() string { return filepath.Join(s.Work, s.Name+"-n1", "db") }
@@ -37,18 +41,31 @@ func (s *Side) snapDir(db string) string { return filepath.Join(s.Work, "perf", 
 // size the manifest gives, the schema, the loader, then a snapshot of the
 // volumes with the server stopped, then the server back up with a statdump
 // watcher on it. Done once per side per fixture, before any pass (Design §5.4).
+//
+// On an HA side csb has made the database already, with its own sizes (a
+// 512M first volume, a 256M log), and the heartbeat runs its server: the
+// schema and the loader run on the master and replicate, and the build ends
+// when the slave has caught up. No snapshot is taken, since a restore stops
+// the server (checkFixtureUse refuses that reset for topology ha).
 func (r *Runner) buildFixture(ctx context.Context, s *Side, f *Fixture) error {
 	db := dbName(f)
-	r.logf("%s: fixture %s -> %s (%d rows, %s)", s.Role, f.Name, db, f.Rows, f.Size)
-	dir := dbDir(db)
 	log := func(step string) string { return fmt.Sprintf("%s/log/%s-%s.log", workPerf, step, db) }
-	if err := r.mustExecLog(ctx, s, "createdb", log("createdb"),
-		fmt.Sprintf("mkdir -p %s && cd %s && cubrid createdb --db-volume-size=%s --file-path=%s --log-path=%s %s en_US.utf8",
-			dir, dir, f.Size, dir, dir, db), 10*time.Minute); err != nil {
-		return err
-	}
-	if err := r.serverStart(ctx, s, db); err != nil {
-		return err
+	if s.HA {
+		if !s.running[db] {
+			return fmt.Errorf("%s: HA pair %s was made for another fixture than %s", s.Role, s.Name, f.Name)
+		}
+		r.logf("%s: fixture %s -> %s on HA pair %s (%d rows; csb's sizes, not %s)", s.Role, f.Name, db, s.Name, f.Rows, f.Size)
+	} else {
+		r.logf("%s: fixture %s -> %s (%d rows, %s)", s.Role, f.Name, db, f.Rows, f.Size)
+		dir := dbDir(db)
+		if err := r.mustExecLog(ctx, s, "createdb", log("createdb"),
+			fmt.Sprintf("mkdir -p %s && cd %s && cubrid createdb --db-volume-size=%s --file-path=%s --log-path=%s %s en_US.utf8",
+				dir, dir, f.Size, dir, dir, db), 10*time.Minute); err != nil {
+			return err
+		}
+		if err := r.serverStart(ctx, s, db); err != nil {
+			return err
+		}
 	}
 	// The vacuum statistics the wait below reads count only while a watcher
 	// is registered, so one runs from before the load; serverStop ends it.
@@ -84,6 +101,12 @@ func (r *Runner) buildFixture(ctx context.Context, s *Side, f *Fixture) error {
 	if err := r.mustExecLog(ctx, s, "checkpoint", log("checkpoint"),
 		checkpointRequest(db), 5*time.Minute); err != nil {
 		return err
+	}
+	if s.HA {
+		if !s.paramsTried {
+			r.recordParams(ctx, s, db)
+		}
+		return r.waitSlave(ctx, s, 30*time.Minute)
 	}
 	if err := r.serverStop(ctx, s, db); err != nil {
 		return err
@@ -645,7 +668,13 @@ func firstNonEmptyStr(a, b string) string {
 }
 
 func (r *Runner) mustExec(ctx context.Context, s *Side, what, script string, timeout time.Duration) error {
-	res, err := r.exec(ctx, s.N1, script, timeout)
+	return r.mustExecOn(ctx, s, s.N1, what, script, timeout)
+}
+
+// mustExecOn is mustExec on a node of the side other than the database
+// node: an HA pair's slave.
+func (r *Runner) mustExecOn(ctx context.Context, s *Side, node *sandbox.Node, what, script string, timeout time.Duration) error {
+	res, err := r.exec(ctx, node, script, timeout)
 	if err != nil {
 		return fmt.Errorf("%s: %s: %w", s.Role, what, err)
 	}
@@ -659,5 +688,9 @@ func (r *Runner) mustExec(ctx context.Context, s *Side, what, script string, tim
 // that file's tail in the error when the step fails: the file is what says
 // why, and it goes with the cluster.
 func (r *Runner) mustExecLog(ctx context.Context, s *Side, what, log, script string, timeout time.Duration) error {
-	return r.mustExec(ctx, s, what, fmt.Sprintf("{ %s; } > %s 2>&1; rc=$?; [ $rc -eq 0 ] || tail -20 %s >&2; exit $rc", script, log, log), timeout)
+	return r.mustExecLogOn(ctx, s, s.N1, what, log, script, timeout)
+}
+
+func (r *Runner) mustExecLogOn(ctx context.Context, s *Side, node *sandbox.Node, what, log, script string, timeout time.Duration) error {
+	return r.mustExecOn(ctx, s, node, what, fmt.Sprintf("{ %s; } > %s 2>&1; rc=$?; [ $rc -eq 0 ] || tail -20 %s >&2; exit $rc", script, log, log), timeout)
 }

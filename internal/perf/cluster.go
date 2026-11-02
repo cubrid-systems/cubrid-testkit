@@ -21,7 +21,8 @@ import (
 )
 
 // Side is one of the two clusters a comparison runs on: the target build or
-// the reference build, each a single database node and one client node.
+// the reference build, each a single database node and one client node -- or,
+// for topology ha, an HA pair and one client node.
 type Side struct {
 	Role  string // target or reference
 	Name  string // the cluster name, pf-<yyyymmdd>-<hex4>-{t,r}
@@ -29,6 +30,16 @@ type Side struct {
 	CLI   *sandbox.CLI
 	N1    *sandbox.Node
 	C1    *sandbox.Node
+	// HA is a side csb stood up as an HA pair: N1 is its master and N2 its
+	// slave, and its one database -- the fixture's, made by csb -- runs under
+	// the heartbeat from create to destroy (cubrid server start and stop
+	// refuse it). pair is csb's description of it, for the replication wait.
+	HA   bool
+	N2   *sandbox.Node
+	pair *sandbox.Pair
+	// guardKeys are the containers whose cgroups guard stage 3 counts as
+	// this side's: the database node, and the slave on an HA side.
+	guardKeys []string
 	// Work is the host path of the cluster's /work; perf/ under it is this
 	// runner's, and every file a pass writes lands there first.
 	Work string
@@ -130,8 +141,18 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 		r.logf("%s: removed what was left of an earlier %s: %s", s.Role, s.Name, strings.Join(removed, " "))
 	}
 	set := confUnion(cases)
+	preset, db := TopologySingle, seedDB
+	if len(cases) > 0 && cases[0].Topology == TopologyHA {
+		// The pair's database is the fixture's: csb makes it on the master,
+		// seeds the slave with it and starts the heartbeat on both, and no
+		// database made after that is in ha_db_list. confKey gives every
+		// fixture its own HA group.
+		s.HA = true
+		s.N2 = sandbox.NewNode(s.CLI, "n2")
+		preset, db = TopologyHA, fixtureDB(cases[0].Fixture.Name)
+	}
 	opts := sandbox.CreateOptions{
-		Preset: "single", Build: build, DB: seedDB, Clients: 1, ClientImage: r.ClientImage, WithBroker: true,
+		Preset: preset, Build: build, DB: db, Clients: 1, ClientImage: r.ClientImage, WithBroker: true,
 		CPUSet: r.CPUSet, ClientCPUSet: r.ClientCPUSet,
 		Set: set,
 		BrokerSet: []string{
@@ -141,7 +162,7 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 		Labels:  map[string]string{"perf.session": r.SessionID, "perf.role": role},
 		Timeout: 10 * time.Minute,
 	}
-	r.logf("%s: creating %s from %s (--set %s)", role, s.Name, build, strings.Join(set, " "))
+	r.logf("%s: creating %s (%s) from %s (--set %s)", role, s.Name, preset, build, strings.Join(set, " "))
 	// On failure the side is returned with the error: csb may have left the
 	// containers of a cluster that did not reach serving, and the caller's
 	// teardown has to know their name.
@@ -152,24 +173,81 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 	if err := r.stageWork(s, cases); err != nil {
 		return s, err
 	}
-	// csb's own database is not a fixture; its server would be an idle
-	// neighbour of every measured pass, and collect_l0.sh would count it. Stop
-	// it, and know that it stopped.
-	if err := r.serverStop(ctx, s, seedDB); err != nil {
-		return s, err
+	if s.HA {
+		// The pair's server is up and stays up: it is the fixture's.
+		s.running[db] = true
+		if err := r.haCheck(ctx, s); err != nil {
+			return s, err
+		}
+		pair, err := sandbox.Describe(ctx, s.CLI, "")
+		if err != nil {
+			return s, fmt.Errorf("%s: describing the HA pair: %w", role, err)
+		}
+		s.pair = pair
+	} else {
+		// csb's own database is not a fixture; its server would be an idle
+		// neighbour of every measured pass, and collect_l0.sh would count it.
+		// Stop it, and know that it stopped.
+		if err := r.serverStop(ctx, s, seedDB); err != nil {
+			return s, err
+		}
 	}
 	if err := r.compileClients(ctx, s, cases); err != nil {
 		return s, err
 	}
 	if r.Guard != nil {
-		if cg, err := containerCgroup(s.Name + "-n1"); err != nil {
-			r.logf("%s: guard: %v (foreign CPU will count this cluster's)", s.Role, err)
-		} else {
-			s.cgroup = cg
-			r.Guard.add(s.Name, cg)
+		nodes := []string{"n1"}
+		if s.HA {
+			nodes = append(nodes, "n2")
+		}
+		for _, n := range nodes {
+			name := s.Name + "-" + n
+			cg, err := containerCgroup(name)
+			if err != nil {
+				r.logf("%s: guard: %v (foreign CPU will count %s's)", s.Role, err, name)
+				continue
+			}
+			if n == "n1" {
+				s.cgroup = cg
+			}
+			s.guardKeys = append(s.guardKeys, name)
+			r.Guard.add(name, cg)
 		}
 	}
 	return s, nil
+}
+
+// haCheck says whether an HA side's pair still has n1 as its one active
+// node. Every step reads the master as n1 and the slave as n2, so a pair
+// that failed over, or has not settled, would have a pass time the wrong
+// node.
+func (r *Runner) haCheck(ctx context.Context, s *Side) error {
+	nodes, err := s.CLI.HAStatus(ctx)
+	if err != nil {
+		return fmt.Errorf("%s: ha status: %w", s.Role, err)
+	}
+	if act := sandbox.Actives(nodes); len(act) != 1 || act[0] != s.Name+"-n1" {
+		return fmt.Errorf("%s: the active node of %s is %v, not %s-n1: the pair failed over or has not settled", s.Role, s.Name, act, s.Name)
+	}
+	return nil
+}
+
+// waitSlave waits until the slave of an HA side shows a write made on the
+// master now, so a pass starts on a pair that holds one database and no
+// apply of the reset runs beside it. The slave's applier is resumed first:
+// a case that stops it (ha.apply_insert) and is cut short leaves it stopped,
+// and every pass after would wait here to its bound.
+func (r *Runner) waitSlave(ctx context.Context, s *Side, bound time.Duration) error {
+	if s.pair == nil {
+		return fmt.Errorf("%s: %s was not described as an HA pair", s.Role, s.Name)
+	}
+	if _, err := r.exec(ctx, s.N2, `pkill -CONT -f '^cub_admin applylogdb'; true`, time.Minute); err != nil {
+		return fmt.Errorf("%s: resuming the slave's applier: %w", s.Role, err)
+	}
+	if _, err := s.pair.WaitForReplication(ctx, bound); err != nil {
+		return fmt.Errorf("%s: waiting for the slave: %w", s.Role, err)
+	}
+	return nil
 }
 
 // groupKey is confKey over a set of cases that share a cluster.
@@ -239,6 +317,9 @@ func (r *Runner) buildFixtures(ctx context.Context, s *Side, suite *Suite, cases
 			return err
 		}
 		s.built[name] = true
+		if s.HA {
+			continue // the pair's one server stays up
+		}
 		if err := r.serverStop(ctx, s, dbName(f)); err != nil {
 			return err
 		}
@@ -247,9 +328,16 @@ func (r *Runner) buildFixtures(ctx context.Context, s *Side, suite *Suite, cases
 }
 
 // startFixtureServer brings the case's fixture server up with its watcher
-// when it is not up already.
+// when it is not up already. An HA side's server is always up; the case gets
+// the pair checked instead.
 func (r *Runner) startFixtureServer(ctx context.Context, s *Side, f *Fixture) error {
 	db := dbName(f)
+	if s.HA {
+		if !s.running[db] {
+			return fmt.Errorf("%s: HA pair %s serves %s, not %s", s.Role, s.Name, strings.Join(sortedKeys(s.running), " "), db)
+		}
+		return r.haCheck(ctx, s)
+	}
 	if s.running[db] {
 		return nil
 	}
@@ -262,8 +350,12 @@ func (r *Runner) startFixtureServer(ctx context.Context, s *Side, f *Fixture) er
 // stopOthers takes down every other fixture server on the side, watcher
 // first (serverStop does that), so their daemons and data_buffer_size are
 // out of the way (§5.1, §7 memory). A nil fixture stops every server: the
-// side is idle for a while (the overlap comparison runs without it).
+// side is idle for a while (the overlap comparison runs without it). An HA
+// side has one server and the heartbeat keeps it; idle, the side is paused.
 func (r *Runner) stopOthers(ctx context.Context, s *Side, f *Fixture) error {
+	if s.HA {
+		return nil
+	}
 	keep := ""
 	if f != nil {
 		keep = dbName(f)
@@ -423,6 +515,9 @@ const jdbcJar = `jar=$(ls /opt/cubrid-ro/jdbc/cubrid_jdbc.jar /opt/cubrid-ro/jdb
 // would be inherited by the daemon and the exec would wait on it until the
 // timeout (csb T8; seen again on the hub in M0).
 func (r *Runner) serverStart(ctx context.Context, s *Side, db string) error {
+	if s.HA {
+		return errHAServer(s, db)
+	}
 	s.startN[db]++
 	delete(s.ckptOffset, db)
 	log := fmt.Sprintf("%s/log/start-%s-%d.log", workPerf, db, s.startN[db])
@@ -444,6 +539,9 @@ func (r *Runner) serverStart(ctx context.Context, s *Side, db string) error {
 // it is a client of the server, and a watcher still attached when the next
 // start comes refuses the new one (Design §5.4).
 func (r *Runner) serverStop(ctx context.Context, s *Side, db string) error {
+	if s.HA {
+		return errHAServer(s, db)
+	}
 	if _, err := r.exec(ctx, s.N1, fmt.Sprintf("bash %s/scripts/statdump_window.sh stop %s >/dev/null 2>&1; true", workPerf, shellJoin([]string{db})), time.Minute); err != nil {
 		return err
 	}
@@ -459,6 +557,12 @@ func (r *Runner) serverStop(ctx context.Context, s *Side, db string) error {
 	}
 	delete(s.running, db)
 	return nil
+}
+
+// errHAServer is what a start or stop of an HA side's server is: a step that
+// should not have been asked for, because the engine refuses it.
+func errHAServer(s *Side, db string) error {
+	return fmt.Errorf("%s: %s on HA pair %s is the heartbeat's to start and stop", s.Role, db, s.Name)
 }
 
 // exec runs a script on a node with a bound on both clocks and returns the
@@ -481,7 +585,9 @@ func (r *Runner) destroySide(s *Side) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	if r.Guard != nil {
-		r.Guard.remove(s.Name)
+		for _, k := range s.guardKeys {
+			r.Guard.remove(k)
+		}
 	}
 	// A paused container cannot be stopped; thaw first, whatever state the
 	// pass left it in.

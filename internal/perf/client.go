@@ -67,7 +67,17 @@ func (r *Runner) prepareUtility(ctx context.Context, s *Side, c *Case, f *Fixtur
 	}
 	log := fmt.Sprintf("%s/log/prepare-%s-%s%d.log", workPerf, c.ID, phase, k)
 	script := fmt.Sprintf("cd %s && env %s %s", workPerf, clientEnv(s, c, f, phase, k, out.InNode), shellJoin(c.Utility.Prepare))
-	return r.mustExecLog(ctx, s, "client.prepare", log, script, time.Duration(c.BudgetS)*time.Second)
+	return r.mustExecLogOn(ctx, s, utilityNode(s, c), "client.prepare", log, script, time.Duration(c.BudgetS)*time.Second)
+}
+
+// utilityNode is where a utility case's prepare and argv run: the database
+// node, or the HA pair's slave when the case asks for it (validate refuses
+// client.node outside topology ha, so N2 is there).
+func utilityNode(s *Side, c *Case) *sandbox.Node {
+	if c.Utility != nil && c.Utility.Node == UtilityNodeSlave {
+		return s.N2
+	}
+	return s.N1
 }
 
 // runClient runs the case's program for one pass and returns what it
@@ -92,7 +102,7 @@ func (r *Runner) runClient(ctx context.Context, s *Side, c *Case, f *Fixture, ph
 		cmd = fmt.Sprintf(`%s; cd %s && env %s java -Xmx1g -cp %s/classes:$jar %s %s`,
 			jdbcJar, workPerf, env, workPerf, c.JDBC.Main, shellJoin(c.JDBC.Args))
 	case "utility":
-		node = s.N1
+		node = utilityNode(s, c)
 		cmd = fmt.Sprintf(`cd %s && env %s bash %s/scripts/run_utility.sh %s`, workPerf, env, workPerf, shellJoin(c.Utility.Argv))
 	case "cdc-api":
 		node = s.C1

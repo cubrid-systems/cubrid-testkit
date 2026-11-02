@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
 
 // copySuite puts testdata/suite in a temporary directory, so a test can break
@@ -101,6 +103,26 @@ func TestSuiteReadsEveryCaseAndFixture(t *testing.T) {
 	}
 }
 
+// A utility case of topology ha may run on the pair's slave.
+func TestAnHAUtilityMayRunOnTheSlave(t *testing.T) {
+	root := copySuite(t)
+	dir := caseDir(root, "lib.backupdb")
+	rewrite(t, filepath.Join(dir, "case.json"), func(m map[string]any) {
+		m["topology"] = "ha"
+		m["client"] = map[string]any{"argv": []string{"bash", "apply.sh", "run"}, "ops": 1, "prepare": []string{"bash", "apply.sh", "prepare"}, "node": "slave"}
+	})
+	c, err := ReadCase(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Topology != TopologyHA || c.Utility == nil || c.Utility.Node != UtilityNodeSlave {
+		t.Errorf("topology=%q utility=%+v", c.Topology, c.Utility)
+	}
+	if n := utilityNode(&Side{N1: sandbox.NewNode(nil, "n1"), N2: sandbox.NewNode(nil, "n2")}, c); n.Name != "n2" {
+		t.Errorf("the utility runs on %s, want n2", n.Name)
+	}
+}
+
 // The Spec's list of what validate refuses (§7.2), one case each, and the
 // refusal has to name the thing -- a reader fixes a manifest from the message.
 func TestCaseRefusalsNameTheProblem(t *testing.T) {
@@ -148,7 +170,19 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 			m["judge_counters"] = []string{"cas.rw_syscalls"}
 		}, `judge_counters has "cas.rw_syscalls", which is not a count of work`},
 		{"no judge_counters key", "txn.commit_single", func(m map[string]any) { delete(m, "judge_counters") }, "missing judge_counters"},
-		{"a topology off the list", "txn.commit_single", func(m map[string]any) { m["topology"] = "ha" }, `topology "ha" is not one of single`},
+		{"a topology off the list", "txn.commit_single", func(m map[string]any) { m["topology"] = "multi" }, `topology "multi" is not one of single, ha`},
+		{"a node on a single cluster", "lib.backupdb", func(m map[string]any) {
+			m["client"] = map[string]any{"argv": []string{"cubrid", "backupdb"}, "ops": 1, "node": "slave"}
+		}, "client.node slave needs topology ha"},
+		{"a node off the list", "lib.backupdb", func(m map[string]any) {
+			m["topology"] = "ha"
+			m["client"] = map[string]any{"argv": []string{"cubrid", "backupdb"}, "ops": 1, "node": "master"}
+		}, `client.node "master" is not a node this runner knows`},
+		{"a cold HA case", "txn.commit_single", func(m map[string]any) {
+			m["topology"] = "ha"
+			m["cold"] = true
+		}, "cold must be false for topology ha"},
+		{"an HA case on a restored snapshot", "storage.bulk_update", func(m map[string]any) { m["topology"] = "ha" }, "topology ha needs a fixture whose reset leaves the server up"},
 		{"an op off the list", "txn.commit_single", func(m map[string]any) { m["op"] = "txn" }, `op "txn" is not one of`},
 		{"a metric off the list", "txn.commit_single", func(m map[string]any) { m["metric"] = "p99" }, `metric "p99" is not one of`},
 		{"a background off the list", "txn.commit_single", func(m map[string]any) { m["background"] = "off" }, `background "off" is not one of`},

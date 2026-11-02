@@ -13,13 +13,19 @@ import (
 // §5.1, §5.9; Spec FR-5, FR-7.1, FR-20.1).
 
 // confKey is a case's cubrid.conf overrides as one string, so cases that can
-// share a cluster share a key. The empty key is a case with no override.
+// share a cluster share a key. The empty key is a case with no override. An
+// HA case's key starts with ha(<fixture>): csb makes the pair's one database
+// when it creates the pair, so the pair serves one fixture, and a single
+// cluster is never the one an HA case runs on.
 func confKey(c *Case) string {
 	parts := make([]string, 0, len(c.Conf))
 	for k, v := range c.Conf {
 		parts = append(parts, k+"="+v)
 	}
 	sort.Strings(parts)
+	if c.Topology == TopologyHA {
+		parts = append([]string{TopologyHA + "(" + c.Fixture.Name + ")"}, parts...)
+	}
 	return strings.Join(parts, ";")
 }
 

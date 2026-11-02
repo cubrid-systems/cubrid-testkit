@@ -148,6 +148,11 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	if err := r.reset(ctx, s, c, f); err != nil {
 		return p.null("reset: " + err.Error())
 	}
+	if s.HA {
+		if err := r.waitSlave(ctx, s, 10*time.Minute); err != nil {
+			return p.null("slave: " + err.Error())
+		}
+	}
 	if c.Cold {
 		if err := r.coldStart(ctx, s, db); err != nil {
 			return p.null(err.Error())
@@ -231,6 +236,11 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		return p.null("client: " + err.Error())
 	}
 	if phase != "measure" {
+		if s.HA {
+			if err := r.haCheck(ctx, s); err != nil {
+				return p.null("ha: " + err.Error())
+			}
+		}
 		return p
 	}
 	var l0post *l0Snapshot
@@ -243,6 +253,13 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	}
 	if l0post, err = r.l0Collect(ctx, s, db, out.InNode, out.Host, "l0-post.json"); err != nil {
 		p.Missing["l0"] = "post: " + err.Error()
+	}
+	// A pair that failed over during the pass had the case time other nodes
+	// than it names; after the snapshots, so the check is outside them.
+	if s.HA && reason == "" {
+		if err := r.haCheck(ctx, s); err != nil {
+			reason = "ha: " + err.Error()
+		}
 	}
 	if reason != "" {
 		p.NullReason = reason

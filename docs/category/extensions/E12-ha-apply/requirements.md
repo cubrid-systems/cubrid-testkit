@@ -44,10 +44,11 @@ writeset did not, which #8052 then fixed.
 The patterns are a closed list in Go: primary, unique, reverse-unique and foreign keys (single,
 composite, cascading), savepoints, DDL, partitions, and keys the index holds equal while their writes
 differ (-0.0 and +0.0, one instant in two zones, a case-insensitive collation, a subclass and its
-superclass, a string and the same with a trailing space). An unknown name is refused. The two
-VARCHAR trailing-space patterns are one key only where `ignore_trailing_space` is on, so they run
-only on a pair whose nodes say so when asked; elsewhere the whole catalog leaves them out, saying
-so, and naming them is refused.
+superclass, a string and the same with a trailing space, one amount in two currencies, a VARBIT
+and the same padded with zero bits, a NUL and a space, and a NaN, equal to every key). An unknown
+name is refused. The two VARCHAR trailing-space patterns are one key only where
+`ignore_trailing_space` is on, so they run only on a pair whose nodes say so when asked; elsewhere
+the whole catalog leaves them out, saying so, and naming them is refused.
 
 ## 4. The verdict
 
@@ -91,6 +92,8 @@ refuses to start where an earlier run's files already are.
   operations on #8052's new head is **same**.
 - **Trailing spaces** (after #8052 `17aae152e`): on a pair with `ignore_trailing_space` on, the two
   VARCHAR trailing-space patterns are **missed** on `61ee0944a` and **held** on `3fb54e549`.
+- **Reduced keys** (after #8052 `eb31453ff`): the seven patterns of currency, bit length, NUL and
+  NaN are **missed** on `3fb54e549` and **held** on `fb1636c34`.
 
 ## 6. Not in scope
 

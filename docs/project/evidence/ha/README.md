@@ -14,6 +14,14 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-and-the-reduced-keys](ha-apply-and-the-reduced-keys.md) — **2026-11-01.**
+  `testkit ha-apply pairs` against #8052 `eb31453ff`, which hashes a key as its index compares it:
+  a MONETARY amount in two currencies, a VARBIT and the same padded with zero bits, a NUL and a
+  space, each as a unique key and a reference, and a DOUBLE NaN, which the index holds equal to
+  every key. All seven patterns were missed on `3fb54e549`, with no conflict counted, and held on
+  `fb1636c34`, the NaN by a fallback to commit order. On `fb1636c34` all 32 patterns besides the
+  control held, the trailing-space pair included, and `stress` without foreign keys was the same.
+
 - [ha-apply-and-the-trailing-space](ha-apply-and-the-trailing-space.md) — **2026-11-01.**
   `testkit ha-apply pairs` against #8052 `17aae152e`, which hashes a string key without the
   trailing spaces the index ignores. With `ignore_trailing_space` on, a VARCHAR and the same with a

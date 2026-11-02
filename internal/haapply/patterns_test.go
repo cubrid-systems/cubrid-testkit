@@ -32,9 +32,10 @@ func TestEveryPatternIsComplete(t *testing.T) {
 			}
 		}
 	}
-	// The prototype's 24, and the VARCHAR trailing-space keys of #8052 17aae152e.
-	if len(Catalog) != 26 {
-		t.Errorf("catalog has %d patterns, want the prototype's 24 and 2 trailing-space ones", len(Catalog))
+	// The prototype's 24, the VARCHAR trailing-space keys of #8052 17aae152e,
+	// and the seven of eb31453ff.
+	if len(Catalog) != 33 {
+		t.Errorf("catalog has %d patterns, want the prototype's 24, 2 trailing-space and 7 of eb31453ff", len(Catalog))
 	}
 }
 
@@ -80,5 +81,16 @@ func TestSelectPutsTheControlFirstAndRefusesUnknownNames(t *testing.T) {
 func TestTheTwoZonesNameOneInstant(t *testing.T) {
 	if tz0(65) != "'2020-01-01 00:01:05 +00:00'" || tz9(65) != "'2020-01-01 09:01:05 +09:00'" {
 		t.Errorf("tz0/tz9 = %s %s", tz0(65), tz9(65))
+	}
+}
+
+// The two VARBIT values of a round differ only in zeros past the 17th bit, so
+// in whole bytes they are one.
+func TestTheTwoBitStringsAreOneInWholeBytes(t *testing.T) {
+	for _, r := range []int{1, 999} {
+		short, long := strings.Trim(vb17(r), "B'"), strings.Trim(vb24(r), "B'")
+		if len(short) != 17 || len(long) != 24 || long != short+"0000000" {
+			t.Errorf("round %d: %s, %s", r, vb17(r), vb24(r))
+		}
 	}
 }

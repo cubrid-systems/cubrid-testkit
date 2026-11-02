@@ -3,6 +3,7 @@ package perf
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -227,6 +228,22 @@ func TestCopyModesReadsEachCopylogdb(t *testing.T) {
 	}
 	if got := copyModes(""); len(got) != 0 {
 		t.Errorf("copyModes of nothing = %v", got)
+	}
+	two := ps + "cub_admin copylogdb -L /db/perf_ha_rep_x-n3 -m async perf_ha_rep@x-n3\n"
+	for _, c := range []struct {
+		ps, want string
+		ok, mode bool // mode: the error is errCopyMode
+	}{
+		{ps, "async", true, false},
+		{ps, "sync", false, true},
+		{"", "async", false, false},
+		{"cub_admin copylogdb -L /db/x perf_ha_rep@x-n2\n", "async", false, false},
+		{two, "async", false, false},
+	} {
+		err := copyModeOK(c.ps, c.want)
+		if (err == nil) != c.ok || errors.Is(err, errCopyMode) != c.mode {
+			t.Errorf("copyModeOK(%q, %s) = %v", c.ps, c.want, err)
+		}
 	}
 }
 

@@ -260,19 +260,49 @@ func (r *Runner) haCheck(ctx context.Context, s *Side) error {
 // case's conf asks for. paramdump does not show the key, and a csb before
 // cluster-sandbox #15 dropped it while its describe still recorded it, so an
 // async case ran sync with nothing to say so. One value is checked on every
-// node; a per-node list, or no key, is not checked.
+// node; a per-node list, or no key (the engine's default, sync), is not. A
+// node whose copylogdb is not there yet is read again, three times, two
+// seconds apart.
 func (r *Runner) checkCopyMode(ctx context.Context, s *Side, want string) error {
 	if want == "" || strings.ContainsAny(want, ":, ") {
 		return nil
 	}
 	for _, n := range []*sandbox.Node{s.N1, s.N2} {
-		res, err := r.exec(ctx, n, `ps -eo args | grep '^cub_admin copylogdb'`, time.Minute)
+		var err error
+		for try := 1; try <= 3; try++ {
+			res, xerr := r.exec(ctx, n, `ps -eo args | grep '^cub_admin copylogdb'`, time.Minute)
+			if xerr != nil {
+				return fmt.Errorf("%s: reading copylogdb on %s-%s: %w", s.Role, s.Name, n.Name, xerr)
+			}
+			if err = copyModeOK(res.Stdout, want); err == nil || errors.Is(err, errCopyMode) {
+				break
+			}
+			if try < 3 && sleepCtx(ctx, 2*time.Second) != nil {
+				break
+			}
+		}
 		if err != nil {
-			return fmt.Errorf("%s: reading copylogdb on %s: %w", s.Role, n.Name, err)
+			return fmt.Errorf("%s: %s-%s: %w", s.Role, s.Name, n.Name, err)
 		}
-		if got := copyModes(res.Stdout); len(got) != 1 || got[0] != want {
-			return fmt.Errorf("%s: copylogdb on %s-%s runs -m %v and the case asks ha_copy_sync_mode=%s: this csb did not write the key (cluster-sandbox #15 or later does)", s.Role, s.Name, n.Name, got, want)
-		}
+	}
+	return nil
+}
+
+// errCopyMode is a copylogdb that runs another mode than the case asks for:
+// the csb did not write the key. The session skips that group alone.
+var errCopyMode = errors.New("this csb did not write ha_copy_sync_mode (cluster-sandbox #15 or later does)")
+
+// copyModeOK is checkCopyMode's reading of one node's ps: one copylogdb,
+// running -m want.
+func copyModeOK(ps, want string) error {
+	got := copyModes(ps)
+	switch {
+	case len(got) == 0:
+		return fmt.Errorf("no copylogdb running")
+	case len(got) > 1:
+		return fmt.Errorf("%d copylogdb running, want one", len(got))
+	case got[0] != want:
+		return fmt.Errorf("copylogdb runs -m %s and the case asks ha_copy_sync_mode=%s: %w", got[0], want, errCopyMode)
 	}
 	return nil
 }

@@ -837,9 +837,16 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		}
 		if err != nil {
 			s.note("pair %s: cluster: %v", p.Name, err)
-			if ctx.Err() != nil {
+			switch {
+			case ctx.Err() != nil:
 				stop = "signal"
-			} else {
+			case errors.Is(err, errCopyMode):
+				// The pair stood up with another copy mode than the group
+				// asks for: this group's numbers would be wrong, the rest's
+				// are not. The next group's ensure replaces the side.
+				skipGroup(g, "cluster: "+err.Error())
+				continue
+			default:
 				broken = "cluster: " + err.Error()
 			}
 			skipGroup(g, firstNonEmptyStr(stop, broken))

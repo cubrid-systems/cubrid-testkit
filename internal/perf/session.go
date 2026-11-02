@@ -837,9 +837,16 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		}
 		if err != nil {
 			s.note("pair %s: cluster: %v", p.Name, err)
-			if ctx.Err() != nil {
+			switch {
+			case ctx.Err() != nil:
 				stop = "signal"
-			} else {
+			case errors.Is(err, errCopyMode):
+				// The pair stood up with another copy mode than the group
+				// asks for: this group's numbers would be wrong, the rest's
+				// are not. The next group's ensure replaces the side.
+				skipGroup(g, "cluster: "+err.Error())
+				continue
+			default:
 				broken = "cluster: " + err.Error()
 			}
 			skipGroup(g, firstNonEmptyStr(stop, broken))
@@ -924,12 +931,16 @@ func (s *Session) groupMemory(g confGroup, overlap bool) string {
 	if err != nil {
 		return ""
 	}
-	sides := int64(2)
+	// A server per side, and two on an HA side: the master's and the slave's.
+	servers := int64(2)
 	if overlap {
-		sides = 3
+		servers = 3
 	}
-	if per*sides > capBytes {
-		return fmt.Sprintf("memory_cap: %d × data_buffer_size=%s exceeds %s", sides, dbs, s.Conf.MemoryCap)
+	if g.Cases[0].Topology == TopologyHA {
+		servers *= 2
+	}
+	if per*servers > capBytes {
+		return fmt.Sprintf("memory_cap: %d × data_buffer_size=%s exceeds %s", servers, dbs, s.Conf.MemoryCap)
 	}
 	return ""
 }

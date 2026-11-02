@@ -1,13 +1,18 @@
 package perf
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
 
 // A fake install tree: enough for isInstallTree and readFingerprint.
@@ -145,6 +150,121 @@ func TestConfGroupsFollowTheShuffledOrder(t *testing.T) {
 	}
 	if n != len(cases) {
 		t.Errorf("%d cases in groups, want %d", n, len(cases))
+	}
+}
+
+// An HA pair holds the one database csb made, the fixture's: HA cases group
+// by fixture as well as conf, never with a single cluster, and the memory
+// check counts the slave's buffer too.
+func TestHACasesGroupByFixtureAndCountBothServers(t *testing.T) {
+	mk := func(id, topology, fixture string, conf map[string]string) *Case {
+		return &Case{ID: id, Topology: topology, Fixture: FixtureRef{Name: fixture, Version: 1}, Conf: conf}
+	}
+	cases := []*Case{
+		mk("txn.a", TopologySingle, "narrow_1m", map[string]string{"data_buffer_size": "3G"}),
+		mk("ha.b", TopologyHA, "ha_rep", map[string]string{"data_buffer_size": "3G"}),
+		mk("ha.c", TopologyHA, "ha_other", map[string]string{"data_buffer_size": "3G"}),
+		mk("ha.d", TopologyHA, "ha_rep", map[string]string{"data_buffer_size": "3G", "ha_copy_sync_mode": "async"}),
+		mk("ha.e", TopologyHA, "ha_rep", map[string]string{"data_buffer_size": "3G"}),
+	}
+	var keys []string
+	for _, g := range confGroups(cases) {
+		var ids []string
+		for _, c := range g.Cases {
+			ids = append(ids, c.ID)
+		}
+		keys = append(keys, g.Key+" "+strings.Join(ids, ","))
+	}
+	want := []string{
+		"data_buffer_size=3G txn.a",
+		"ha(ha_rep);data_buffer_size=3G ha.b,ha.e",
+		"ha(ha_other);data_buffer_size=3G ha.c",
+		"ha(ha_rep);data_buffer_size=3G;ha_copy_sync_mode=async ha.d",
+	}
+	if strings.Join(keys, "\n") != strings.Join(want, "\n") {
+		t.Errorf("groups:\n%s\nwant:\n%s", strings.Join(keys, "\n"), strings.Join(want, "\n"))
+	}
+	s := &Session{Conf: &Conf{MemoryCap: "8G"}}
+	if why := s.groupMemory(confGroup{Cases: cases[:1]}, false); why != "" {
+		t.Errorf("a single group of 2 × 3G under 8G was refused: %s", why)
+	}
+	if why := s.groupMemory(confGroup{Cases: cases[1:2]}, false); !strings.Contains(why, "4 × data_buffer_size=3G") {
+		t.Errorf("an HA group of 4 × 3G under 8G: %q", why)
+	}
+	s.Conf.MemoryCap = "16G"
+	if why := s.groupMemory(confGroup{Cases: cases[1:2]}, true); !strings.Contains(why, "6 × data_buffer_size=3G") {
+		t.Errorf("an HA group with an overlap, 6 × 3G under 16G: %q", why)
+	}
+}
+
+// An HA side's server is the heartbeat's: the runner refuses to start or
+// stop it, before any exec, and leaves it up when the side goes idle.
+func TestAnHASideKeepsItsServer(t *testing.T) {
+	r := &Runner{Log: io.Discard}
+	s := &Side{Role: "target", Name: "pf-20261102-0000-t", HA: true, running: map[string]bool{"perf_ha_rep": true},
+		N1: sandbox.NewNode(nil, "n1"), N2: sandbox.NewNode(nil, "n2")}
+	ctx := context.Background()
+	for name, step := range map[string]func() error{
+		"start": func() error { return r.serverStart(ctx, s, "perf_ha_rep") },
+		"stop":  func() error { return r.serverStop(ctx, s, "perf_ha_rep") },
+	} {
+		if err := step(); err == nil || !strings.Contains(err.Error(), "heartbeat") {
+			t.Errorf("server %s on an HA side: %v", name, err)
+		}
+	}
+	if err := r.stopOthers(ctx, s, nil); err != nil || !s.running["perf_ha_rep"] {
+		t.Errorf("stopOthers on an HA side: err=%v running=%v", err, s.running)
+	}
+	if n := utilityNode(s, &Case{Utility: &UtilityClient{Argv: []string{"x"}, Ops: 1}}); n.Name != "n1" {
+		t.Errorf("a utility without client.node runs on %s, want n1", n.Name)
+	}
+}
+
+// The copylogdb mode is read from ps, the -m of each copylogdb line.
+func TestCopyModesReadsEachCopylogdb(t *testing.T) {
+	ps := "cub_admin copylogdb -L /db/perf_ha_rep_x-n2 -m async perf_ha_rep@x-n2\n"
+	if got := copyModes(ps); len(got) != 1 || got[0] != "async" {
+		t.Errorf("copyModes = %v", got)
+	}
+	if got := copyModes(""); len(got) != 0 {
+		t.Errorf("copyModes of nothing = %v", got)
+	}
+	two := ps + "cub_admin copylogdb -L /db/perf_ha_rep_x-n3 -m async perf_ha_rep@x-n3\n"
+	for _, c := range []struct {
+		ps, want string
+		ok, mode bool // mode: the error is errCopyMode
+	}{
+		{ps, "async", true, false},
+		{ps, "sync", false, true},
+		{"", "async", false, false},
+		{"cub_admin copylogdb -L /db/x perf_ha_rep@x-n2\n", "async", false, false},
+		{two, "async", false, false},
+	} {
+		err := copyModeOK(c.ps, c.want)
+		if (err == nil) != c.ok || errors.Is(err, errCopyMode) != c.mode {
+			t.Errorf("copyModeOK(%q, %s) = %v", c.ps, c.want, err)
+		}
+	}
+}
+
+// The role check reads csb ha status: n1 the one active node, and nothing
+// else.
+func TestActiveIsN1(t *testing.T) {
+	node := func(name, role string) sandbox.NodeHealth { return sandbox.NodeHealth{Name: name, Role: role} }
+	const cl = "pf-20261102-0000-t"
+	for _, c := range []struct {
+		name  string
+		nodes []sandbox.NodeHealth
+		ok    bool
+	}{
+		{"n1 active", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "standby"), node(cl+"-c1", "unknown")}, true},
+		{"failed over", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, false},
+		{"no active", []sandbox.NodeHealth{node(cl+"-n1", "to_be_active"), node(cl+"-n2", "standby")}, false},
+		{"two actives", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "active")}, false},
+	} {
+		if err := activeIsN1(c.nodes, cl); (err == nil) != c.ok {
+			t.Errorf("%s: %v", c.name, err)
+		}
 	}
 }
 

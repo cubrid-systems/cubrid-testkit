@@ -14,6 +14,14 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-restart-and-statements](ha-apply-restart-and-statements.md) — **2026-11-02.**
+  `testkit ha-apply restart --statements`: the workload's DML replicated as statements (every
+  client commit fell back to a serial apply). Missed on `b84567f36`, before the statement marker
+  (481 keys back, 1,606 -670s); held on `787defb50`; on `19e83a5d9`, which has the statement marker
+  and not `ha_applied_tx_marker`, inconclusive and the caught-up slave the same as the master.
+- [ha-apply-and-a-crashed-master](ha-apply-and-a-crashed-master.md) — **2026-11-02.** A prototype:
+  the master crashed under load at 10, 30 and 90 seconds on `787defb50`. Each time the slave, once
+  active, held every commit the clients saw acknowledged, and at most the one in flight.
 - [ha-apply-and-lock-escalation](ha-apply-and-lock-escalation.md) — **2026-11-02.**
   `testkit ha-apply stress --set lock_escalation=5`, for #8052 `502685e64`: on `cf8955a91` the slave
   stopped (on a pair made by hand with the same setting, `lockdb` showed its coordinator holding the

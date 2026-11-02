@@ -39,7 +39,7 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 |---|---|
 | `pairs` | 패턴마다 T1 은 ballast 를 쓴 뒤 키 하나를 쓰고, 그 뒤에 커밋되는 T2 는 그 키에 의존하며 witness 를 쓴다. T2 가 T1 보다 먼저 적용되는 일이 있는가? |
 | `stress` (M2) | 작은 키 공간 하나에 N 개 클라이언트가 결정적 부하를 건다. 두 노드가 같은 상태로 끝나는가 — PK 로 읽어서, heap 행 수로, 고아 행 없이, 적용 실패 없이? |
-| `restart` (M3) | 클라이언트마다 자기 키를 INSERT 하고 다음 트랜잭션에서 그 키를 옮기기를 되풀이하는 동안 슬레이브의 applier 를 거듭 죽인다(`--kill node` 는 슬레이브 노드 전체를 crash 시키고 다시 띄운다). 다시 뜬 applier 가 이미 커밋된 트랜잭션을 한 번 더 적용하는가? |
+| `restart` (M3) | 클라이언트마다 자기 키를 INSERT 하고 다음 트랜잭션에서 그 키를 옮기기를 되풀이하는 동안 슬레이브의 applier 를 거듭 죽인다(`--kill node` 는 슬레이브 노드 전체를 crash 시키고 다시 띄우고, `--statements` 는 DML 을 문장으로 복제한다). 다시 뜬 applier 가 이미 커밋된 트랜잭션을 한 번 더 적용하는가? |
 | `list` | 패턴 목록과 각 쌍이 공유하는 것. |
 
 패턴은 Go 안의 닫힌 목록이다. PK, UNIQUE, REVERSE UNIQUE, FK(단일·복합·CASCADE), savepoint, DDL,
@@ -81,17 +81,18 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 마스터에 마커 표 하나를 만들고 지운다. 실행은 클라이언트의 스크립트와 로그, 그리고 다르게 읽힌 표의
 양쪽 읽기를 원장 옆에 남기고, 다른 실행의 파일이 이미 있는 자리에서는 시작하지 않는다.
 
-`restart` 실행의 판정도 하나다. **missed**(applier 가 실패했다: `fail_counter` 가 움직였거나 슬레이브의
-applier 로그에 -670 이 늘었다. 또는 따라온 슬레이브의 표가 마스터와 다르다: 행 수, 키의 합, 옮기지 않은
-키 수), **inconclusive**(실패 없이 슬레이브가 끝의 마커를 5 분(`--kill node` 는 20 분) 안에 보이지
-못했다. 또는 죽일 applier 가 있었던 kill 이 없다(`--kill node` 는 applier 가 떠 있던 슬레이브의 crash).
-또는 죽이기 직전에 저장된 적용 위치보다 위의 `ha_applied_tx_marker` 가 1 행
-이상이었던 kill 이 없다), **held** 셋이다. marker 표가 없는 슬레이브는 held 가 될 수 없다. 실패가 있거나
-따라온 슬레이브의 표가 다르면 missed, 아니면 inconclusive 다. 실행 중에 applier 로그에서 센 시작 횟수나
--670 수가 줄었으면(회전) 로그가 줄을 잃은 것이다. 그래도 -670 이 늘었으면 적어도 그만큼은 실행 중에 쓰였으므로
-missed 다. 늘지 않았으면 그 실행은 -670 이 없었다고 말할 수 없으므로 held 가 될 수 없다. `fail_counter`
-로도 이를 메울 수 없다. kill 이 다음 저장보다 먼저 오면 마지막 저장 뒤에 센 실패는 사라진다. 클라이언트의
-스크립트와 로그는 `stress` 처럼 남긴다.
+`restart` 실행의 판정도 하나다. **missed**(applier 가 실패했다: `fail_counter` 가 움직였거나
+슬레이브의 applier 로그에 -670 이 늘었다. 또는 따라온 슬레이브의 표가 마스터와 다르다: 행 수, 키의
+합, 옮기지 않은 키 수), **inconclusive**(실패 없이 슬레이브가 끝의 마커를 5 분(`--kill node` 는
+20 분, `--statements` 는 그것과 함께여도 30 분) 안에 보이지 못했다. 또는 죽일 applier 가 있었던 kill
+이 없다(`--kill node` 는 applier 가 떠 있던 슬레이브의 crash). 또는 죽이기 직전에 저장된 적용
+위치보다 위의 `ha_applied_tx_marker` 가 1 행 이상이었던 kill 이 없다), **held** 셋이다. marker 표가
+없는 슬레이브는 held 가 될 수 없다. 실패가 있거나 따라온 슬레이브의 표가 다르면 missed, 아니면
+inconclusive 다. 실행 중에 applier 로그에서 센 시작 횟수나 -670 수가 줄었으면(회전) 로그가 줄을 잃은
+것이다. 그래도 -670 이 늘었으면 적어도 그만큼은 실행 중에 쓰였으므로 missed 다. 늘지 않았으면 그
+실행은 -670 이 없었다고 말할 수 없으므로 held 가 될 수 없다. `fail_counter` 로도 이를 메울 수 없다.
+kill 이 다음 저장보다 먼저 오면 마지막 저장 뒤에 센 실패는 사라진다. 클라이언트의 스크립트와 로그는
+`stress` 처럼 남긴다.
 
 ## 5. 완료 조건
 
@@ -109,8 +110,12 @@ missed 다. 늘지 않았으면 그 실행은 -670 이 없었다고 말할 수 �
   둘이 `fb1636c34` 에서 **missed**, `b984637bb` 에서 **held** 다.
 - **M3** (`restart`): applied-tx marker 를 들여온 #8052 `72650ce0d` 의 부모 `19e83a5d9` 에서 실행이
   **missed**, `b984637bb` 에서 **held** 다. `--kill node` 도 그렇다.
-- **lock escalation** (#8052 `502685e64` 에 대해): `--set lock_escalation=5` 로 세운 쌍에서 `stress` 가
-  `cf8955a91` 에서 **stalled**, `502685e64` 와 `787defb50` 에서 **same** 이다.
+- **문장** (`restart --statements`): 문장 marker 를 들여온 #8052 `d398beba2` 의 부모 `b84567f36`
+  에서 **missed**, `787defb50` 에서 **held** 다. 그 marker 로 문장 트랜잭션을 건너뛰고
+  `ha_applied_tx_marker` 는 없는 `19e83a5d9` 에서는 실행이 inconclusive 이고, 따라온 슬레이브는
+  마스터와 같다.
+- **lock escalation** (#8052 `502685e64` 에 대해): `--set lock_escalation=5` 로 세운 쌍에서 `stress`
+  가 `cf8955a91` 에서 **stalled**, `502685e64` 와 `787defb50` 에서 **same** 이다.
 
 ## 6. 범위 밖
 

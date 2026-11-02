@@ -136,6 +136,25 @@ func (r *Runner) failCounter(ctx context.Context) (int, error) {
 	return strconv.Atoi(s)
 }
 
+// IgnoresTrailingSpace asks both nodes whether they compare VARCHAR without
+// trailing spaces. It asks the comparison rather than reads a conf: a key in
+// the wrong file is ignored, and only the comparison says what the index does.
+func (r *Runner) IgnoresTrailingSpace(ctx context.Context) (bool, error) {
+	const probe = "SELECT CAST('k' AS VARCHAR(4)) = CAST('k ' AS VARCHAR(4))"
+	m, err := r.q(ctx, r.Pair.Master, probe)
+	if err != nil {
+		return false, err
+	}
+	s, err := r.q(ctx, r.slave(), probe)
+	if err != nil {
+		return false, err
+	}
+	if m != s {
+		return false, fmt.Errorf("the master compares 'k' and 'k ' as %s and the slave as %s: the two nodes disagree on ignore_trailing_space", m, s)
+	}
+	return m == "1", nil
+}
+
 func (r *Runner) barrier(ctx context.Context) error {
 	_, err := r.Pair.WaitForReplication(ctx, r.BarrierFor)
 	return err

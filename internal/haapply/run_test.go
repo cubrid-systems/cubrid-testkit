@@ -154,6 +154,29 @@ func TestAKilledCsqlIsTheRunsFailure(t *testing.T) {
 	}
 }
 
+// The pair's comparison is asked of both nodes, and two answers are the
+// run's failure rather than a guess.
+func TestTrailingSpaceIsAskedOfBothNodes(t *testing.T) {
+	for _, c := range []struct {
+		master, slave string
+		want, fails   bool
+	}{
+		{"1", "1", true, false},
+		{"0", "0", false, false},
+		{"1", "0", false, true},
+		{"0", "1", false, true},
+		{"1", "ERR", false, true}, // the slave read no value
+	} {
+		r, state, _ := fakePair(t, "0")
+		setState(t, state, "trailing.m1", c.master)
+		setState(t, state, "trailing.s1", c.slave)
+		got, err := r.IgnoresTrailingSpace(context.Background())
+		if (err != nil) != c.fails || (err == nil && got != c.want) {
+			t.Errorf("master %s slave %s: %t, %v", c.master, c.slave, got, err)
+		}
+	}
+}
+
 func TestTheStallBoundGrowsWithTheBallast(t *testing.T) {
 	for rows, want := range map[int]time.Duration{
 		1: 2 * time.Minute, 20000: 2 * time.Minute, 20001: 4 * time.Minute, 200000: 20 * time.Minute,

@@ -268,6 +268,24 @@ func TestARunWillNotWriteOverAnotherRunsFiles(t *testing.T) {
 	}
 }
 
+// A ledger that was at the path is replaced once there is a pair to compare.
+func TestAComparisonReplacesAnEarlierLedger(t *testing.T) {
+	fakeEnv(t, "0")
+	ledger := filepath.Join(t.TempDir(), "l.tsv")
+	if err := os.WriteFile(ledger, []byte(strings.Repeat("an earlier run\n", 1000)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var errOut bytes.Buffer
+	if code := Main([]string{"stress", "--cluster", "fake", "--compare-only", "--ledger", ledger},
+		&bytes.Buffer{}, &errOut); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, errOut.String())
+	}
+	b, err := os.ReadFile(ledger)
+	if err != nil || !strings.HasPrefix(string(b), "# cluster=fake ") || strings.Contains(string(b), "an earlier run") {
+		t.Errorf("ledger %q, %v", b, err)
+	}
+}
+
 // Clients still running at the timeout are stopped, and the pair is compared
 // all the same.
 func TestClientsPastTheTimeoutAreStoppedAndThePairStillCompared(t *testing.T) {

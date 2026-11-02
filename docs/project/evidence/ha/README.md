@@ -14,6 +14,17 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-and-the-trailing-space](ha-apply-and-the-trailing-space.md) — **2026-11-01.**
+  `testkit ha-apply pairs` against #8052 `17aae152e`, which hashes a string key without the
+  trailing spaces the index ignores. With `ignore_trailing_space` on, a VARCHAR and the same with a
+  trailing space are one key: on `61ee0944a` both such patterns were missed, on `3fb54e549` both
+  held. The CHAR pair is the same bytes on either head and held on both, so it is not a pattern.
+  The command asks the pair how it compares and leaves the two out, or refuses them, where they
+  are two keys. cluster-sandbox's `--set-hidden` puts the parameter where the engine does not read
+  it; the install tree's `cubrid.conf`, which csb copies to every node, works. On `3fb54e549` the
+  whole catalog held, and `stress` gave M2's verdicts again. #8052 has since hashed four more kinds
+  of equal key (`eb31453ff`), which the catalog does not have yet.
+
 - [fk-index-insert-loses-the-victims-error](fk-index-insert-loses-the-victims-error.md) —
   **2026-10-30.** **A child INSERT chosen as a deadlock victim while it locks its own new row for
   the foreign key index is not told so.** The lock's failure path returns `NO_ERROR`; the insert goes

@@ -227,13 +227,16 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 // node. Every step reads the master as n1 and the slave as n2, so a pair
 // that failed over, or has not settled, would have a pass time the wrong
 // node.
-// A call csb could not answer is asked again, twice; an answer naming
-// another active node is not.
+// A call csb could not answer is asked again, twice, each try bounded at 20 s
+// (a hung csb would otherwise hold each for the CLI's two minutes while the
+// other side stays paused); an answer naming another active node is not.
 func (r *Runner) haCheck(ctx context.Context, s *Side) error {
 	var nodes []sandbox.NodeHealth
 	var err error
+	cli := *s.CLI
+	cli.Timeout = 20 * time.Second
 	for try := 1; try <= 3; try++ {
-		if nodes, err = s.CLI.HAStatus(ctx); err == nil || ctx.Err() != nil {
+		if nodes, err = cli.HAStatus(ctx); err == nil || ctx.Err() != nil {
 			break
 		}
 		r.logf("%s: ha status, try %d: %v", s.Role, try, err)

@@ -37,7 +37,7 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 |---|---|
 | `pairs` | 패턴마다 T1 은 ballast 를 쓴 뒤 키 하나를 쓰고, 그 뒤에 커밋되는 T2 는 그 키에 의존하며 witness 를 쓴다. T2 가 T1 보다 먼저 적용되는 일이 있는가? |
 | `stress` (M2) | 작은 키 공간 하나에 N 개 클라이언트가 결정적 부하를 건다. 두 노드가 같은 상태로 끝나는가 — PK 로 읽어서, heap 행 수로, 고아 행 없이, 적용 실패 없이? |
-| `restart` (M3) | 클라이언트마다 자기 키를 INSERT 하고 다음 트랜잭션에서 그 키를 옮기기를 되풀이하는 동안 슬레이브의 applier 를 거듭 죽인다. 다시 뜬 applier 가 이미 커밋된 트랜잭션을 한 번 더 적용하는가? |
+| `restart` (M3) | 클라이언트마다 자기 키를 INSERT 하고 다음 트랜잭션에서 그 키를 옮기기를 되풀이하는 동안 슬레이브의 applier 를 거듭 죽인다(`--kill node` 는 슬레이브 노드 전체를 crash 시키고 다시 띄운다). 다시 뜬 applier 가 이미 커밋된 트랜잭션을 한 번 더 적용하는가? |
 | `list` | 패턴 목록과 각 쌍이 공유하는 것. |
 
 패턴은 Go 안의 닫힌 목록이다. PK, UNIQUE, REVERSE UNIQUE, FK(단일·복합·CASCADE), savepoint, DDL,
@@ -105,7 +105,7 @@ missed 다. 늘지 않았으면 그 실행은 -670 이 없었다고 말할 수 �
 - **binary collation 의 뒤쪽 NUL** (#8052 `cf8955a91` 뒤): `ignore_trailing_space` 를 끈 쌍에서 패턴
   둘이 `fb1636c34` 에서 **missed**, `b984637bb` 에서 **held** 다.
 - **M3** (`restart`): applied-tx marker 를 들여온 #8052 `72650ce0d` 의 부모 `19e83a5d9` 에서 실행이
-  **missed**, `b984637bb` 에서 **held** 다.
+  **missed**, `b984637bb` 에서 **held** 다. `--kill node` 도 그렇다.
 
 ## 6. 범위 밖
 

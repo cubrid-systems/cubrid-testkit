@@ -14,6 +14,13 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-restart-and-a-crashed-slave](ha-apply-restart-and-a-crashed-slave.md) — **2026-11-02.**
+  `testkit ha-apply restart --kill node`: the same workload while the whole slave node is crashed
+  (`csb node kill`, no flush) and started again, so the restarted applier finds what the server's
+  recovery kept. On `19e83a5d9` the caught-up slave had 25 rows the master does not have (39 in a
+  prototype run), keys inserted a second time; on `b984637bb`, 5 crashes, each with markers to
+  skip, left the pair the same. A crashed slave was slow to catch up, so the run waits up to 20
+  minutes for its final marker.
 - [ha-apply-restart-and-the-applied-tx-marker](ha-apply-restart-and-the-applied-tx-marker.md) —
   **2026-11-01.** `testkit ha-apply restart`, M3: clients insert keys of their own and move each in
   the next transaction while the slave's applier is killed every 5 seconds. On #8052 `19e83a5d9`,

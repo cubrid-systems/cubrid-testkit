@@ -19,7 +19,9 @@ import (
 // fakeCSBEnv makes the test binary a stand-in for csb: it answers `cluster
 // describe` with one pair, and runs every `node exec` script here with sh, the
 // directory the variable names first on PATH. Every node is this host. An exec
-// whose script holds $FAKE_EXEC_FAIL fails as csb does.
+// whose script holds $FAKE_EXEC_FAIL fails as csb does; `node kill` and `node
+// start` run $FAKE_NODE_KILL and $FAKE_NODE_START with sh, the node as $1, and
+// fail as csb does when that script does.
 const fakeCSBEnv = "HAAPPLY_FAKE_CSB"
 
 func TestMain(m *testing.M) {
@@ -42,6 +44,15 @@ func fakeCSB(args []string, dir string) int {
 		}
 		reply(true, map[string]string{"format": "ctp",
 			"conf": "env.instance1.master.ssh.host=m1\nenv.instance1.slave.ssh.host=s1\nenv.instance1.ha.ha_db_list=db\n"})
+	case len(args) >= 3 && args[0] == "node" && (args[1] == "kill" || args[1] == "start"):
+		node := args[len(args)-1]
+		if hook := os.Getenv("FAKE_NODE_" + strings.ToUpper(args[1])); hook != "" {
+			if err := exec.Command("sh", "-c", hook, "sh", node).Run(); err != nil {
+				reply(false, map[string]any{})
+				return 1
+			}
+		}
+		reply(true, map[string]any{"nodes": []string{node}})
 	case len(args) >= 2 && args[0] == "node" && args[1] == "exec":
 		node, script := "", ""
 		for i, a := range args {

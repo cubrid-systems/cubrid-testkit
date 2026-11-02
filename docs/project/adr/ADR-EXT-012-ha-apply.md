@@ -10,8 +10,9 @@
   충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-reduced-keys.md`). `cf8955a91` 의
   둘도 충족했다 (2026-11-01, `docs/project/evidence/ha/ha-apply-and-the-binary-nul.md`). M3(`restart`)도
   구현됐고 §4 의 완료 조건을 충족했다 (2026-11-01,
-  `docs/project/evidence/ha/ha-apply-restart-and-the-applied-tx-marker.md`). 셸 프로토타입은
-  `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
+  `docs/project/evidence/ha/ha-apply-restart-and-the-applied-tx-marker.md`). 슬레이브 노드를 crash 시키는
+  `--kill node` 도 충족했다 (2026-11-02, `docs/project/evidence/ha/ha-apply-restart-and-a-crashed-slave.md`).
+  셸 프로토타입은 `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
 - **Date:** 2026-10-30
 - **Trigger:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), 구현 CBRD-27508 / CUBRID/cubrid #8052 —
   슬레이브가 트랜잭션을 여러 worker 로 적용하면서 **충돌하는 것끼리의 순서만** 지킨다. 그 순서가
@@ -70,11 +71,20 @@ writeset 이 의존성 하나를 놓치면, 슬레이브는 뒤의 트랜잭션�
   쓴다.
 - `restart` — 부하 중에 슬레이브의 applier 를 죽였다 살려도 커밋이 두 번 적용되지 않는가. 클라이언트마다
   자기 키를 INSERT 해 커밋하고, 다음 트랜잭션에서 그 키를 옮겨 커밋하기를 되풀이한다. 그동안
-  `--kill-every` 마다 슬레이브의 `cub_admin applylogdb` 를 `kill -9` 하고, heartbeat 가 그것을 다시
-  띄운다. 워커는 coordinator 가 적용 위치를 저장하기 전에 자기 연결로 커밋하므로, 다시 뜬 applier 는
+  슬레이브의 `cub_admin applylogdb` 를 거듭 `kill -9` 하고, heartbeat 가 그것을 다시 띄운다. 한 kill
+  이 끝나고 다음 kill 까지는 `--kill-every` 를 기다린다. 워커는 coordinator 가 적용 위치를 저장하기 전에 자기 연결로 커밋하므로, 다시 뜬 applier 는
   이미 적용된 커밋을 만난다. 그것을 다시 적용하면 옮긴 키가 INSERT 로 되살아난다(#8052 `72650ce0d`).
   `stress` 의 무작위 연산에 kill 을 더한 실행은 marker 이전 head 에서도 same 이었으므로, 이 모양의
-  부하를 따로 둔다.
+  부하를 따로 둔다. `--kill node` 는 applier 대신 슬레이브 노드 전체를 crash 시키고(`csb node kill`:
+  `cub_admin`, `cub_server`, `cub_master` 를 `kill -9`, 서버는 flush 하지 않는다) 다시 띄운다
+  (`csb node start`: 서비스를 멈추고 heartbeat 를 띄워 45 초까지 합류를 기다리고, crash 가 짧게 남긴
+  복제 로그는 다시 복사한다). 그러면 다시 뜬 applier 가 만나는 것은 서버의 재시작 복구가 남긴 것이다:
+  저장된 적용 위치와 marker 행은 둘 다 커밋된 슬레이브 트랜잭션이 쓴 것이다. crash 와 그 뒤의 start 는
+  시작하면 실행을 멈춰도 끝까지 간다. csb 는 별도의 프로세스 그룹에서 돌므로 터미널의 ^C 도 받지
+  않는다. crash 가 실패했다고 나와도 노드에 닿았을 수 있으므로 start 는 언제나 뒤따른다. 슬레이브가
+  다시 뜨지 않으면 실행은 실패로 끝나고, 그 슬레이브를 띄울 명령을 알려 준다. crash 된 슬레이브는 따라오는 데
+  오래 걸렸으므로(8 × 6,000 에서 `b984637bb` 는 클라이언트가 끝나고 6.5~7 분) 끝의 마커는 5 분이 아니라
+  20 분까지 기다린다.
 - `list` — 패턴 목록과 각 패턴이 공유하는 키.
 
 마커 대기 검사는 동사로 두지 않는다. live 테스트가 이미 그것을 고정한다(F6).
@@ -209,9 +219,9 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   저장된 적용 위치보다 위의 marker 가 있던 kill 수(marker 표가 없으면 `-`)와 한 kill 이 본 그 marker 의
   최대값, applier 로그가 말하는 시작 횟수, 두 노드의 행 수, 키의 합 비교, 옮기지 않은 키 수(마스터/
   슬레이브), `fail_counter` 변화, applier 로그의 -670 증가, 슬레이브가 따라왔는지, 판정. 로그가 줄을
-  잃었으면 시작 횟수는 `-` 를 쓰고, -670 수가 늘었으면 그 증가를 하한으로, 아니면 `-` 를 쓴다. 첫 줄은 클러스터, 빌드, 두
-  설정값에 클라이언트 수, 반복 수, kill 간격, timeout 을 더한다. 클라이언트의 스크립트와 로그는
-  `stress` 처럼 원장 옆에 남긴다.
+  잃었으면 시작 횟수는 `-` 를 쓰고, -670 수가 늘었으면 그 증가를 하한으로, 아니면 `-` 를 쓴다. 첫 줄은
+  클러스터, 빌드, 두 설정값에 클라이언트 수, 반복 수, 무엇을 죽였는지(`kill=applier|node`), kill 간격,
+  timeout 을 더한다. 클라이언트의 스크립트와 로그는 `stress` 처럼 원장 옆에 남긴다.
 
 ### 3-7. Go 만
 
@@ -232,7 +242,8 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   `eb31453ff` 의 일곱(§3-4)은 `3fb54e549` 가 missed, `eb31453ff` 를 담은 `fb1636c34` 가 held 이다.
   `cf8955a91` 의 둘(§3-4)은 `ignore_trailing_space` 를 끈 쌍에서 `fb1636c34` 가 missed,
   `cf8955a91` 을 담은 `b984637bb` 가 held 이다. **M3** — `restart`. 완료 조건은 applied-tx marker 를
-  들여온 `72650ce0d` 의 부모 `19e83a5d9` 에서 missed, `b984637bb` 에서 held 다.
+  들여온 `72650ce0d` 의 부모 `19e83a5d9` 에서 missed, `b984637bb` 에서 held 다. `--kill node` 도 두
+  head 에서 같은 판정이다.
 
 ## 5. 기각한 대안
 

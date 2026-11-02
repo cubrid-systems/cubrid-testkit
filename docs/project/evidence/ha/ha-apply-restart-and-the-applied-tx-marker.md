@@ -96,6 +96,10 @@ master_errors	clients	kills	kills_backlog	markers_peak	restarts	master_rows	slav
 0	done	43	-	0	43	24000	10960	differ	0	2097	80	80	stalled	missed
 ```
 
+These kills ran on a ticker, every 5 seconds start to start. From
+[ha-apply-restart-and-a-crashed-slave](ha-apply-restart-and-a-crashed-slave.md) on, the command waits
+`--kill-every` from the end of one kill to the next, so the same run makes somewhat fewer kills.
+
 The two ran at the same time. On `b984637bb` all 43 kills found markers above the stored position,
 up to 2,060, the applier started 43 times, and the slave held what the master held. On `19e83a5d9`
 the applier failed 80 times with 80 -670s, and the slave had not caught up when the barrier gave
@@ -115,7 +119,8 @@ prototype's 111 and those 97) and 208 lines with -670; that read is kept with th
   apply info store while the markers were deleted. Nothing here makes one.
 - **`502685e64` and `9343b73f7` on their own**: no head between `72650ce0d` and them was run.
 - **A crash of the slave's server** (`csb node kill`), which also restarts the applier but after a
-  server recovery.
+  server recovery: [ha-apply-restart-and-a-crashed-slave](ha-apply-restart-and-a-crashed-slave.md)
+  (`--kill node`, 2026-11-02).
 - **Statements**: the marker covers a DDL or a DML replicated as a statement too; the workload has
   only rows.
 

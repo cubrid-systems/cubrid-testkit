@@ -2,6 +2,8 @@ package sandbox
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -124,5 +126,35 @@ func TestFaultsListsWhatIsInForce(t *testing.T) {
 	}
 	if got := fs[0].String(); !strings.Contains(got, "gbha-n2") || !strings.Contains(got, "gbha-n1") {
 		t.Errorf("the line names only half the fault: %q", got)
+	}
+}
+
+// A slave crash and its start name the slave to csb, and csb runs in a
+// process group of its own, so a terminal's ^C cannot cut the start off after
+// the crash.
+func TestASlaveCrashAndStartNameTheSlaveAndRunDetached(t *testing.T) {
+	for _, verb := range []string{"kill", "start"} {
+		bin, log := fakeCSB(t, `awk '{ print $5 }' /proc/$$/stat > "$(dirname "$0")/pgid"; echo $$ > "$(dirname "$0")/pid"
+echo '{"schema":"csb/v1","ok":true,"data":{"nodes":["gbha-n2"]},"notes":[]}'`)
+		p := &Pair{Cluster: "gbha", Master: "gbha-n1", Slaves: []string{"gbha-n2"}, cli: &CLI{Bin: bin, Cluster: "gbha"}}
+		do := p.CrashSlave
+		if verb == "start" {
+			do = p.StartSlave
+		}
+		if err := do(context.Background(), 0); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"node", verb, "--cluster", "gbha", "--json", "gbha-n2"}
+		if got := argv(t, log); strings.Join(got, " ") != strings.Join(want, " ") {
+			t.Errorf("%s sent %v, want %v", verb, got, want)
+		}
+		pgid, _ := os.ReadFile(filepath.Join(filepath.Dir(bin), "pgid"))
+		pid, _ := os.ReadFile(filepath.Join(filepath.Dir(bin), "pid"))
+		if strings.TrimSpace(string(pgid)) == "" || strings.TrimSpace(string(pgid)) != strings.TrimSpace(string(pid)) {
+			t.Errorf("%s: csb ran in process group %q, not its own (%q)", verb, pgid, pid)
+		}
+		if err := do(context.Background(), 1); err == nil {
+			t.Errorf("%s of a slave the pair does not have was sent", verb)
+		}
 	}
 }

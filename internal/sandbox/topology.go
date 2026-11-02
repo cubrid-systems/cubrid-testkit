@@ -158,11 +158,19 @@ func (p *Pair) caseCLI() *CLI {
 
 // SlaveChannel returns the channel for slave n, counting from zero.
 func (p *Pair) SlaveChannel(n int) (exec.Channel, error) {
+	name, err := p.slaveName(n)
+	if err != nil {
+		return nil, err
+	}
+	return NewNode(p.caseCLI(), name), nil
+}
+
+func (p *Pair) slaveName(n int) (string, error) {
 	if n < 0 || n >= len(p.Slaves) {
-		return nil, fmt.Errorf("sandbox: cluster %q has %d slave(s) and slave %d was asked for",
+		return "", fmt.Errorf("sandbox: cluster %q has %d slave(s) and slave %d was asked for",
 			p.Cluster, len(p.Slaves), n)
 	}
-	return NewNode(p.caseCLI(), p.Slaves[n]), nil
+	return p.Slaves[n], nil
 }
 
 // Nodes names every node, master first. What a run records as "where this ran".

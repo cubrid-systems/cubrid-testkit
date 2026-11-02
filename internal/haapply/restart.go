@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cubrid-systems/cubrid-testkit/internal/exec"
 	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
 
@@ -22,7 +23,8 @@ import (
 // transaction moved brings the key back (#8052 72650ce0d). Each client inserts
 // fresh keys of its own and moves each one in the next transaction, so the
 // workers apply the clients in parallel, while the slave's applier is killed
-// again and again.
+// again and again, or the whole slave node crashed: then the server's restart
+// recovery decides what the restarted applier finds, the marker rows among it.
 
 const restartSetup = `DROP TABLE IF EXISTS r_kv;
 CREATE TABLE r_kv (id INT PRIMARY KEY, c INT, i INT);`
@@ -63,10 +65,19 @@ func restartSQL(c, iters int) string {
 	return b.String()
 }
 
+// What a restart run kills: the slave's applier, which heartbeat starts
+// again, or the whole slave node, crashed and started again.
+const (
+	KillApplier = "applier"
+	KillNode    = "node"
+)
+
 // RestartConfig is one restart run.
 type RestartConfig struct {
 	Clients, Iters int
-	// KillEvery is the time between two kills of the slave's applier while the
+	// Kill is KillApplier or KillNode.
+	Kill string
+	// KillEvery is the time from the end of one kill to the next while the
 	// clients run; Timeout bounds the clients.
 	KillEvery, Timeout time.Duration
 	// Host, Node and Save are as in StressConfig.
@@ -77,12 +88,15 @@ type RestartConfig struct {
 type RestartOutcome struct {
 	Errors int // ERROR lines in the clients' logs: the master refusing
 	Hung   bool
-	// Kills is the kills that found an applier to kill. Backlog is those that
-	// found, just before, markers above the slave's stored apply position, so
-	// the applier that came up had commits to skip; -1 when the slave has no
-	// marker table. A kill whose marker read failed counts in neither way.
-	// MarkersPeak is the most markers one kill found.
+	// Kills is the kills that found an applier to kill, or under KillNode the
+	// crashes csb made. Backlog is those that found, just before, markers
+	// above the slave's stored apply position, so the applier that came up had
+	// commits to skip; -1 when the slave has no marker table. A kill whose
+	// marker read failed counts in neither way. MarkersPeak is the most
+	// markers one kill found.
 	Kills, Backlog, MarkersPeak int
+	// Down is a crashed slave node that did not start again.
+	Down bool
 	// Restarts is how many times the slave's applier log says it started, -1
 	// when the log lost lines during the run.
 	Restarts int
@@ -122,6 +136,9 @@ func JudgeRestart(o RestartOutcome) string {
 // Restart runs the workload with the kills and compares the pair.
 func (r *Runner) Restart(ctx context.Context, c RestartConfig) (RestartOutcome, error) {
 	var o RestartOutcome
+	if c.Kill == "" {
+		c.Kill = KillApplier
+	}
 	defer r.keepFiles(c.Host, c.Save, "restart")
 	if err := os.RemoveAll(c.Host); err != nil {
 		return o, err
@@ -170,16 +187,23 @@ func (r *Runner) Restart(ctx context.Context, c RestartConfig) (RestartOutcome, 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		r.killLoop(ctx, c.KillEvery, stop, &o)
+		r.killLoop(ctx, c, stop, &o)
 	}()
 	out, err := r.sh(ctx, r.restartClientsScript(c), c.Timeout+5*time.Minute)
 	close(stop)
 	wg.Wait()
+	var down error
+	if o.Down {
+		down = fmt.Errorf("%s did not start again after a crash or an attempt at one; `csb node start %s` brings it back", r.slave(), r.slave())
+	}
 	if err != nil {
 		if _, kerr := r.Client.Run(context.Background(), "kill -9 $(cat "+shellQuote(c.Node+"/pids")+") 2>/dev/null; true"); kerr != nil {
 			r.logf("restart: the clients may still be running on %s: %v", r.Client.Name, kerr)
 		}
-		return o, err
+		return o, errors.Join(err, down)
+	}
+	if down != nil {
+		return o, down
 	}
 	switch tags := parseTags(out); tags["clients"] {
 	case "done":
@@ -253,73 +277,113 @@ func (r *Runner) slaveHasTimeout(ctx context.Context) error {
 	return nil
 }
 
-// killLoop kills the slave's applier every d until stop is closed, reading
-// the markers above the stored apply position just before each kill.
-// Heartbeat starts the applier again. A kill that could not be made is said
-// and the loop goes on: the clients run to their end either way, and a run
-// with no kill is inconclusive.
-func (r *Runner) killLoop(ctx context.Context, d time.Duration, stop <-chan struct{}, o *RestartOutcome) {
+// killLoop kills until stop is closed, waiting c.KillEvery after each
+// attempt, and reads the markers above the stored apply position just before
+// each kill. A kill that could not be made is said and the loop goes on: the
+// clients run to their end either way, and a run with no kill is
+// inconclusive. A crashed node that does not start again ends the kills.
+func (r *Runner) killLoop(ctx context.Context, c RestartConfig, stop <-chan struct{}, o *RestartOutcome) {
 	ch, err := r.Pair.SlaveChannel(0)
 	if err != nil {
 		r.logf("restart: no channel to the slave, so no kill: %v", err)
 		return
 	}
-	script := killScript(r.Pair.DB, o.Backlog >= 0)
-	tick := time.NewTicker(d)
-	defer tick.Stop()
+	script := killScript(r.Pair.DB, o.Backlog >= 0, c.Kill == KillApplier)
+	wait := time.NewTimer(c.KillEvery)
+	defer wait.Stop()
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-wait.C:
 		}
-		res, err := ch.Run(ctx, script)
-		if err != nil {
-			r.logf("restart: a kill on %s was not made: %v", r.slave(), err)
-			continue
-		}
-		tags := parseTags(res.Stdout)
-		switch tags["pkill"] {
-		case "0":
-		case "1":
-			continue // heartbeat had not started it again yet
+		select {
+		case <-stop: // the clients ended as the wait did: no kill after them
+			return
 		default:
-			r.logf("restart: pkill on %s said %q: %s", r.slave(), tags["pkill"], strings.TrimSpace(res.Stderr))
-			continue
 		}
-		o.Kills++
-		if o.Backlog < 0 {
-			continue
+		markers, killed, down := r.killOnce(ctx, ch, script, c.Kill)
+		if killed {
+			o.Kills++
+			if o.Backlog >= 0 {
+				if m, err := strconv.Atoi(markers); err != nil {
+					r.logf("restart: the markers on %s could not be read before kill %d", r.slave(), o.Kills)
+				} else if m > 0 {
+					o.Backlog++
+					o.MarkersPeak = max(o.MarkersPeak, m)
+				}
+			}
 		}
-		m, err := strconv.Atoi(tags["markers"])
-		if err != nil {
-			r.logf("restart: the markers on %s could not be read before kill %d", r.slave(), o.Kills)
-			continue
+		if down {
+			o.Down = true
+			return
 		}
-		if m > 0 {
-			o.Backlog++
-			o.MarkersPeak = max(o.MarkersPeak, m)
-		}
+		wait.Reset(c.KillEvery)
 	}
 }
 
-// killScript runs on the slave. The marker read is bounded, so a slave server
-// that stops answering does not hold the kill. The bracket keeps pkill from
-// matching the shell that runs this script, whose command line holds the
-// pattern.
-func killScript(db string, markers bool) string {
-	read := "m=-"
+// killOnce reads the markers and kills: the applier, which heartbeat starts
+// again, or the node, which it starts again itself. It says what the read
+// found, whether there was something to kill, and whether a crashed node is
+// down.
+//
+// A crash and its start run to their end once begun, even when the run is
+// being stopped, so that no pair is left down: neither takes the run's
+// cancel, and csb runs out of reach of a terminal's ^C (Pair.CrashSlave). A
+// crash that failed may still have reached the node, and `csb node start`
+// begins with a service stop, so the start follows it either way.
+func (r *Runner) killOnce(ctx context.Context, ch exec.Channel, script, kill string) (markers string, killed, down bool) {
+	res, err := ch.Run(ctx, script)
+	if err != nil {
+		r.logf("restart: a kill on %s was not made: %v", r.slave(), err)
+		return "", false, false
+	}
+	tags := parseTags(res.Stdout)
+	if kill == KillNode {
+		cycle := context.WithoutCancel(ctx)
+		crashErr := r.Pair.CrashSlave(cycle, 0)
+		if crashErr != nil {
+			r.logf("restart: a crash of %s may not have been made: %v", r.slave(), crashErr)
+		}
+		if ctx.Err() != nil {
+			r.logf("restart: stopping; %s is started again first", r.slave())
+		}
+		if err := r.Pair.StartSlave(cycle, 0); err != nil {
+			r.logf("restart: %s did not start again after a crash or an attempt at one, so no more kills: %v", r.slave(), err)
+			return tags["markers"], crashErr == nil, true
+		}
+		return tags["markers"], crashErr == nil, false
+	}
+	switch tags["pkill"] {
+	case "0":
+		return tags["markers"], true, false
+	case "1": // heartbeat had not started it again yet
+	default:
+		r.logf("restart: pkill on %s said %q: %s", r.slave(), tags["pkill"], strings.TrimSpace(res.Stderr))
+	}
+	return "", false, false
+}
+
+// killScript runs on the slave: the marker read, and with pkill the kill of
+// the applier. The read is bounded, so a slave server that stops answering
+// does not hold the kill. The bracket keeps pkill from matching the shell that
+// runs this script, whose command line holds the pattern.
+func killScript(db string, markers, pkill bool) string {
+	s := "m=-"
 	if markers {
-		read = fmt.Sprintf(`c=csql
+		s = fmt.Sprintf(`c=csql
 if [ -x "$CUBRID/bin/csql" ]; then c="$CUBRID/bin/csql"; export LD_LIBRARY_PATH="$CUBRID/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"; fi
 m=$(timeout 10 $c -u dba -t -c %s %s 2>/dev/null | awk '/^ *[0-9]+ *$/ { print $1; exit }')`,
 			shellQuote(backlogQuery), shellQuote(db+"@localhost"))
 	}
-	return read + `
+	if pkill {
+		s += `
 pkill -9 -f 'cub_admin [a]pplylogdb'
-echo "pkill=$?"
+echo "pkill=$?"`
+	}
+	return s + `
 echo "markers=${m:--}"
 `
 }

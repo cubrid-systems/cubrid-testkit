@@ -55,7 +55,9 @@ stress options:
 restart options:
   --clients N      clients at once, at most 20 (default 8)
   --iters N        keys a client inserts and then moves, at most 100000 (default 3000)
-  --kill-every D   time between two kills of the slave's applier, 1s at least (default 5s)
+  --kill WHAT      applier: kill -9 the slave's applier, which heartbeat starts again;
+                   node: crash the whole slave node and start it again (default applier)
+  --kill-every D   time from the end of one kill to the next, 1s at least (default 5s)
   --timeout D      how long the clients may take before they are stopped, 1s at least (default 30m)
 `
 
@@ -65,6 +67,12 @@ const maxRounds = 999
 
 // barrierFor is how long the slave may take to apply a marker.
 const barrierFor = 5 * time.Minute
+
+// crashBarrierFor is barrierFor after a restart run that crashes the slave
+// node, which was slow to catch up: on #8052 b984637bb, 8 crashes under 8
+// clients x 6,000 keys left the slave 6.5 to 7 minutes behind when the
+// clients ended (evidence/ha/ha-apply-restart-and-a-crashed-slave.md).
+const crashBarrierFor = 20 * time.Minute
 
 // Main is the subcommand: exit 0 when the run finished, whatever its
 // verdicts; 1 when it could not run; 2 for a command it cannot read.
@@ -551,6 +559,7 @@ func parseRestart(args []string, stderr io.Writer) (*restartArgs, error) {
 	c := &a.cfg
 	fs.IntVar(&c.Clients, "clients", 8, "")
 	fs.IntVar(&c.Iters, "iters", 3000, "")
+	fs.StringVar(&c.Kill, "kill", KillApplier, "")
 	fs.DurationVar(&c.KillEvery, "kill-every", 5*time.Second, "")
 	fs.DurationVar(&c.Timeout, "timeout", 30*time.Minute, "")
 	fs.Usage = func() { fmt.Fprint(stderr, usage) }
@@ -568,6 +577,8 @@ func parseRestart(args []string, stderr io.Writer) (*restartArgs, error) {
 		return nil, fmt.Errorf("--clients must be 1 to %d", maxRestartClients)
 	case c.Iters < 1 || c.Iters > maxRestartIters:
 		return nil, fmt.Errorf("--iters must be 1 to %d", maxRestartIters)
+	case c.Kill != KillApplier && c.Kill != KillNode:
+		return nil, fmt.Errorf("--kill must be %s or %s", KillApplier, KillNode)
 	case c.KillEvery < time.Second:
 		return nil, fmt.Errorf("--kill-every must be 1s at least")
 	case c.Timeout < time.Second:
@@ -612,7 +623,7 @@ func restart(args []string, stdout, stderr io.Writer) int {
 
 	c := a.cfg
 	meta := append(s.meta(ctx), fmt.Sprintf("clients=%d", c.Clients), fmt.Sprintf("iters=%d", c.Iters),
-		"kill_every="+c.KillEvery.String(), "timeout="+c.Timeout.String())
+		"kill="+c.Kill, "kill_every="+c.KillEvery.String(), "timeout="+c.Timeout.String())
 	if err := start(); err != nil {
 		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, err)
 		return 1
@@ -626,6 +637,9 @@ func restart(args []string, stdout, stderr io.Writer) int {
 	c.Node = "/work/" + filepath.ToSlash(dir)
 	c.Save = save
 	r := &Runner{Pair: s.pair, Client: s.client, Log: stderr, BarrierFor: barrierFor}
+	if c.Kill == KillNode {
+		r.BarrierFor = crashBarrierFor
+	}
 	code := 0
 	o, err := r.Restart(ctx, c)
 	if err != nil {

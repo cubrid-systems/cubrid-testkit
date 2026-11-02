@@ -39,7 +39,7 @@ writeset did not, which #8052 then fixed.
 |---|---|
 | `pairs` | For each pattern, T1 writes ballast and then a key; T2, committed after it, depends on that key and writes a witness. Is T2 ever applied before T1? |
 | `stress` (M2) | N clients on one small key space, a deterministic workload: do the nodes end the same — through the primary key, by heap count, with no orphan and no apply failure? |
-| `restart` (M3) | Each client inserts fresh keys of its own and moves each one in the next transaction, while the slave's applier is killed again and again: does an applier that starts again apply a committed transaction a second time? |
+| `restart` (M3) | Each client inserts fresh keys of its own and moves each one in the next transaction, while the slave's applier is killed again and again (with `--kill node`, the whole slave node is crashed and started again): does an applier that starts again apply a committed transaction a second time? |
 | `list` | The patterns, and what each pair shares. |
 
 The patterns are a closed list in Go: primary, unique, reverse-unique and foreign keys (single,
@@ -112,7 +112,8 @@ Its clients' scripts and logs are kept as `stress` keeps them.
   `ignore_trailing_space` off, the two patterns are **missed** on `fb1636c34` and **held** on
   `b984637bb`.
 - **M3** (`restart`): a run is **missed** on #8052 `19e83a5d9`, the parent of `72650ce0d`, which
-  added the applied-tx marker, and **held** on `b984637bb`.
+  added the applied-tx marker, and **held** on `b984637bb`; a run with `--kill node` gives the same two
+  verdicts.
 
 ## 6. Not in scope
 

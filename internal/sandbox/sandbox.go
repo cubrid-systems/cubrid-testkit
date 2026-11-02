@@ -44,6 +44,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -113,6 +114,10 @@ type CLI struct {
 	Cluster string
 	// Timeout bounds one call. Zero means DefaultTimeout.
 	Timeout time.Duration
+	// Detach starts csb in a process group of its own, so that a terminal's
+	// ^C, which goes to the whole foreground group, does not end a call that
+	// must finish once begun; the context still bounds it.
+	Detach bool
 }
 
 // Bind returns the CLI for a cluster.
@@ -194,6 +199,9 @@ func (c *CLI) callRaw(ctx context.Context, noun, verb string, rest ...string) (*
 	}
 	argv = append(append(argv, "--json"), rest...)
 	cmd := exec.CommandContext(ctx, c.bin(), argv...)
+	if c.Detach {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
 	var out, errOut strings.Builder
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	runErr := cmd.Run()

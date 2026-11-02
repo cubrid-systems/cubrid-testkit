@@ -137,7 +137,8 @@ func (r *Runner) passOn(ctx context.Context, s *Side, idle []*Side, c *Case, f *
 	return p
 }
 
-// pass is Design §5.5's pass(): reset, the cold sequence when asked, the
+// pass is Design §5.5's pass(): reset, the cold sequence when asked (after
+// a vacuum wait, so the restart starts from a settled database), the
 // vacuum wait, a checkpoint taken to its end when asked, then the snapshots
 // around the client. A step that fails before the client runs makes the pass null
 // with that step's name; the collect layer failing does not (FR-16).
@@ -162,6 +163,24 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		}
 	}
 	if c.Cold {
+		// The reset's vacuum work before the restart, while the watcher
+		// counts it: vacuum resumed after the restart would read part of
+		// what the pass reads cold into the buffer before the window, and
+		// the wait after the restart sees nothing, the statistics having
+		// started over with the server (storage.drop_large_table: 17,000 to
+		// 36,000 of 36,000 pages read cold, by pass).
+		if note, err := r.watcherEnsure(ctx, s, db); err != nil {
+			p.Notes = append(p.Notes, "watcher before the cold restart: "+err.Error())
+		} else if note != "" {
+			p.Notes = append(p.Notes, "before the cold restart: "+note)
+		}
+		note, err := r.waitVacuum(ctx, s, db, time.Minute)
+		if note != "" {
+			p.Notes = append(p.Notes, "before the cold restart: "+note)
+		}
+		if err != nil {
+			p.Notes = append(p.Notes, "vacuum wait before the cold restart: "+err.Error())
+		}
 		if err := r.coldStart(ctx, s, db); err != nil {
 			return p.null(err.Error())
 		}

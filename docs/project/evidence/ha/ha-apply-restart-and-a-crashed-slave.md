@@ -16,6 +16,7 @@
 | pair | #8052 | how it was stood up |
 |---|---|---|
 | `hap1102bc41` | `19e83a5d9` (`11.5.0.2932-19e83a5`) | by `restart --build --keep` (§3) |
+| `hap1102ab7b` | `19e83a5d9` (`11.5.0.2932-19e83a5`) | by `restart --build --kill node --keep`, testkit from `main` (§3, the last run) |
 | `hap11010a6b` | `b984637bb` (`11.5.0.2989-b984637`) | kept from [ha-apply-restart-and-the-applied-tx-marker](ha-apply-restart-and-the-applied-tx-marker.md); its nodes had `ignore_trailing_space=yes`, which no table here reads |
 
 ---
@@ -121,8 +122,16 @@ handling, three runs on `hap11010a6b`, one after the other: `stress --ops 0,1,2,
 same (`haapply-low1-stress.tsv`); `restart` with the applier kill held, 32 kills, all with markers
 up to 2,093 (`haapply-low1-applier.tsv`); and `restart --kill node` held, 5 crashes, all with
 markers up to 2,083, 5 starts, both nodes 24,000 rows with the same key sum, 1,200,036,012,000
-(`haapply-low1-node.tsv`). `hap1102bc41` was gone by then, so `19e83a5d9` was not run again; the
-verdict's code did not change.
+(`haapply-low1-node.tsv`). `hap1102bc41` was gone by then.
+
+`19e83a5d9` was run again once the change was merged, with testkit built from `main` (`98e3c51`, the
+second interrupt's handling included), on a pair the command stood up from a new build of
+`19e83a5d9` (`11.5.0.2932-19e83a5`), `hap1102ab7b`:
+`restart --build <an install of #8052 19e83a5d9> --kill node --keep` was missed, 5 crashes (no
+marker table), 5 starts, and the slave caught up with 24,024 rows to the master's 24,000, 24 keys
+not moved, the key sums 1,200,036,012,000 and 1,201,046,014,412, and 24 failures with 24 -670s
+(`haapply-cr3-19e8.tsv`). With `b984637bb` held from the same code but for that handling, the
+current command gives both of §5's verdicts. The pair was removed afterwards.
 
 ## 4. Not here
 
@@ -143,4 +152,4 @@ testkit ha-apply restart --build <an install of #8052 19e83a5d9> --kill node    
 testkit ha-apply restart --build <an install of #8052 b984637bb> --kill node    # held
 ```
 
-What ran was `--cluster` on the two kept pairs.
+What ran was `--cluster` on the two kept pairs, and `--build --keep` for `hap1102ab7b`.

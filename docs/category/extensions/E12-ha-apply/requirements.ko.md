@@ -2,6 +2,9 @@
 
 *[English](requirements.md) · 한국어*
 
+이 항목이 지금 #8052 의 무엇을 덮는지, 그 리뷰를 감당할 수 있는지는
+[review-coverage.ko.md](review-coverage.ko.md) 에 있다.
+
 **출처:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), CBRD-27508 / CUBRID/cubrid #8052 (구현),
 `docs/project/evidence/ha/parallel-apply-*` 의 셸 프로토타입과 그 결과
 **상태:** incubating — **진행 중** (ADR-EXT-012 제안 2026-10-30. M1 `pairs`·`list`, M2 `stress`, M3

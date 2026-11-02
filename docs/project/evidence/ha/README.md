@@ -14,6 +14,12 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-coverage-on-787defb50](ha-apply-coverage-on-787defb50.md) — **2026-11-02.**
+  Four gaps on `787defb50`: a history of 1,000 keys (468 fallbacks and clears; same) and of 50,000
+  (held, the clears ordering by construction), 1 and 16 workers (same, held), a memory limit whose
+  check may not have run, and serial fragments (AUTO_INCREMENT, SERIAL, `INCR`) under kills, the
+  same on both nodes on `787defb50` and on `3fb54e549`. Run alone with no kill, the two heads took
+  the same time.
 - [ha-apply-restart-and-statements](ha-apply-restart-and-statements.md) — **2026-11-02.**
   `testkit ha-apply restart --statements`: the workload's DML replicated as statements (every
   client commit fell back to a serial apply). Missed on `b84567f36`, before the statement marker

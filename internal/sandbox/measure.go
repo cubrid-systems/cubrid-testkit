@@ -114,6 +114,42 @@ func (c *CLI) DestroyPurge(ctx context.Context) ([]string, error) {
 	return data.Removed, nil
 }
 
+// NodeStart is `csb node start` on a node by name: the service stopped and
+// started, the heartbeat started, the node waited for, and a replication log a
+// crash left short recopied. Detached like StartSlave: a start cut in half
+// would leave the node down. The perf runner uses it after a case that crashed
+// the master (ha.failover).
+func (c *CLI) NodeStart(ctx context.Context, node string) error {
+	d := *c
+	d.Detach = true
+	_, err := d.callLong(ctx, "node", "start", node)
+	return err
+}
+
+// Failback is `csb ha failback --to <node> --yes`: the cluster's current master
+// stepped down so that node is promoted, and the old master put back as its
+// slave. Detached, for the same reason as NodeStart. csb says ok when the roles
+// moved and puts what it could not verify -- the rejoin, the replication -- in
+// notes of severity error; those are this call's error.
+func (c *CLI) Failback(ctx context.Context, to string) error {
+	d := *c
+	d.Detach = true
+	env, err := d.callLong(ctx, "ha", "failback", "--to", to, "--yes")
+	if err != nil {
+		return err
+	}
+	var bad []Note
+	for _, n := range env.Notes {
+		if n.Severity == "error" {
+			bad = append(bad, n)
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("sandbox: csb ha failback --to %s: %s", to, notesLine(bad))
+	}
+	return nil
+}
+
 // DescribeRaw returns `cluster describe` as csb printed it, for a results
 // directory that keeps the reproducible artifact beside the numbers.
 func (c *CLI) DescribeRaw(ctx context.Context) (json.RawMessage, error) {

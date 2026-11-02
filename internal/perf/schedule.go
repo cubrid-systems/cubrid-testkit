@@ -93,6 +93,9 @@ func selectCases(s *Suite, pair string, globs []string, only string) []*Case {
 // canaryPairs says what is wrong with a canary that names pairs: a canary
 // gates every pair, so it has to be one every pair can run.
 func canaryPairs(c *Case) string {
+	if c.Failover {
+		return fmt.Sprintf("canary %s fails its pair over; a canary is the pair's A/A gate", c.ID)
+	}
 	if len(c.Pairs) == 0 {
 		return ""
 	}
@@ -124,6 +127,10 @@ func caseBound(c *Case) time.Duration {
 	if c.Topology == TopologyHA {
 		per += haPassAllowance
 	}
+	if c.Failover {
+		per += failoverAllowance
+		return time.Duration(passes)*per + fixtureSwitchBound + failoverRestoreBound
+	}
 	return time.Duration(passes)*per + fixtureSwitchBound
 }
 
@@ -136,6 +143,14 @@ const deferCheckpointAllowance = time.Minute
 // reset, and the role checks; on the hub they took about a second together.
 const haPassAllowance = 30 * time.Second
 
+// failoverAllowance is what a failover pass adds: the killed node started
+// again (csb node start took 16 s on the hub) and the pair settled.
+const failoverAllowance = time.Minute
+
+// failoverRestoreBound is putting n1 back on both sides when a failover case
+// ends: a settle, a failback and a settle each, then the slave wait.
+const failoverRestoreBound = 2 * 15 * time.Minute
+
 func remeasureBound(c *Case) time.Duration {
 	per := time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second
 	if c.Background == "defer" {
@@ -143,6 +158,9 @@ func remeasureBound(c *Case) time.Duration {
 	}
 	if c.Topology == TopologyHA {
 		per += haPassAllowance
+	}
+	if c.Failover {
+		per += failoverAllowance
 	}
 	return time.Duration(remeasurePairs*2) * per
 }

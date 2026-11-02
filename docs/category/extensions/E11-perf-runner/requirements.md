@@ -88,7 +88,13 @@ until the slave shows a marker written on the master (`sandbox.Pair.WaitForRepli
 slave's applylogdb first; it checks with `csb ha status` that `n1` is the one active node when the pair is
 made, before every case and after every pass, and when the pair is made that copylogdb runs the
 `ha_copy_sync_mode` the case asks for (a csb before cluster-sandbox #15 dropped the key). A `utility` case may run its `client.argv` and
-`client.prepare` on the slave (`client.node: "slave"`). Guard stage 3 counts both database containers, and
+`client.prepare` on the slave (`client.node: "slave"`). A case that says `"failover": true` kills its pair's master
+(`ha.failover`): after each of its passes the runner starts the killed node again as the slave (`csb node
+start`), waits for one active node and one standby, and lets `N1` follow the master, so the next pass kills
+the other node; when the case ends it puts `n1` back as master (`csb ha failback`) and waits for the
+slave, and a side it cannot restore has the rest of its group skipped and is destroyed. A node is started
+only when two readings in a row call it down while the other is active, since `csb node start` stops the
+service first; a failover case cannot be a canary and takes no counters. Guard stage 3 counts both database containers, and
 the memory check two servers a side.
 
 `testkit perf session -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>] [--out <dir>]

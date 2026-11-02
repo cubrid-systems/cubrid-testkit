@@ -288,6 +288,15 @@ func (r *Runner) runOne(ctx context.Context, c *Case, f *Fixture) (int, string) 
 	}
 	session.ParamDiff = params.list()
 	cr := r.runCase(ctx, c, f, t, ref)
+	if c.Failover && r.Keep {
+		// The sides are destroyed next unless they are kept for a look.
+		for _, s := range []*Side{t, ref} {
+			if err := r.restoreN1(ctx, s); err != nil {
+				r.logf("%v", err)
+				session.Notes = append(session.Notes, "ha: "+err.Error())
+			}
+		}
+	}
 	for _, p := range cr.Passes {
 		s := t
 		if p.Side == "reference" {

@@ -62,6 +62,11 @@ type Case struct {
 	// conf only some builds take -- a parameter 11.4.6 does not have -- names
 	// the pair whose two builds both take it.
 	Pairs []string `json:"pairs,omitempty"`
+	// Failover is a case that fails its HA pair over: its client kills the
+	// master. The runner then starts the killed node again as the slave and
+	// follows the roles (N1 is whichever node is master), and puts n1 back as
+	// master when the case ends.
+	Failover bool `json:"failover,omitempty"`
 
 	// Conf is the cubrid.conf overrides as the file will carry them: a JSON
 	// string, number or true/false, each written out as text.
@@ -252,7 +257,7 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 		p.add("%v", err)
 		return nil, p
 	}
-	if !presence(p, raw, "", caseKeys, []string{"notes", "pairs"}) {
+	if !presence(p, raw, "", caseKeys, []string{"notes", "pairs", "failover"}) {
 		return nil, p
 	}
 	var c Case
@@ -302,6 +307,18 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 			p.add("client.node %q is not a node this runner knows: %s, or leave it out for the database node", c.Utility.Node, UtilityNodeSlave)
 		case c.Topology != TopologyHA:
 			p.add("client.node %s needs topology %s; a %s cluster has one database node", UtilityNodeSlave, TopologyHA, c.Topology)
+		}
+	}
+	if c.Failover {
+		switch {
+		case c.Topology != TopologyHA:
+			p.add("failover needs topology %s: it fails an HA pair over", TopologyHA)
+		case c.Driver != "utility":
+			p.add("failover needs the utility driver: its client kills the master from inside it")
+		case c.Utility != nil && c.Utility.Node != "":
+			p.add("failover runs on the master; client.node %q would run it on the slave", c.Utility.Node)
+		case len(c.Counters) > 0:
+			p.add("failover takes no counters: the snapshots read the master the case kills")
 		}
 	}
 	// An HA server is the heartbeat's to start and stop: cubrid server

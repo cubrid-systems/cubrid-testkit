@@ -627,6 +627,34 @@ func (ss *sides) frozen() string {
 	return ""
 }
 
+// lostReason names the first side whose HA roles a failover case left
+// unrestored, or "".
+func lostReason(sides ...*Side) string {
+	for _, s := range sides {
+		if s != nil && s.lost != nil {
+			return fmt.Sprintf("cluster: %s's HA roles were not restored: %v", s.Role, s.lost)
+		}
+	}
+	return ""
+}
+
+// dropLost destroys every side a failover case left unrestored and empties
+// its slot: the rest of its group was skipped, and the next group stands a
+// side up anew rather than run on it.
+func (s *Session) dropLost(ss *sides, dir string) {
+	for _, slot := range []**Side{&ss.t, &ss.r, &ss.o} {
+		if *slot == nil || (*slot).lost == nil {
+			continue
+		}
+		s.logf("destroying %s, whose HA roles were not restored", (*slot).Name)
+		s.keepLogs(*slot, dir)
+		if err := s.destroySide(*slot); err != nil {
+			s.note("teardown of a lost side: %v", err)
+		}
+		*slot = nil
+	}
+}
+
 // runPair is one pair of Design §5.1: the canary gate, then the cases. It
 // returns the reason the session must stop ("budget", "lease", "signal"),
 // or "" when the session goes on to the next pair -- which includes a pair
@@ -884,6 +912,8 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		} else if why := ss.frozen(); why != "" {
 			s.note("pair %s: %s", p.Name, why)
 			broken = why
+		} else {
+			s.dropLost(ss, pairDir)
 		}
 	}
 	for _, e := range entries {
@@ -971,6 +1001,8 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 			case !s.Clock.fits(time.Now(), caseBound(c)):
 				s.note("pair %s: %s left, %s needs %s; the rest is skipped (FR-5)", p.Name, s.Clock.left(time.Now()).Round(time.Minute), c.ID, caseBound(c).Round(time.Minute))
 				stop = "budget"
+			case t.lost != nil || ref.lost != nil:
+				broken = lostReason(t, ref)
 			}
 		}
 		if stop != "" || broken != "" {
@@ -1008,6 +1040,15 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 				v = judge(c, cr, reps)
 			} else {
 				v.Why += "; no budget to re-measure"
+			}
+		}
+		if c.Failover {
+			// The master moved with every pass; the next case starts on n1.
+			for _, side := range []*Side{t, ref} {
+				if err := s.restoreN1(ctx, side); err != nil {
+					s.note("pair %s: %s: %v", p.Name, c.ID, err)
+					side.lost = err
+				}
 			}
 		}
 		for _, ps := range cr.Passes {

@@ -247,24 +247,147 @@ func TestCopyModesReadsEachCopylogdb(t *testing.T) {
 	}
 }
 
-// The role check reads csb ha status: n1 the one active node, and nothing
-// else.
-func TestActiveIsN1(t *testing.T) {
+// The role check reads csb ha status: the node N1 names the one active
+// node, and nothing else.
+func TestActiveIs(t *testing.T) {
 	node := func(name, role string) sandbox.NodeHealth { return sandbox.NodeHealth{Name: name, Role: role} }
 	const cl = "pf-20261102-0000-t"
 	for _, c := range []struct {
 		name  string
+		want  string
 		nodes []sandbox.NodeHealth
 		ok    bool
 	}{
-		{"n1 active", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "standby"), node(cl+"-c1", "unknown")}, true},
-		{"failed over", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, false},
-		{"no active", []sandbox.NodeHealth{node(cl+"-n1", "to_be_active"), node(cl+"-n2", "standby")}, false},
-		{"two actives", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "active")}, false},
+		{"n1 active", "n1", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "standby"), node(cl+"-c1", "unknown")}, true},
+		{"failed over", "n1", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, false},
+		{"failed over, followed", "n2", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, true},
+		{"no active", "n1", []sandbox.NodeHealth{node(cl+"-n1", "to_be_active"), node(cl+"-n2", "standby")}, false},
+		{"two actives", "n1", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "active")}, false},
 	} {
-		if err := activeIsN1(c.nodes, cl); (err == nil) != c.ok {
+		if err := activeIs(c.nodes, cl, c.want); (err == nil) != c.ok {
 			t.Errorf("%s: %v", c.name, err)
 		}
+	}
+}
+
+// After a failover pass: the database nodes sorted by role, the client left
+// out, a node changing roles waited for rather than started; and a swap
+// makes N1 the master and points the replication wait the same way.
+func TestHARolesAndTheSwap(t *testing.T) {
+	node := func(name, role string) sandbox.NodeHealth { return sandbox.NodeHealth{Name: name, Role: role} }
+	const cl = "pf-20261102-0000-t"
+	act, stb, down := haRoles([]sandbox.NodeHealth{node(cl+"-n1", "unknown"), node(cl+"-n2", "active"), node(cl+"-c1", "unknown")}, cl)
+	if strings.Join(names(act), ",") != cl+"-n2" || len(stb) != 0 || strings.Join(names(down), ",") != cl+"-n1" {
+		t.Errorf("a killed master: active %v standby %v down %v", names(act), names(stb), names(down))
+	}
+	act, stb, down = haRoles([]sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "to_be_active")}, cl)
+	if len(act) != 0 || len(stb) != 1 || len(down) != 0 {
+		t.Errorf("a promotion under way: active %v standby %v down %v", names(act), names(stb), names(down))
+	}
+	s := &Side{Name: cl, HA: true, N1: sandbox.NewNode(nil, "n1"), N2: sandbox.NewNode(nil, "n2"),
+		pair: &sandbox.Pair{Master: cl + "-n1", Slaves: []string{cl + "-n2"}}, ckptOffset: map[string]int64{"perf_x": 3}}
+	swapRoles(s)
+	if s.N1.Name != "n2" || s.N2.Name != "n1" || s.pair.Master != cl+"-n2" || strings.Join(s.pair.Slaves, ",") != cl+"-n1" || s.ckptOffset != nil {
+		t.Errorf("after the swap: N1 %s N2 %s pair %s %v offsets %v", s.N1.Name, s.N2.Name, s.pair.Master, s.pair.Slaves, s.ckptOffset)
+	}
+	swapRoles(s)
+	if s.N1.Name != "n1" || s.pair.Master != cl+"-n1" {
+		t.Errorf("after the swap back: N1 %s pair %s", s.N1.Name, s.pair.Master)
+	}
+}
+
+// fakeHA is a csb that answers ha status with the replies in turn (the last
+// one from then on), takes node start and ha failback, and logs both.
+func fakeHA(t *testing.T, replies ...string) (bin, log string) {
+	t.Helper()
+	dir := t.TempDir()
+	for i, r := range replies {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("r%02d", i+1)), []byte(r), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin, log = filepath.Join(dir, "csb"), filepath.Join(dir, "started")
+	script := "#!/bin/bash\nd=" + dir + "\n" + `ok() { printf '{"schema":"csb/v1","command":"%s","ok":true,"data":{},"notes":[]}\n' "$1"; }
+case "$1 $2" in
+"ha status") n=$(( $(cat $d/n 2>/dev/null || echo 0) + 1 )); echo $n > $d/n
+  f=$(printf '%s/r%02d' $d $n); [ -f "$f" ] || f=$(ls $d/r?? | sort | tail -1); cat "$f" ;;
+"node start") echo "start ${@: -1}" >> $d/started; ok "node start" ;;
+"ha failback") echo failback >> $d/started; ok "ha failback" ;;
+*) echo "unexpected $*" >&2; exit 1 ;;
+esac
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, log
+}
+
+// haReply is csb ha status for a two-node pair, each node "role/server state/live".
+func haReply(cl, n1, n2 string) string {
+	node := func(name, spec string) string {
+		f := strings.Split(spec, "/")
+		return fmt.Sprintf(`{"name":"%s-%s","live":%s,"role":"%s","server_state":"%s"}`, cl, name, f[2], f[0], f[1])
+	}
+	return `{"schema":"csb/v1","command":"ha status","ok":true,"data":{"nodes":[` + node("n1", n1) + "," + node("n2", n2) +
+		`,{"name":"` + cl + `-c1","live":true,"role":"unknown"}]},"notes":[]}`
+}
+
+func TestHASettle(t *testing.T) {
+	defer func(d time.Duration) { settleInterval = d }(settleInterval)
+	settleInterval = 10 * time.Millisecond
+	const cl = "pf-20261102-0000-t"
+	side := func(bin string) *Side {
+		return &Side{Role: "target", Name: cl, HA: true, CLI: &sandbox.CLI{Bin: bin, Cluster: cl},
+			N1: sandbox.NewNode(nil, "n1"), N2: sandbox.NewNode(nil, "n2"),
+			pair: &sandbox.Pair{Master: cl + "-n1", Slaves: []string{cl + "-n2"}}}
+	}
+	started := func(log string) string {
+		b, _ := os.ReadFile(log)
+		return strings.TrimSpace(string(b))
+	}
+	r := &Runner{Log: io.Discard}
+	ctx := context.Background()
+	killed := haReply(cl, "unknown//true", "active/registered_and_active/true")
+	settled := haReply(cl, "standby/registered_and_standby/true", "active/registered_and_active/true")
+
+	// The killed master, down in two readings while the other is active:
+	// started once, and N1 follows the master to n2.
+	bin, log := fakeHA(t, killed, killed, killed, settled)
+	s := side(bin)
+	if err := r.haSettle(ctx, s, 10*time.Second); err != nil || s.N1.Name != "n2" || started(log) != "start "+cl+"-n1" {
+		t.Errorf("a killed master: %v, N1 %s, started %q", err, s.N1.Name, started(log))
+	}
+
+	// A reading csb could not complete has every role unknown: nothing is
+	// started on it, and the pair as it was is settled.
+	unread := haReply(cl, "unknown//true", "unknown//true")
+	bin, log = fakeHA(t, unread, unread, haReply(cl, "active/registered_and_active/true", "standby/registered_and_standby/true"))
+	s = side(bin)
+	if err := r.haSettle(ctx, s, 10*time.Second); err != nil || s.N1.Name != "n1" || started(log) != "" {
+		t.Errorf("an unreadable reading: %v, N1 %s, started %q", err, s.N1.Name, started(log))
+	}
+
+	// A standby whose server is not registered has no applier: waited for.
+	bin, _ = fakeHA(t, haReply(cl, "standby/started/true", "active/registered_and_active/true"))
+	if err := r.haSettle(ctx, side(bin), 100*time.Millisecond); err == nil {
+		t.Error("a standby that is not registered settled")
+	}
+
+	// Two active nodes in two readings are an error; in one, a reading.
+	two := haReply(cl, "active/registered_and_active/true", "active/registered_and_active/true")
+	bin, _ = fakeHA(t, two, two)
+	if err := r.haSettle(ctx, side(bin), 10*time.Second); err == nil || !strings.Contains(err.Error(), "two active") {
+		t.Errorf("two actives: %v", err)
+	}
+	bin, _ = fakeHA(t, two, settled)
+	if err := r.haSettle(ctx, side(bin), 10*time.Second); err != nil {
+		t.Errorf("two actives once: %v", err)
+	}
+
+	// A promotion that never ends runs to the bound.
+	bin, _ = fakeHA(t, haReply(cl, "unknown//true", "to_be_active/registered/true"))
+	if err := r.haSettle(ctx, side(bin), 100*time.Millisecond); err == nil || !strings.Contains(err.Error(), "did not settle") {
+		t.Errorf("a stuck promotion: %v", err)
 	}
 }
 
@@ -272,6 +395,13 @@ func TestBudgetBoundsAndTheClock(t *testing.T) {
 	c := &Case{ID: "x.y", Warmup: 1, Repeats: 5, BudgetS: 120, WarmS: 10}
 	if got := caseBound(c); got != 6*2*(120+10+60)*time.Second+fixtureSwitchBound {
 		t.Errorf("caseBound = %s", got)
+	}
+	fo := &Case{ID: "ha.fo", Topology: TopologyHA, Failover: true, Warmup: 1, Repeats: 5, BudgetS: 60}
+	if got := caseBound(fo); got != 6*2*(60+60)*time.Second+6*2*(haPassAllowance+failoverAllowance)+fixtureSwitchBound+failoverRestoreBound {
+		t.Errorf("caseBound of a failover case = %s", got)
+	}
+	if msg := canaryPairs(fo); !strings.Contains(msg, "fails its pair over") {
+		t.Errorf("a failover canary: %q", msg)
 	}
 	if got := remeasureBound(c); got != 5*2*(130+60)*time.Second {
 		t.Errorf("remeasureBound = %s", got)

@@ -2,6 +2,9 @@
 
 *English · [한국어](requirements.ko.md)*
 
+What this entry covers of #8052 today, and whether it can carry a review of it:
+[review-coverage.md](review-coverage.md).
+
 **Source:** CBRD-27459 (writeset and applylogdb parallelisation, design), CBRD-27508 /
 CUBRID/cubrid #8052 (implementation); the shell prototypes and their results in
 `docs/project/evidence/ha/parallel-apply-*`

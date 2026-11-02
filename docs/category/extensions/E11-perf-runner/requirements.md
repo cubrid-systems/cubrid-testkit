@@ -86,7 +86,8 @@ loaded on the master and replicated, no snapshot is taken, and `validate` refuse
 `restore_snapshot` fixture for such a case. After the fixture and after every pass's reset the runner waits
 until the slave shows a marker written on the master (`sandbox.Pair.WaitForReplication`), resuming the
 slave's applylogdb first; it checks with `csb ha status` that `n1` is the one active node when the pair is
-made, before every case and after every pass. A `utility` case may run its `client.argv` and
+made, before every case and after every pass, and when the pair is made that copylogdb runs the
+`ha_copy_sync_mode` the case asks for (a csb before cluster-sandbox #15 dropped the key). A `utility` case may run its `client.argv` and
 `client.prepare` on the slave (`client.node: "slave"`). Guard stage 3 counts both database containers, and
 the memory check two servers a side.
 

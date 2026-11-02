@@ -81,7 +81,8 @@ master 에 적재해 복제하고 스냅샷은 만들지 않으며, 이런 케�
 `validate` 가 거부한다. 픽스처를 만든 뒤와 패스마다 reset 뒤에는, master 에 쓴 표지 테이블이 slave 에
 보일 때까지 기다린다(`sandbox.Pair.WaitForReplication`). 그 전에 slave 의 applylogdb 를 다시 돌린다.
 `n1` 이 유일한 active 노드인지는 pair 를 만들 때, 케이스마다, 패스가 끝날 때마다 `csb ha status` 로
-확인한다. `utility` 케이스는 `client.argv` 와 `client.prepare` 를 slave 에서 돌릴 수 있다
+확인한다. pair 를 만들 때는 copylogdb 가 케이스가 정한 `ha_copy_sync_mode` 로 도는지도 본다(cluster-sandbox
+#15 이전의 csb 는 이 키를 버렸다). `utility` 케이스는 `client.argv` 와 `client.prepare` 를 slave 에서 돌릴 수 있다
 (`client.node: "slave"`). guard 3 단계는 데이터베이스 컨테이너 둘을 모두 세고, 메모리 검사는 한 쪽에 서버
 둘로 센다.
 

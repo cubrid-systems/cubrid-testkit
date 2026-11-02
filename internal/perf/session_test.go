@@ -219,6 +219,17 @@ func TestAnHASideKeepsItsServer(t *testing.T) {
 	}
 }
 
+// The copylogdb mode is read from ps, the -m of each copylogdb line.
+func TestCopyModesReadsEachCopylogdb(t *testing.T) {
+	ps := "cub_admin copylogdb -L /db/perf_ha_rep_x-n2 -m async perf_ha_rep@x-n2\n"
+	if got := copyModes(ps); len(got) != 1 || got[0] != "async" {
+		t.Errorf("copyModes = %v", got)
+	}
+	if got := copyModes(""); len(got) != 0 {
+		t.Errorf("copyModes of nothing = %v", got)
+	}
+}
+
 // The role check reads csb ha status: n1 the one active node, and nothing
 // else.
 func TestActiveIsN1(t *testing.T) {

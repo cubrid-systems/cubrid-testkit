@@ -190,6 +190,9 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 			return s, fmt.Errorf("%s: describing the HA pair: %w", role, err)
 		}
 		s.pair = pair
+		if err := r.checkCopyMode(ctx, s, cases[0].Conf["ha_copy_sync_mode"]); err != nil {
+			return s, err
+		}
 	} else {
 		// csb's own database is not a fixture; its server would be an idle
 		// neighbour of every measured pass, and collect_l0.sh would count it.
@@ -251,6 +254,42 @@ func (r *Runner) haCheck(ctx context.Context, s *Side) error {
 		return fmt.Errorf("%s: %w", s.Role, err)
 	}
 	return nil
+}
+
+// checkCopyMode says whether the pair's copylogdb processes run the mode the
+// case's conf asks for. paramdump does not show the key, and a csb before
+// cluster-sandbox #15 dropped it while its describe still recorded it, so an
+// async case ran sync with nothing to say so. One value is checked on every
+// node; a per-node list, or no key, is not checked.
+func (r *Runner) checkCopyMode(ctx context.Context, s *Side, want string) error {
+	if want == "" || strings.ContainsAny(want, ":, ") {
+		return nil
+	}
+	for _, n := range []*sandbox.Node{s.N1, s.N2} {
+		res, err := r.exec(ctx, n, `ps -eo args | grep '^cub_admin copylogdb'`, time.Minute)
+		if err != nil {
+			return fmt.Errorf("%s: reading copylogdb on %s: %w", s.Role, n.Name, err)
+		}
+		if got := copyModes(res.Stdout); len(got) != 1 || got[0] != want {
+			return fmt.Errorf("%s: copylogdb on %s-%s runs -m %v and the case asks ha_copy_sync_mode=%s: this csb did not write the key (cluster-sandbox #15 or later does)", s.Role, s.Name, n.Name, got, want)
+		}
+	}
+	return nil
+}
+
+// copyModes is the -m value of each copylogdb line ps printed.
+func copyModes(ps string) []string {
+	var out []string
+	for _, line := range strings.Split(ps, "\n") {
+		f := strings.Fields(line)
+		for i := 0; i+1 < len(f); i++ {
+			if f[i] == "-m" {
+				out = append(out, f[i+1])
+				break
+			}
+		}
+	}
+	return out
 }
 
 // activeIsN1 is haCheck's reading of csb ha status: n1 the one active node.

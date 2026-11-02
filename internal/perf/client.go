@@ -49,8 +49,8 @@ const (
 // clientEnv is the PERF_* environment of a pass's client (and of a utility
 // case's prepare), docs/design/10-regression.md §3.
 func clientEnv(s *Side, c *Case, f *Fixture, phase string, k int, outInNode string) string {
-	return fmt.Sprintf("PERF_PHASE=%s PERF_DB=%s PERF_HOST=%s-n1 PERF_PORT=33000 PERF_OUT=%s PERF_REPEAT=%d PERF_WARM_S=%d PERF_OPS=%d",
-		phase, dbName(f), s.Name, outInNode, k, c.WarmS, utilityOps(c))
+	return fmt.Sprintf("PERF_PHASE=%s PERF_DB=%s PERF_HOST=%s-%s PERF_PORT=33000 PERF_OUT=%s PERF_REPEAT=%d PERF_WARM_S=%d PERF_OPS=%d",
+		phase, dbName(f), s.Name, s.N1.Name, outInNode, k, c.WarmS, utilityOps(c))
 }
 
 // prepareUtility runs a utility case's client.prepare in the database node,

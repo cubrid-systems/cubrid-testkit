@@ -62,8 +62,9 @@ type Side struct {
 	// it would wait for its timeout, so the pair stops (Design §11).
 	frozen error
 	// lost is set when a failover case left the side's HA roles where
-	// restoreN1 could not put them back: the cases after it would time the
-	// wrong node, so the group stops (sides.frozen).
+	// restoreN1 could not put them back: the cases after it in its group
+	// would time the wrong node, so they are skipped, and the side is
+	// destroyed after the group (Session.dropLost).
 	lost error
 	// params is the parameters the cluster's server runs with, and the
 	// client-only ones a client on its node loads (recordParams); nil when
@@ -262,77 +263,111 @@ func (r *Runner) haCheck(ctx context.Context, s *Side) error {
 }
 
 // haSettle brings back an HA side whose case failed it over (Case.Failover):
-// one active node and one standby again, the node the case killed started as
-// the slave (csb node start: the service cycled, the heartbeat started, a log
-// the crash left short recopied), and N1 and N2 following the roles, so every
-// later step reads the master as N1. A node that is neither active nor
-// standby nor on its way to either is started once; the wait is bounded.
+// one active node and one standby again, both registered, the node the case
+// killed started as the slave (csb node start: the service cycled, the
+// heartbeat started, a log the crash left short recopied), and N1 and N2
+// following the roles, so every later step reads the master as N1.
+//
+// csb node start stops the node's service first, so a node is started only
+// when two readings in a row call it down while exactly one other node is
+// active and its container is live: a reading csb could not complete reads
+// every role unknown, and starting on it would stop the one master. Two
+// active nodes are an error only when two readings say so. A node changing
+// roles is waited for. A start that fails ends the settle; the wait is
+// bounded, the start inside it too.
 func (r *Runner) haSettle(ctx context.Context, s *Side, bound time.Duration) error {
 	deadline := time.Now().Add(bound)
 	started := map[string]bool{}
 	cli := *s.CLI
 	cli.Timeout = 20 * time.Second
 	last := ""
+	var downBefore map[string]bool
+	twoActive := false
 	for {
 		nodes, err := cli.HAStatus(ctx)
+		downNow := map[string]bool{}
 		if err != nil {
 			last = err.Error()
 		} else {
 			act, stb, down := haRoles(nodes, s.Name)
-			last = fmt.Sprintf("active %v, standby %v, down %v", act, stb, down)
+			last = fmt.Sprintf("active %v, standby %v, down %v", names(act), names(stb), names(down))
 			switch {
-			case len(act) > 1:
-				return fmt.Errorf("%s: %s has two active nodes %v", s.Role, s.Name, act)
-			case len(act) == 1 && len(stb) == 1:
-				if act[0] != s.Name+"-"+s.N1.Name {
+			case len(act) > 1 && twoActive:
+				return fmt.Errorf("%s: %s has two active nodes %v", s.Role, s.Name, names(act))
+			case len(act) == 1 && len(stb) == 1 && registered(act[0]) && registered(stb[0]):
+				if act[0].Name != s.Name+"-"+s.N1.Name {
 					swapRoles(s)
-					r.logf("%s: %s's master is %s now", s.Role, s.Name, act[0])
+					r.logf("%s: %s's master is %s now", s.Role, s.Name, act[0].Name)
 				}
 				return nil
 			}
+			twoActive = len(act) > 1
 			for _, n := range down {
-				if started[n] {
+				downNow[n.Name] = true
+				if started[n.Name] || !downBefore[n.Name] || len(act) != 1 || !n.Live {
 					continue
 				}
-				started[n] = true
-				r.logf("%s: starting %s again (csb node start)", s.Role, n)
-				if err := cli.NodeStart(ctx, n); err != nil {
-					r.logf("%s: csb node start %s: %v", s.Role, n, err)
+				started[n.Name] = true
+				r.logf("%s: starting %s again (csb node start)", s.Role, n.Name)
+				sctx, cancel := context.WithDeadline(ctx, deadline)
+				err := cli.NodeStart(sctx, n.Name)
+				cancel()
+				if err != nil {
+					return fmt.Errorf("%s: csb node start %s: %w", s.Role, n.Name, err)
 				}
 			}
 		}
+		downBefore = downNow
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			return fmt.Errorf("%s: %s did not settle to one active node and one standby in %s: %s", s.Role, s.Name, bound, last)
 		}
-		if sleepCtx(ctx, 2*time.Second) != nil {
+		if sleepCtx(ctx, settleInterval) != nil {
 			return fmt.Errorf("%s: %s did not settle: %s", s.Role, s.Name, last)
 		}
 	}
 }
 
+// settleInterval is the time between two readings of haSettle.
+var settleInterval = 2 * time.Second
+
 // haRoles sorts a cluster's database nodes by what csb ha status says of
 // them: active, standby, and down -- a node whose server answers nothing
 // (unknown), which csb node start brings back. A node changing roles
 // (to_be_active, to_be_standby) is in none and is waited for.
-func haRoles(nodes []sandbox.NodeHealth, cluster string) (active, standby, down []string) {
+func haRoles(nodes []sandbox.NodeHealth, cluster string) (active, standby, down []sandbox.NodeHealth) {
 	for _, n := range nodes {
 		if !strings.HasPrefix(n.Name, cluster+"-n") {
 			continue // a client node has no role
 		}
 		switch strings.ToLower(n.Role) {
 		case "active":
-			active = append(active, n.Name)
+			active = append(active, n)
 		case "standby":
-			standby = append(standby, n.Name)
+			standby = append(standby, n)
 		case "", "unknown":
-			down = append(down, n.Name)
+			down = append(down, n)
 		}
 	}
 	return active, standby, down
 }
 
+func names(nodes []sandbox.NodeHealth) []string {
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, n.Name)
+	}
+	return out
+}
+
+// registered is a node whose server the heartbeat has: registered_and_active
+// or _standby. A standby whose server is up and not registered has no applier.
+func registered(n sandbox.NodeHealth) bool {
+	return strings.HasPrefix(n.ServerState, "registered_and_")
+}
+
 // swapRoles makes N1 the node that is master now and N2 its slave, and the
-// pair the replication wait writes through the same.
+// pair the replication wait writes through the same. A checkpoint offset
+// read on the old master's server is not the new one's.
 func swapRoles(s *Side) {
 	s.N1, s.N2 = s.N2, s.N1
 	if s.pair != nil {
@@ -340,26 +375,34 @@ func swapRoles(s *Side) {
 		p.Master, p.Slaves = s.Name+"-"+s.N1.Name, []string{s.Name + "-" + s.N2.Name}
 		s.pair = &p
 	}
+	s.ckptOffset = nil
 }
 
-// restoreN1 puts n1 back as the master of an HA side a failover case left on
-// n2 (csb ha failback), so the next case starts where every case does. A side
-// it cannot restore is lost: the cases after it would time the wrong node.
+// restoreN1 puts an HA side a failover case ran on back the way every case
+// starts: settled, n1 the master (csb ha failback when it is not), and the
+// slave replicating. It looks at the pair whatever N1 says, since a settle
+// that failed leaves N1 on a node that is down. A side it cannot restore is
+// lost: the cases after it would time the wrong node.
 func (r *Runner) restoreN1(ctx context.Context, s *Side) error {
-	if s == nil || !s.HA || s.N1.Name == "n1" {
+	if s == nil || !s.HA {
 		return nil
-	}
-	r.logf("%s: putting %s-n1 back as master (csb ha failback)", s.Role, s.Name)
-	if err := s.CLI.Failback(ctx, s.Name+"-n1"); err != nil {
-		r.logf("%s: csb ha failback: %v", s.Role, err)
 	}
 	if err := r.haSettle(ctx, s, 5*time.Minute); err != nil {
 		return err
 	}
 	if s.N1.Name != "n1" {
-		return fmt.Errorf("%s: %s-n1 is not the master after the failback", s.Role, s.Name)
+		r.logf("%s: putting %s-n1 back as master (csb ha failback)", s.Role, s.Name)
+		if err := s.CLI.Failback(ctx, s.Name+"-n1"); err != nil {
+			r.logf("%s: csb ha failback: %v", s.Role, err)
+		}
+		if err := r.haSettle(ctx, s, 5*time.Minute); err != nil {
+			return err
+		}
 	}
-	return nil
+	if err := r.haCheck(ctx, s); err != nil {
+		return err
+	}
+	return r.waitSlave(ctx, s, 3*time.Minute)
 }
 
 // checkCopyMode says whether the pair's copylogdb processes run the mode the
@@ -454,7 +497,7 @@ func (r *Runner) waitSlave(ctx context.Context, s *Side, bound time.Duration) er
 		return fmt.Errorf("%s: resuming the slave's copy and applier: %w", s.Role, err)
 	}
 	if strings.Contains(res.Stdout, "no-applylogdb") {
-		r.logf("%s: no applylogdb on %s-n2 to resume; the wait for the slave can run to its bound", s.Role, s.Name)
+		r.logf("%s: no applylogdb on %s-%s to resume; the wait for the slave can run to its bound", s.Role, s.Name, s.N2.Name)
 	}
 	lag, err := s.pair.WaitForReplication(ctx, bound)
 	if err != nil {

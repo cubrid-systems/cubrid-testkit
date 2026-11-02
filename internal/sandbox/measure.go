@@ -128,12 +128,26 @@ func (c *CLI) NodeStart(ctx context.Context, node string) error {
 
 // Failback is `csb ha failback --to <node> --yes`: the cluster's current master
 // stepped down so that node is promoted, and the old master put back as its
-// slave. Detached, for the same reason as NodeStart.
+// slave. Detached, for the same reason as NodeStart. csb says ok when the roles
+// moved and puts what it could not verify -- the rejoin, the replication -- in
+// notes of severity error; those are this call's error.
 func (c *CLI) Failback(ctx context.Context, to string) error {
 	d := *c
 	d.Detach = true
-	_, err := d.callLong(ctx, "ha", "failback", "--to", to, "--yes")
-	return err
+	env, err := d.callLong(ctx, "ha", "failback", "--to", to, "--yes")
+	if err != nil {
+		return err
+	}
+	var bad []Note
+	for _, n := range env.Notes {
+		if n.Severity == "error" {
+			bad = append(bad, n)
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("sandbox: csb ha failback --to %s: %s", to, notesLine(bad))
+	}
+	return nil
 }
 
 // DescribeRaw returns `cluster describe` as csb printed it, for a results

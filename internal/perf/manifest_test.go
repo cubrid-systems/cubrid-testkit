@@ -127,6 +127,7 @@ func TestAnHAUtilityMayRunOnTheSlave(t *testing.T) {
 	rewrite(t, filepath.Join(dir, "case.json"), func(m map[string]any) {
 		m["failover"] = true
 		m["client"] = map[string]any{"argv": []string{"bash", "fo.sh"}, "ops": 1}
+		m["counters"], m["judge_counters"] = []string{}, []string{}
 	})
 	if c, err = ReadCase(dir); err != nil || !c.Failover {
 		t.Errorf("a failover case: %v, failover=%v", err, c != nil && c.Failover)
@@ -197,6 +198,11 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 			m["topology"] = "ha"
 			m["failover"] = true
 		}, "failover needs the utility driver"},
+		{"a failover with counters", "lib.backupdb", func(m map[string]any) {
+			m["topology"] = "ha"
+			m["failover"] = true
+			m["counters"] = []string{"dev_flushes"}
+		}, "failover takes no counters"},
 		{"a failover on the slave", "lib.backupdb", func(m map[string]any) {
 			m["topology"] = "ha"
 			m["failover"] = true

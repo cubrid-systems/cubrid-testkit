@@ -617,18 +617,42 @@ func (ss *sides) all() []*Side {
 	return out
 }
 
-// frozen names the first side that could not be unpaused, or whose HA roles
-// a failover case left unrestored, or "".
+// frozen names the first side that could not be unpaused, or "".
 func (ss *sides) frozen() string {
 	for _, s := range ss.all() {
 		if s.frozen != nil {
 			return fmt.Sprintf("cluster: %s could not be unpaused: %v", s.Role, s.frozen)
 		}
-		if s.lost != nil {
+	}
+	return ""
+}
+
+// lostReason names the first side whose HA roles a failover case left
+// unrestored, or "".
+func lostReason(sides ...*Side) string {
+	for _, s := range sides {
+		if s != nil && s.lost != nil {
 			return fmt.Sprintf("cluster: %s's HA roles were not restored: %v", s.Role, s.lost)
 		}
 	}
 	return ""
+}
+
+// dropLost destroys every side a failover case left unrestored and empties
+// its slot: the rest of its group was skipped, and the next group stands a
+// side up anew rather than run on it.
+func (s *Session) dropLost(ss *sides, dir string) {
+	for _, slot := range []**Side{&ss.t, &ss.r, &ss.o} {
+		if *slot == nil || (*slot).lost == nil {
+			continue
+		}
+		s.note("%s", lostReason(*slot))
+		s.keepLogs(*slot, dir)
+		if err := s.destroySide(*slot); err != nil {
+			s.note("teardown of a lost side: %v", err)
+		}
+		*slot = nil
+	}
 }
 
 // runPair is one pair of Design §5.1: the canary gate, then the cases. It
@@ -888,6 +912,8 @@ func (s *Session) runPair(ctx context.Context, p *SessionPair, canaries []*Case)
 		} else if why := ss.frozen(); why != "" {
 			s.note("pair %s: %s", p.Name, why)
 			broken = why
+		} else {
+			s.dropLost(ss, pairDir)
 		}
 	}
 	for _, e := range entries {
@@ -976,7 +1002,7 @@ func (s *Session) runGroup(ctx context.Context, p *SessionPair, cases []*Case, t
 				s.note("pair %s: %s left, %s needs %s; the rest is skipped (FR-5)", p.Name, s.Clock.left(time.Now()).Round(time.Minute), c.ID, caseBound(c).Round(time.Minute))
 				stop = "budget"
 			case t.lost != nil || ref.lost != nil:
-				broken = (&sides{t: t, r: ref}).frozen()
+				broken = lostReason(t, ref)
 			}
 		}
 		if stop != "" || broken != "" {

@@ -317,6 +317,8 @@ func readCase(dir string, suite map[string]*Fixture) (*Case, error) {
 			p.add("failover needs the utility driver: its client kills the master from inside it")
 		case c.Utility != nil && c.Utility.Node != "":
 			p.add("failover runs on the master; client.node %q would run it on the slave", c.Utility.Node)
+		case len(c.Counters) > 0:
+			p.add("failover takes no counters: the snapshots read the master the case kills")
 		}
 	}
 	// An HA server is the heartbeat's to start and stop: cubrid server

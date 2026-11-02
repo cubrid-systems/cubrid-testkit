@@ -145,6 +145,14 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	p := &pass{Rep: k, Side: s.Role, Phase: phase, WarmS: c.WarmS, Missing: map[string]string{}}
 	db := dbName(f)
 	r.logf("%s %s rep %d: %s", c.ID, s.Role, k, phase)
+	if c.Failover && s.HA {
+		// A failover pass starts on a settled pair: the last pass's settle
+		// may have failed, or its client may have died after the kill, and the
+		// reset on a node that is down would fail before any settle ran again.
+		if err := r.haSettle(ctx, s, 5*time.Minute); err != nil {
+			return p.null("ha: " + err.Error())
+		}
+	}
 	if err := r.reset(ctx, s, c, f); err != nil {
 		return p.null("reset: " + err.Error())
 	}
@@ -210,7 +218,10 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 			return p.null("prepare: " + err.Error())
 		}
 		var err error
-		if l0pre, err = r.l0Collect(ctx, s, db, out.InNode, out.Host, "l0-pre.json"); err != nil {
+		if c.Failover {
+			// The client kills the node L0 would read after it.
+			p.Missing["l0"] = "not read: the failover case kills the master"
+		} else if l0pre, err = r.l0Collect(ctx, s, db, out.InNode, out.Host, "l0-pre.json"); err != nil {
 			p.Missing["l0"] = "pre: " + err.Error()
 		}
 		if wantStatdump {
@@ -251,8 +262,10 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 			p.Missing["statdump"] = "post: " + e.Error()
 		}
 	}
-	if l0post, err = r.l0Collect(ctx, s, db, out.InNode, out.Host, "l0-post.json"); err != nil {
-		p.Missing["l0"] = "post: " + err.Error()
+	if !c.Failover {
+		if l0post, err = r.l0Collect(ctx, s, db, out.InNode, out.Host, "l0-post.json"); err != nil {
+			p.Missing["l0"] = "post: " + err.Error()
+		}
 	}
 	// A pair that failed over during the pass had the case time other nodes
 	// than it names; after the snapshots, so the check is outside them. A

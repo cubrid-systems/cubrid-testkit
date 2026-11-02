@@ -86,8 +86,10 @@ master 에 적재해 복제하고 스냅샷은 만들지 않으며, 이런 케�
 (`client.node: "slave"`). `"failover": true` 인 케이스는 pair 의
 master 를 죽인다(`ha.failover`). 러너는 그 케이스의 패스가 끝날 때마다 죽은 노드를 slave 로 다시 띄우고
 (`csb node start`), active 하나와 standby 하나가 될 때까지 기다린 뒤 `N1` 이 master 를 따르게 한다. 그래서
-다음 패스는 다른 노드를 죽인다. 케이스가 끝나면 `n1` 을 master 로 되돌리고(`csb ha failback`), 되돌리지 못한
-쪽은 그 그룹을 멈춘다. guard 3 단계는 데이터베이스 컨테이너 둘을 모두 세고, 메모리 검사는 한 쪽에 서버
+다음 패스는 다른 노드를 죽인다. 케이스가 끝나면 `n1` 을 master 로 되돌리고(`csb ha failback`) slave 를
+기다린다. 되돌리지 못한 쪽은 그 그룹의 나머지 케이스를 건너뛰고 버린다. `csb node start` 는 service 를 먼저
+멈추므로, 노드는 두 번 연속 down 으로 읽히고 다른 노드가 active 일 때만 띄운다. failover 케이스는 canary 가
+될 수 없고 카운터를 받지 않는다. guard 3 단계는 데이터베이스 컨테이너 둘을 모두 세고, 메모리 검사는 한 쪽에 서버
 둘로 센다.
 
 `testkit perf session -c <perf.conf> [--dry-run] [--only <case-glob>] [--pair <name>] [--out <dir>]

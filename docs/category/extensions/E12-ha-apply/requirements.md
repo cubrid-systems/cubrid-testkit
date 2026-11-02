@@ -5,7 +5,8 @@
 **Source:** CBRD-27459 (writeset and applylogdb parallelisation, design), CBRD-27508 /
 CUBRID/cubrid #8052 (implementation); the shell prototypes and their results in
 `docs/project/evidence/ha/parallel-apply-*`
-**Status:** incubating — **in progress** (ADR-EXT-012 proposed 2026-10-30; M1 is `pairs` and `list`)
+**Status:** incubating — **in progress** (ADR-EXT-012 proposed 2026-10-30; M1 `pairs` and `list`, M2
+`stress` and M3 `restart` are built and meet §5)
 **Axis mapping:** a new oracle — the order in which a slave applies dependent transactions
 
 ---
@@ -87,7 +88,8 @@ refuses to start where an earlier run's files already are.
 A `restart` run has one verdict too: **missed** (the applier failed -- `fail_counter` moved, or the
 slave's applier log gained a -670 -- or a slave that caught up reads the table otherwise than the
 master: its rows, the sum of its keys, or the keys not moved), **inconclusive** (a slave that did not
-show the final marker within five minutes without failing, no kill that found an applier, or no kill
+show the final marker within five minutes, twenty under `--kill node`, without failing; no kill that
+found an applier, under `--kill node` no crash of a slave whose applier ran; or no kill
 that found `ha_applied_tx_marker` rows above the slave's stored apply position just before), or
 **held**. A slave with no marker table is never held: missed on a failure or on a caught-up slave
 whose table differs, inconclusive otherwise. Where a count read from the applier log went down

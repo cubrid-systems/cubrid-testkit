@@ -243,24 +243,22 @@ func (r *Runner) runStress(ctx context.Context, c StressConfig, o *StressOutcome
 	if err != nil {
 		return 0, err
 	}
-	out, err := r.sh(ctx, r.clientsScript(c), c.Timeout+5*time.Minute)
+	// Until the clients end, the master's orphans are counted: one a later
+	// statement cleaned up is gone from the final state but not from what
+	// happened. A poll is bounded, so a master that stops answering does not
+	// hold the script past the timeout.
+	run := clients{Node: c.Node, N: c.Clients, Timeout: c.Timeout,
+		Pre: `command -v timeout >/dev/null || { echo "no timeout(1) on the client node to bound the polls" >&2; exit 1; }
+seen=0; peak=0`,
+		Poll: fmt.Sprintf(`o=$(timeout 30 csql -u dba -t -c %s %s 2>/dev/null | awk '/^ *-?[0-9]+ *$/ { print $1; exit }')
+if [ -n "$o" ] && [ "$o" -gt 0 ]; then seen=$((seen + 1)); [ "$o" -gt "$peak" ] && peak=$o; fi`,
+			shellQuote(orphanQuery), r.at(r.Pair.Master)),
+		Post: `echo "orphan_polls=$seen"; echo "orphan_peak=$peak"`}
+	tags, hung, errs, err := r.runClients(ctx, "stress", c.Host, run)
 	if err != nil {
-		// The script did not end its clients: an interrupt, or csb's own
-		// bound. Clients left writing would be in the next run's tables.
-		if _, kerr := r.Client.Run(context.Background(), "kill -9 $(cat "+shellQuote(c.Node+"/pids")+") 2>/dev/null; true"); kerr != nil {
-			r.logf("stress: the clients may still be running on %s: %v", r.Client.Name, kerr)
-		}
 		return 0, err
 	}
-	tags := parseTags(out)
-	switch tags["clients"] {
-	case "done":
-	case "hung":
-		r.logf("stress: the clients had not finished after %s and were stopped", c.Timeout)
-		o.Hung = true
-	default:
-		return 0, fmt.Errorf("the clients' script said %q", strings.TrimSpace(out))
-	}
+	o.Hung, o.Errors = hung, errs
 	o.OrphanPolls, _ = strconv.Atoi(tags["orphan_polls"])
 	o.OrphanPeak, _ = strconv.Atoi(tags["orphan_peak"])
 	// Counted before the barrier, whose DDL would add a fallback and a clear.
@@ -269,20 +267,57 @@ func (r *Runner) runStress(ctx context.Context, c StressConfig, o *StressOutcome
 		return 0, err
 	}
 	o.Writeset = w1.minus(w0)
-	for i := 1; i <= c.Clients; i++ {
-		b, err := os.ReadFile(filepath.Join(c.Host, fmt.Sprintf("c%d.log", i)))
+	return fail0, nil
+}
+
+// clients is a run of the clients' scripts c1.sql to cN.sql in Node, on the
+// client node: every one's csql on the master at once, stopped past Timeout.
+// Pre runs before they start, Poll while any is alive (it must return soon:
+// a bounded read, or a sleep), and Post after the clients= line, however
+// they ended.
+type clients struct {
+	Node            string
+	N               int
+	Timeout         time.Duration
+	Pre, Poll, Post string
+}
+
+// runClients runs the clients and reads what they did: the tags the script
+// printed, whether they were stopped past the timeout, and the ERROR lines in
+// their logs, which host holds. A script that did not end its clients -- an
+// interrupt, or csb's own bound -- has them killed: clients left writing
+// would be in the next run's tables.
+func (r *Runner) runClients(ctx context.Context, verb, host string, k clients) (tags map[string]string, hung bool, errs int, err error) {
+	out, err := r.sh(ctx, r.clientsScript(k), k.Timeout+5*time.Minute)
+	if err != nil {
+		if _, kerr := r.Client.Run(context.Background(), "kill -9 $(cat "+shellQuote(k.Node+"/pids")+") 2>/dev/null; true"); kerr != nil {
+			r.logf("%s: the clients may still be running on %s: %v", verb, r.Client.Name, kerr)
+		}
+		return nil, false, 0, err
+	}
+	tags = parseTags(out)
+	switch tags["clients"] {
+	case "done":
+	case "hung":
+		r.logf("%s: the clients had not finished after %s and were stopped", verb, k.Timeout)
+		hung = true
+	default:
+		return nil, false, 0, fmt.Errorf("the clients' script said %q", strings.TrimSpace(out))
+	}
+	for i := 1; i <= k.N; i++ {
+		b, err := os.ReadFile(filepath.Join(host, fmt.Sprintf("c%d.log", i)))
 		if err != nil {
-			return 0, err
+			return nil, false, 0, err
 		}
 		// csql says "Execute OK." for each COMMIT and ROLLBACK. A client that
 		// finished without one ran nothing -- it could not connect, say -- and
 		// a pair that was not written to would read the same.
-		if !o.Hung && !strings.Contains(string(b), "Execute OK.") {
-			return 0, fmt.Errorf("client %d ended no transaction: %s", i, firstNonEmpty(firstLine(string(b)), "an empty log"))
+		if !hung && !strings.Contains(string(b), "Execute OK.") {
+			return nil, false, 0, fmt.Errorf("client %d ended no transaction: %s", i, firstNonEmpty(firstLine(string(b)), "an empty log"))
 		}
-		o.Errors += strings.Count(string(b), "ERROR:")
+		errs += strings.Count(string(b), "ERROR:")
 	}
-	return fail0, nil
+	return tags, hung, errs, nil
 }
 
 func firstLine(s string) string {
@@ -319,15 +354,11 @@ func (r *Runner) keepFiles(host, save, verb string) {
 	}
 }
 
-// clientsScript starts every client's csql on the master at once and, until
-// they end, counts the master's orphans: one a later statement cleaned up is
-// gone from the final state but not from what happened. Past the timeout it
-// stops them; a poll is bounded too, so a master that stops answering does
-// not hold the script past it. The pids file is for a run that ends without
-// the script.
-func (r *Runner) clientsScript(c StressConfig) string {
+// clientsScript is the clients' run on the client node. The pids file is for
+// a run that ends without the script.
+func (r *Runner) clientsScript(k clients) string {
 	return fmt.Sprintf(`cd %[1]s || exit 1
-command -v timeout >/dev/null || { echo "no timeout(1) on the client node to bound the polls" >&2; exit 1; }
+%[5]s
 pids=""
 i=1
 while [ $i -le %[2]d ]; do
@@ -337,18 +368,20 @@ while [ $i -le %[2]d ]; do
 done
 echo "$pids" > pids
 alive() { for p in $pids; do kill -0 $p 2>/dev/null && return 0; done; return 1; }
-end=$(( $(date +%%s) + %[4]d )); seen=0; peak=0
+end=$(( $(date +%%s) + %[4]d ))
 while alive; do
   if [ $(date +%%s) -ge $end ]; then
     kill -9 $pids 2>/dev/null; wait
-    echo clients=hung; echo "orphan_polls=$seen"; echo "orphan_peak=$peak"; exit 0
+    echo clients=hung
+%[7]s
+    exit 0
   fi
-  o=$(timeout 30 csql -u dba -t -c %[5]s %[3]s 2>/dev/null | awk '/^ *-?[0-9]+ *$/ { print $1; exit }')
-  if [ -n "$o" ] && [ "$o" -gt 0 ]; then seen=$((seen + 1)); [ "$o" -gt "$peak" ] && peak=$o; fi
+%[6]s
 done
 wait
-echo clients=done; echo "orphan_polls=$seen"; echo "orphan_peak=$peak"
-`, shellQuote(c.Node), c.Clients, r.at(r.Pair.Master), int(c.Timeout.Seconds()), shellQuote(orphanQuery))
+echo clients=done
+%[7]s
+`, shellQuote(k.Node), k.N, r.at(r.Pair.Master), int(k.Timeout.Seconds()), k.Pre, k.Poll, k.Post)
 }
 
 // compareStress reads the tables on both nodes. A primary-key read passes a

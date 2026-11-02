@@ -4,7 +4,8 @@
 
 **출처:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), CBRD-27508 / CUBRID/cubrid #8052 (구현),
 `docs/project/evidence/ha/parallel-apply-*` 의 셸 프로토타입과 그 결과
-**상태:** incubating — **진행 중** (ADR-EXT-012 제안 2026-10-30, M1 은 `pairs` 와 `list`)
+**상태:** incubating — **진행 중** (ADR-EXT-012 제안 2026-10-30. M1 `pairs`·`list`, M2 `stress`, M3
+`restart` 가 구현되어 §5 를 충족했다)
 **축:** 새 오라클 — 슬레이브가 서로 의존하는 트랜잭션을 적용하는 순서
 
 ---
@@ -81,8 +82,9 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 
 `restart` 실행의 판정도 하나다. **missed**(applier 가 실패했다: `fail_counter` 가 움직였거나 슬레이브의
 applier 로그에 -670 이 늘었다. 또는 따라온 슬레이브의 표가 마스터와 다르다: 행 수, 키의 합, 옮기지 않은
-키 수), **inconclusive**(실패 없이 슬레이브가 끝의 마커를 5 분 안에 보이지 못했다. 또는 죽일 applier 가
-있었던 kill 이 없다. 또는 죽이기 직전에 저장된 적용 위치보다 위의 `ha_applied_tx_marker` 가 1 행
+키 수), **inconclusive**(실패 없이 슬레이브가 끝의 마커를 5 분(`--kill node` 는 20 분) 안에 보이지
+못했다. 또는 죽일 applier 가 있었던 kill 이 없다(`--kill node` 는 applier 가 떠 있던 슬레이브의 crash).
+또는 죽이기 직전에 저장된 적용 위치보다 위의 `ha_applied_tx_marker` 가 1 행
 이상이었던 kill 이 없다), **held** 셋이다. marker 표가 없는 슬레이브는 held 가 될 수 없다. 실패가 있거나
 따라온 슬레이브의 표가 다르면 missed, 아니면 inconclusive 다. 실행 중에 applier 로그에서 센 시작 횟수나
 -670 수가 줄었으면(회전) 로그가 줄을 잃은 것이다. 그래도 -670 이 늘었으면 적어도 그만큼은 실행 중에 쓰였으므로

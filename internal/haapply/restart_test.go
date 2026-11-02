@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -93,8 +95,9 @@ func TestARestartVerdictNeedsAKillWithCommitsToSkip(t *testing.T) {
 // pkill without procps would under $STATE/pkillbroken), and each kill adds a
 // start to the applier log, as heartbeat starting it again would: first
 // rotating it as er_file_backup does under $STATE/rotate, and followed by a
-// -670 under $STATE/dup670. The slave's timeout fails under
-// $STATE/notimeout.
+// -670 under $STATE/dup670. The slave's pgrep finds an applier unless
+// $STATE/noapplier exists too (and fails as pgrep without procps would under
+// $STATE/pgrepbroken), and its timeout fails under $STATE/notimeout.
 func restartPair(t *testing.T) (*Runner, string, RestartConfig) {
 	r, state, _ := fakePair(t, "0")
 	setState(t, state, "clientlog", "Execute OK. (0.001 sec)\n")
@@ -111,8 +114,9 @@ func restartPair(t *testing.T) (*Runner, string, RestartConfig) {
 		"[ -f \"$STATE/rotate\" ] && { rm -f " + l + ".bak; mv " + l + " " + l + ".bak; }\n" +
 		"echo 'log applier: log applier started.' >> " + l + "\n" +
 		"[ -f \"$STATE/dup670\" ] && echo 'failed to apply update replication log, server error: -670' >> " + l + "\nexit 0\n"
+	pgrep := "#!/bin/sh\n[ -f \"$STATE/pgrepbroken\" ] && exit 127\n[ -f \"$STATE/noapplier\" ] && exit 1\nexit 0\n"
 	timeout := "#!/bin/sh\n[ -f \"$STATE/notimeout\" ] && exit 127\nshift\nexec \"$@\"\n"
-	for name, script := range map[string]string{"pkill": pkill, "timeout": timeout} {
+	for name, script := range map[string]string{"pkill": pkill, "pgrep": pgrep, "timeout": timeout} {
 		if err := os.WriteFile(filepath.Join(os.Getenv(fakeCSBEnv), name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -171,7 +175,7 @@ func TestWithoutAMarkerTableARestartRunIsNotHeld(t *testing.T) {
 	}
 	var b bytes.Buffer
 	restartRow(&b, o, JudgeRestart(o))
-	if f := strings.Split(strings.TrimSpace(b.String()), "\t"); len(f) != 15 || f[3] != "-" {
+	if f := strings.Split(strings.TrimSpace(b.String()), "\t"); len(f) != 16 || f[3] != "-" {
 		t.Errorf("the row %q should say - for the backlog", b.String())
 	}
 }
@@ -217,7 +221,7 @@ func TestTheRestartLedgerCarriesTheRunAndItsVerdict(t *testing.T) {
 	var b bytes.Buffer
 	restartHead(&b, []string{"cluster=x", "clients=2"})
 	o := RestartOutcome{Kills: 4, Backlog: 4, MarkersPeak: 9, Restarts: 4, RowsMaster: 6, RowsSlave: 6,
-		SumMaster: "1", SumSlave: "1"}
+		SumMaster: "123", SumSlave: "123"}
 	restartRow(&b, o, JudgeRestart(o))
 	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
 	if len(lines) != 3 || lines[0] != "# cluster=x clients=2" {
@@ -226,6 +230,14 @@ func TestTheRestartLedgerCarriesTheRunAndItsVerdict(t *testing.T) {
 	head, row := strings.Split(lines[1], "\t"), strings.Split(lines[2], "\t")
 	if len(head) != len(row) || head[len(head)-1] != "verdict" || row[len(row)-1] != Held {
 		t.Errorf("header %v and row %v do not line up on a verdict", head, row)
+	}
+	for i, h := range head {
+		if (h == "key_sum_master" || h == "key_sum_slave") && row[i] != "123" {
+			t.Errorf("%s is %q, want the sum itself", h, row[i])
+		}
+	}
+	if !strings.Contains(restartLine(o, Held), "key_sum(master=123,slave=123)") {
+		t.Errorf("the line gives both sums: %s", restartLine(o, Held))
 	}
 	if !strings.HasPrefix(restartLine(o, Held), "held ") {
 		t.Errorf("the line starts with the verdict: %s", restartLine(o, Held))
@@ -318,7 +330,7 @@ func TestAnApplierLogThatLostLinesIsNotHeld(t *testing.T) {
 	}
 	var b bytes.Buffer
 	restartRow(&b, o, JudgeRestart(o))
-	if f := strings.Split(strings.TrimSpace(b.String()), "\t"); len(f) != 15 || f[5] != "-" || f[12] != "-" {
+	if f := strings.Split(strings.TrimSpace(b.String()), "\t"); len(f) != 16 || f[5] != "-" || f[13] != "-" {
 		t.Errorf("the row %q should say - for the restarts and the -670s", b.String())
 	}
 }
@@ -408,9 +420,9 @@ func TestARestartRunCanCrashTheSlaveNode(t *testing.T) {
 	}
 }
 
-// A crashed node that does not start again ends the kills, and the run fails
-// once the clients end, saying how to bring it back, rather than wait for the
-// final marker on a slave that is down.
+// A crashed node that does not start again ends the kills and stops the
+// clients, and the run fails saying how to bring it back, rather than wait
+// for the clients and then the final marker on a slave that is down.
 func TestACrashedNodeThatDoesNotStartEndsTheRun(t *testing.T) {
 	if raceEnabled {
 		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
@@ -419,11 +431,16 @@ func TestACrashedNodeThatDoesNotStartEndsTheRun(t *testing.T) {
 	c.Kill = KillNode
 	setState(t, state, "markers", "7")
 	t.Setenv("FAKE_NODE_START", "exit 1")
+	t.Setenv("CLIENTSLEEP", "30")
 	var log bytes.Buffer
 	r.Log = &log
+	began := time.Now()
 	o, err := r.Restart(context.Background(), c)
-	if err == nil || !strings.Contains(err.Error(), "csb node start s1") {
-		t.Errorf("err %v, want the run to fail saying how to start s1", err)
+	if took := time.Since(began); took > 20*time.Second {
+		t.Errorf("the run took %s: the clients were not stopped once the slave was down", took)
+	}
+	if err == nil || !strings.Contains(err.Error(), "csb node start s1") || strings.Contains(err.Error(), "node exec") {
+		t.Errorf("err %v, want the run to fail saying how to start s1, and only that", err)
 	}
 	if o.Kills != 1 || !o.Down || !strings.Contains(log.String(), "s1 did not start again after a crash or an attempt at one") {
 		t.Errorf("kills %d down %v, log %q: want one kill, the slave down and the failed start said", o.Kills, o.Down, log.String())
@@ -453,7 +470,7 @@ func TestAStoppedRunStillStartsTheNodeItCrashed(t *testing.T) {
 	}()
 	var log bytes.Buffer
 	r.Log = &log
-	_, killed, down := r.killOnce(ctx, ch, killScript("db", false, false), KillNode)
+	_, killed, down := r.killOnce(ctx, ch, killScript("db", false, KillNode), KillNode)
 	b, _ := os.ReadFile(nodes)
 	if !killed || down || string(b) != "crash s1\nstart s1\n" || !strings.Contains(log.String(), "s1 is started again first") {
 		t.Errorf("killed %v down %v, node calls %q, log %q: want the crash and then the start despite the cancel, said",
@@ -462,11 +479,12 @@ func TestAStoppedRunStillStartsTheNodeItCrashed(t *testing.T) {
 }
 
 func TestTheKillScriptKillsTheApplierOnlyWhenAskedTo(t *testing.T) {
-	if s := killScript("db", true, true); !strings.Contains(s, "pkill -9 -f 'cub_admin [a]pplylogdb'") || !strings.Contains(s, "timeout 10") {
+	if s := killScript("db", true, KillApplier); !strings.Contains(s, "pkill -9 -f 'cub_admin [a]pplylogdb'") || !strings.Contains(s, "timeout 10") {
 		t.Errorf("the applier's kill script reads the markers and kills:\n%s", s)
 	}
-	if s := killScript("db", true, false); strings.Contains(s, "pkill") || !strings.Contains(s, "markers=") {
-		t.Errorf("a node crash's script only reads the markers:\n%s", s)
+	if s := killScript("db", true, KillNode); strings.Contains(s, "pkill") || !strings.Contains(s, "markers=") ||
+		!strings.Contains(s, "pgrep -f 'cub_admin [a]pplylogdb'") {
+		t.Errorf("a node crash's script reads the markers and looks for an applier, and kills nothing:\n%s", s)
 	}
 }
 
@@ -497,9 +515,156 @@ func TestAFailedCrashIsStillFollowedByAStart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, killed, down := r.killOnce(context.Background(), ch, killScript("db", false, false), KillNode)
+	_, killed, down := r.killOnce(context.Background(), ch, killScript("db", false, KillNode), KillNode)
 	b, _ := os.ReadFile(nodes)
 	if killed || down || string(b) != "crash s1\nstart s1\n" {
 		t.Errorf("killed %v down %v, node calls %q: want the start after the failed crash, and no kill counted", killed, down, b)
+	}
+}
+
+// A run stopped mid-crash whose node then does not start again says both:
+// what stopped the clients, and how to bring the slave back.
+func TestAStoppedRunWhoseNodeDoesNotStartSaysHowToStartIt(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	c.Kill = KillNode
+	setState(t, state, "markers", "7")
+	t.Setenv("CLIENTSLEEP", "30")
+	crashing := filepath.Join(state, "crashing")
+	t.Setenv("FAKE_NODE_KILL", "touch "+shellQuote(crashing)+"; sleep 1")
+	t.Setenv("FAKE_NODE_START", "exit 1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { // cancel once the crash is under way
+		for ctx.Err() == nil {
+			if _, err := os.Stat(crashing); err == nil {
+				cancel()
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}()
+	o, err := r.Restart(ctx, c)
+	if err == nil || !strings.Contains(err.Error(), "csb node start s1") || !strings.Contains(err.Error(), "node exec") {
+		t.Errorf("err %v, want the clients' end and how to start s1, both", err)
+	}
+	if !o.Down {
+		t.Errorf("the slave is not said to be down")
+	}
+}
+
+// Under --kill node a slave whose applier is not running is not crashed:
+// what a crash asks is what an applier that starts again finds.
+func TestANodeWithNoApplierIsNotCrashed(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	c.Kill = KillNode
+	setState(t, state, "markers", "7")
+	setState(t, state, "noapplier", "")
+	nodes := crashHooks(t, state, "")
+	o, err := r.Restart(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(nodes)
+	if o.Kills != 0 || len(b) != 0 || JudgeRestart(o) != Inconclusive {
+		t.Errorf("kills %d, node calls %q, verdict %s: want no crash, none counted, inconclusive", o.Kills, b, JudgeRestart(o))
+	}
+}
+
+// A pgrep that fails is said, and the node is not crashed on it.
+func TestAPgrepThatFailsIsSaidAndCrashesNothing(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	c.Kill = KillNode
+	setState(t, state, "markers", "7")
+	setState(t, state, "pgrepbroken", "")
+	nodes := crashHooks(t, state, "")
+	var log bytes.Buffer
+	r.Log = &log
+	o, err := r.Restart(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(nodes)
+	if o.Kills != 0 || len(b) != 0 || !strings.Contains(log.String(), `pgrep on s1 said "127"`) {
+		t.Errorf("kills %d, node calls %q, log %q: want no crash and the pgrep failure said", o.Kills, b, log.String())
+	}
+}
+
+// A client that failed on its own while the slave went down is not said to
+// have been stopped for it: the run gives both errors.
+func TestAClientErrorIsNotTakenForAStopWhenTheSlaveIsDown(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	c.Kill = KillNode
+	setState(t, state, "markers", "7")
+	setState(t, state, "clientlog", "ERROR: connection refused\n")
+	t.Setenv("CLIENTSLEEP", "1")
+	t.Setenv("FAKE_NODE_KILL", "sleep 3")
+	t.Setenv("FAKE_NODE_START", "exit 1")
+	var log bytes.Buffer
+	r.Log = &log
+	_, err := r.Restart(context.Background(), c)
+	if err == nil || !strings.Contains(err.Error(), "ended no transaction") || !strings.Contains(err.Error(), "csb node start s1") ||
+		strings.Contains(log.String(), "the clients were stopped") {
+		t.Errorf("err %v, log %q: want the client's error and the down slave both, and no stop said", err, log.String())
+	}
+}
+
+// A restart run ended at a second interrupt names what it may leave and the
+// csb command for each.
+func TestASecondInterruptSaysWhatItLeaves(t *testing.T) {
+	clients := "csb node exec --cluster hapx hapx-c1 -- 'kill -9 $(cat /work/r/pids)'"
+	got := leftBehind(restartLeft(KillApplier, "hapx", "hapx-c1", "/work/r", "hapx-n2", false))
+	if !strings.Contains(got, clients) || strings.Contains(got, "node start") || strings.Contains(got, "destroy") {
+		t.Errorf("an applier run on a kept pair may leave its clients only: %q", got)
+	}
+	got = leftBehind(restartLeft(KillNode, "hapx", "hapx-c1", "/work/r", "hapx-n2", true))
+	for _, want := range []string{clients, "csb node start --cluster hapx hapx-n2", "csb cluster destroy --cluster hapx --purge"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q does not say %q", got, want)
+		}
+	}
+}
+
+// The first interrupt only stops the run; the second ends testkit, after
+// saying what it may leave.
+func TestASecondInterruptEndsTestkit(t *testing.T) {
+	exited := make(chan int, 2)
+	exit = func(code int) { exited <- code }
+	defer func() { exit = os.Exit }()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	var b bytes.Buffer
+	release := secondInterrupt(ctx, &b, []string{"hapx-n2 down"})
+	defer release()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	<-ctx.Done()
+	select {
+	case code := <-exited:
+		t.Fatalf("the first interrupt ended testkit with %d", code)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case code := <-exited:
+		if code != 130 || !strings.Contains(b.String(), "may leave:\n  hapx-n2 down") {
+			t.Errorf("exit %d, said %q: want 130 and what it leaves", code, b.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second interrupt did not end testkit")
 	}
 }

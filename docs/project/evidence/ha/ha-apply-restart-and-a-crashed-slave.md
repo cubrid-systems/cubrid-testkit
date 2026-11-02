@@ -40,8 +40,9 @@ A crashed slave was slow to catch up, though these runs do not show why:
   within 5 minutes, had 3,000 keys a client, and no 6,000-key run without crashes was made.
 - `19e83a5d9`, the same run: a table made on the master as a marker, about 5 to 6 minutes after
   the clients ended, reached the slave 836 seconds later by the wall clock of the loop that waited
-  (the loop is not kept), about 19 to 19.5 minutes in all. That wait overlapped the earlier build's `b984637bb` command run
-  (§3) on the same host, and this slave, which fails as it applies, was slow under applier kills too.
+  (the loop is not kept), about 19 to 19.5 minutes in all. That wait overlapped the earlier build's
+  `b984637bb` command run (§3) on the same host, and this slave, which fails as it applies, was
+  slow under applier kills too.
 
 A slave that comes back with its buffers empty, behind by every second it was down, would look like
 this; that is a guess. The command waits for its final marker up to 20 minutes under `--kill node`,
@@ -76,12 +77,13 @@ terminal).
 
 `testkit ha-apply restart --kill node` is the same run as `restart` with the kill replaced: before
 each kill the marker read, then `csb node kill` and `csb node start` on the slave, then
-`--kill-every` until the next. A crash counts when `csb node kill` succeeds. The start follows even
-a crash csb said failed, which may have reached the node, and neither takes the run's cancel; csb
-runs in a process group of its own, so a terminal's ^C does not cut the start off. A node that does
-not start again ends the kills, and the run fails, once the clients end, with an error that names
-`csb node start` for it. The verdict is
-ADR-EXT-012 3-3's, unchanged. Defaults: 8 clients × 3,000 keys, `--kill-every 5s`.
+`--kill-every` until the next. As built for the runs below, a crash counted when `csb node kill`
+succeeded. The start follows even a crash csb said failed, which may have reached the node, and
+neither takes the run's cancel; csb runs in a process group of its own, so a terminal's ^C does not
+cut the start off. A node that did not start again ended the kills, and the run failed, once the
+clients ended, with an error that names `csb node start` for it. The verdict is ADR-EXT-012 3-3's,
+unchanged. Defaults: 8 clients × 3,000 keys, `--kill-every 5s`. A later change, at the end of this
+section, crashes only a slave whose applier runs, and stops the clients once the slave stays down.
 
 ```
 # cluster=hap11010a6b build=11.5.0.2989-b984637 ha_apply_worker_count=4 ha_writeset_history_size=unset clients=8 iters=3000 kill=node kill_every=5s timeout=30m0s
@@ -107,10 +109,20 @@ all with markers, up to 2,076) and missed on `19e83a5d9` (5 crashes; caught up w
 failures and 16 -670s). The `19e83a5d9` prototype wait of §1 overlapped that `b984637bb` run.
 
 `hap1102bc41` was stood up by `restart --build --keep` with the applier kill, built from the commit
-before this change (`d2ef449`). That run was missed as before: 33 kills, 147 failures and 147 -670s,
-stalled. Once a table made on the master as a marker reached the slave, 227 seconds later, the slave
-held 24,147 rows to the master's 24,000, 147 keys not moved (`haapply-rs3-19e8.tsv`,
-`rs3-19e8-after-reads.txt`).
+before the `--kill node` change (`d2ef449`). That run was missed as before: 33 kills, 147 failures
+and 147 -670s, stalled. Once a table made on the master as a marker reached the slave, 227 seconds
+later, the slave held 24,147 rows to the master's 24,000, 147 keys not moved
+(`haapply-rs3-19e8.tsv`, `rs3-19e8-after-reads.txt`).
+
+A later change, after a second review, crashes only a slave whose applier runs (`pgrep` before the
+crash), stops the clients when the slave does not start again, runs the clients through the code
+`stress` uses, and writes both key sums. Built from it, before a second interrupt was given its own
+handling, three runs on `hap11010a6b`, one after the other: `stress --ops 0,1,2,3,4,9 --txns 100`
+same (`haapply-low1-stress.tsv`); `restart` with the applier kill held, 32 kills, all with markers
+up to 2,093 (`haapply-low1-applier.tsv`); and `restart --kill node` held, 5 crashes, all with
+markers up to 2,083, 5 starts, both nodes 24,000 rows with the same key sum, 1,200,036,012,000
+(`haapply-low1-node.tsv`). `hap1102bc41` was gone by then, so `19e83a5d9` was not run again; the
+verdict's code did not change.
 
 ## 4. Not here
 

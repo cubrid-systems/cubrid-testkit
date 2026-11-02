@@ -41,7 +41,7 @@ writeset did not, which #8052 then fixed.
 |---|---|
 | `pairs` | For each pattern, T1 writes ballast and then a key; T2, committed after it, depends on that key and writes a witness. Is T2 ever applied before T1? |
 | `stress` (M2) | N clients on one small key space, a deterministic workload: do the nodes end the same — through the primary key, by heap count, with no orphan and no apply failure? |
-| `restart` (M3) | Each client inserts fresh keys of its own and moves each one in the next transaction, while the slave's applier is killed again and again (with `--kill node`, the whole slave node is crashed and started again): does an applier that starts again apply a committed transaction a second time? |
+| `restart` (M3) | Each client inserts fresh keys of its own and moves each one in the next transaction, while the slave's applier is killed again and again (with `--kill node`, the whole slave node is crashed and started again; with `--statements`, the DML replicates as statements): does an applier that starts again apply a committed transaction a second time? |
 | `list` | The patterns, and what each pair shares. |
 
 The patterns are a closed list in Go: primary, unique, reverse-unique and foreign keys (single,
@@ -88,16 +88,17 @@ refuses to start where an earlier run's files already are.
 
 A `restart` run has one verdict too: **missed** (the applier failed -- `fail_counter` moved, or the
 slave's applier log gained a -670 -- or a slave that caught up reads the table otherwise than the
-master: its rows, the sum of its keys, or the keys not moved), **inconclusive** (a slave that did not
-show the final marker within five minutes, twenty under `--kill node`, without failing; no kill that
-found an applier, under `--kill node` no crash of a slave whose applier ran; or no kill
-that found `ha_applied_tx_marker` rows above the slave's stored apply position just before), or
-**held**. A slave with no marker table is never held: missed on a failure or on a caught-up slave
-whose table differs, inconclusive otherwise. Where a count read from the applier log went down
-during the run (a rotation), -670s that still grew are missed, since lines are only lost; otherwise
-the run cannot show that no -670 came and is never held either, and `fail_counter` cannot fill the
-gap: it loses the failures counted after it was last stored when a kill comes before the next store.
-Its clients' scripts and logs are kept as `stress` keeps them.
+master: its rows, the sum of its keys, or the keys not moved), **inconclusive** (a slave that did
+not show the final marker within five minutes, twenty under `--kill node` and thirty under
+`--statements` with or without it, without failing; no kill that found an applier, under
+`--kill node` no crash of a slave whose applier ran; or no kill that found `ha_applied_tx_marker`
+rows above the slave's stored apply position just before), or **held**. A slave with no marker table
+is never held: missed on a failure or on a caught-up slave whose table differs, inconclusive
+otherwise. Where a count read from the applier log went down during the run (a rotation), -670s that
+still grew are missed, since lines are only lost; otherwise the run cannot show that no -670 came
+and is never held either, and `fail_counter` cannot fill the gap: it loses the failures counted
+after it was last stored when a kill comes before the next store. Its clients' scripts and logs are
+kept as `stress` keeps them.
 
 ## 5. Acceptance
 
@@ -117,6 +118,10 @@ Its clients' scripts and logs are kept as `stress` keeps them.
 - **M3** (`restart`): a run is **missed** on #8052 `19e83a5d9`, the parent of `72650ce0d`, which
   added the applied-tx marker, and **held** on `b984637bb`; a run with `--kill node` gives the same two
   verdicts.
+- **Statements** (`restart --statements`): **missed** on #8052 `b84567f36`, the parent of
+  `d398beba2`, which added the statement marker, and **held** on `787defb50`. On `19e83a5d9`, which
+  skips a statement transaction through that marker and has no `ha_applied_tx_marker`, a run is
+  inconclusive and the caught-up slave the same as the master.
 - **Lock escalation** (for #8052 `502685e64`): `stress` on a pair stood up with
   `--set lock_escalation=5` is **stalled** on `cf8955a91` and **same** on `502685e64` and on
   `787defb50`.

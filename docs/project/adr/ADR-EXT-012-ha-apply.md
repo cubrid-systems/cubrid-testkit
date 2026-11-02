@@ -12,6 +12,8 @@
   구현됐고 §4 의 완료 조건을 충족했다 (2026-11-01,
   `docs/project/evidence/ha/ha-apply-restart-and-the-applied-tx-marker.md`). 슬레이브 노드를 crash 시키는
   `--kill node` 도 충족했다 (2026-11-02, `docs/project/evidence/ha/ha-apply-restart-and-a-crashed-slave.md`).
+  `--statements` 는 `b84567f36` 에서 missed, `787defb50` 에서 held 였다 (2026-11-02,
+  `docs/project/evidence/ha/ha-apply-restart-and-statements.md`).
   `502685e64` 의 교착도 `--set lock_escalation=5` 로 충족했다 (2026-11-02,
   `docs/project/evidence/ha/ha-apply-and-lock-escalation.md`). 새 head `787defb50` 에서도 모든 동사가
   `b984637bb` 와 같았다 (2026-11-02, `docs/project/evidence/ha/ha-apply-on-787defb50.md`).
@@ -95,7 +97,11 @@ writeset 이 의존성 하나를 놓치면, 슬레이브는 뒤의 트랜잭션�
   이미 시작된 start 는 분리된 csb 가 혼자 마친다. 슬레이브가 다시 뜨지 않으면 클라이언트도 멈추고 실행은
   실패로 끝나며, 그 슬레이브를 띄울 명령을 알려 준다. crash 된 슬레이브는 따라오는 데
   오래 걸렸으므로(8 × 6,000 에서 `b984637bb` 는 클라이언트가 끝나고 6.5~7 분) 끝의 마커는 5 분이 아니라
-  20 분까지 기다린다.
+  20 분까지 기다린다. `--statements` 는 INSERT 와 그 이동에 `/*+ USE_SBR */` 를 붙인다. 마스터는 그
+  둘을 문장으로 복제하고, 슬레이브는 SQL 로 다시 실행한다. writeset 은 그런 문장을 해시하지 못해
+  하나씩 직렬 적용으로 넘기므로 따라오는 데 오래 걸린다(`19e83a5d9` 에서 클라이언트가 끝나고 약
+  20 분). 그래서 끝의 마커는 `--kill node` 와 함께여도 30 분까지 기다린다. 클라이언트 수나 키 수에
+  따라 늘지는 않으므로 더 큰 실행은 stalled 로 끝날 수 있다.
 - `list` — 패턴 목록과 각 패턴이 공유하는 키.
 
 마커 대기 검사는 동사로 두지 않는다. live 테스트가 이미 그것을 고정한다(F6).
@@ -233,12 +239,13 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   디렉터리에 이미 파일이 있으면 쌍을 건드리기 전에 거부한다. 다른 실행의 것을 이번 실행의 것으로
   읽게 되고, 지울 권한도 이 실행에 없다.
 - `restart` 의 원장도 실행 하나에 한 행이다: 마스터 오류 수, 클라이언트를 끊었는지, kill 수, 그중
-  저장된 적용 위치보다 위의 marker 가 있던 kill 수(marker 표가 없으면 `-`)와 한 kill 이 본 그 marker 의
-  최대값, applier 로그가 말하는 시작 횟수, 두 노드의 행 수, 두 노드의 키의 합, 옮기지 않은 키 수(마스터/
-  슬레이브), `fail_counter` 변화, applier 로그의 -670 증가, 슬레이브가 따라왔는지, 판정. 로그가 줄을
-  잃었으면 시작 횟수는 `-` 를 쓰고, -670 수가 늘었으면 그 증가를 하한으로, 아니면 `-` 를 쓴다. 첫 줄은
-  클러스터, 빌드, 두 설정값에 클라이언트 수, 반복 수, 무엇을 죽였는지(`kill=applier|node`), kill 간격,
-  timeout 을 더한다. 클라이언트의 스크립트와 로그는 `stress` 처럼 원장 옆에 남긴다.
+  저장된 적용 위치보다 위의 marker 가 있던 kill 수(marker 표가 없으면 `-`)와 한 kill 이 본 그 marker
+  의 최대값, applier 로그가 말하는 시작 횟수, 두 노드의 행 수, 두 노드의 키의 합, 옮기지 않은 키
+  수(마스터/ 슬레이브), `fail_counter` 변화, applier 로그의 -670 증가, 슬레이브가 따라왔는지, 판정.
+  로그가 줄을 잃었으면 시작 횟수는 `-` 를 쓰고, -670 수가 늘었으면 그 증가를 하한으로, 아니면 `-` 를
+  쓴다. 첫 줄은 클러스터, 빌드, 두 설정값에 클라이언트 수, 반복 수, 무엇을
+  죽였는지(`kill=applier|node`), kill 간격, timeout, 문장으로 복제했는지(`statements=yes|no`)를
+  더한다. 클라이언트의 스크립트와 로그는 `stress` 처럼 원장 옆에 남긴다.
 
 ### 3-7. Go 만
 
@@ -263,6 +270,10 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   head 에서 같은 판정이다.
 - `502685e64` 의 교착(§3-5): `--set lock_escalation=5` 로 세운 쌍에서 `stress` 가 그 부모
   `cf8955a91` 에서 stalled, `502685e64` 와 `787defb50` 에서 same 이다.
+- 문장으로 복제한 DML(§3-2 `--statements`): 문장 트랜잭션을 `ha_applied_stmt_marker` 로 건너뛰게 한
+  `d398beba2` 의 부모 `b84567f36` 에서 missed, `787defb50` 에서 held 다. 그 marker 는 있고
+  `ha_applied_tx_marker` 는 없는 `19e83a5d9` 에서는 실행이 inconclusive 이고 따라온 슬레이브가
+  마스터와 같다. 두 head 모두 문장 트랜잭션을 건너뛰므로 이 조건은 둘을 가르지 않는다.
 
 ## 5. 기각한 대안
 

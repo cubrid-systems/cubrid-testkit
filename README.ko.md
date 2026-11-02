@@ -212,7 +212,7 @@ testkit ha-apply -h
 |---|---|---|
 | `pairs` | writeset 이 서로 다르게 해시할 수 있는 키의 패턴마다, 의존하는 트랜잭션보다 먼저 적용되는 트랜잭션이 있는가 | 패턴마다 한 행: missed, held, inconclusive |
 | `stress` | 작은 키 공간 하나에 N 개 클라이언트를 돌린 뒤 두 노드가 같은가 | damaged, stalled, diverged, hung, same |
-| `restart` | 부하 중에 슬레이브의 applier 를 거듭 죽이거나(`--kill applier`, 기본값) 노드를 거듭 crash 시켜도(`--kill node`) 커밋이 두 번 적용되지 않는가 | missed, held, inconclusive |
+| `restart` | 부하 중에 슬레이브의 applier 를 거듭 죽이거나(`--kill applier`, 기본값) 노드를 거듭 crash 시켜도(`--kill node`) 커밋이 두 번 적용되지 않는가. `--statements` 는 부하의 DML 을 문장으로 복제한다 | missed, held, inconclusive |
 | `list` | 패턴 목록과 각 패턴이 공유하는 키 | — |
 
 `--build DIR` 은 설치 디렉터리로 페어를 세우고(`--workers`, 기본 4, 그리고 `--set key=value` 가

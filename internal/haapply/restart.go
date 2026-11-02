@@ -54,13 +54,19 @@ const backlogQuery = "SELECT COUNT(*) FROM ha_applied_tx_marker m, db_ha_apply_i
 	"OR (m.commit_pageid = a.committed_lsa_pageid AND m.commit_offset > a.committed_lsa_offset))"
 
 // restartSQL is client c's script: an INSERT and its commit, then the move of
-// that key and its commit, iters times.
-func restartSQL(c, iters int) string {
+// that key and its commit, iters times. With statements, both carry the
+// USE_SBR hint, so the master replicates them as statements and the slave
+// runs each again as SQL, rather than applying the rows they changed.
+func restartSQL(c, iters int, statements bool) string {
+	hint := ""
+	if statements {
+		hint = "/*+ USE_SBR */ "
+	}
 	var b strings.Builder
 	for i := 1; i <= iters; i++ {
 		k := c*restartStride + i
-		fmt.Fprintf(&b, "INSERT INTO r_kv VALUES (%d, %d, %d);\nCOMMIT;\nUPDATE r_kv SET id = %d WHERE id = %d;\nCOMMIT;\n",
-			k, c, i, k+restartMove, k)
+		fmt.Fprintf(&b, "INSERT %[1]sINTO r_kv VALUES (%[2]d, %[3]d, %[4]d);\nCOMMIT;\nUPDATE %[1]sr_kv SET id = %[5]d WHERE id = %[2]d;\nCOMMIT;\n",
+			hint, k, c, i, k+restartMove)
 	}
 	return b.String()
 }
@@ -77,6 +83,8 @@ type RestartConfig struct {
 	Clients, Iters int
 	// Kill is KillApplier or KillNode.
 	Kill string
+	// Statements makes the workload's DML replicate as statements.
+	Statements bool
 	// KillEvery is the time from the end of one kill to the next while the
 	// clients run; Timeout bounds the clients.
 	KillEvery, Timeout time.Duration
@@ -158,7 +166,7 @@ func (r *Runner) Restart(ctx context.Context, c RestartConfig) (RestartOutcome, 
 		return o, err
 	}
 	for i := 1; i <= c.Clients; i++ {
-		if err := os.WriteFile(filepath.Join(c.Host, fmt.Sprintf("c%d.sql", i)), []byte(restartSQL(i, c.Iters)), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(c.Host, fmt.Sprintf("c%d.sql", i)), []byte(restartSQL(i, c.Iters, c.Statements)), 0o644); err != nil {
 			return o, err
 		}
 	}

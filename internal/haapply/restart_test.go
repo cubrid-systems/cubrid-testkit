@@ -34,8 +34,12 @@ func TestRestartRefusesWhatItCannotRunBeforeTouchingAPair(t *testing.T) {
 		}
 	}
 	a, err := parseRestart([]string{"--cluster", "x"}, &bytes.Buffer{})
-	if err != nil || a.cfg.Clients != 8 || a.cfg.Iters != 3000 || a.cfg.Kill != KillApplier || a.cfg.KillEvery != 5*time.Second {
+	if err != nil || a.cfg.Clients != 8 || a.cfg.Iters != 3000 || a.cfg.Kill != KillApplier || a.cfg.KillEvery != 5*time.Second ||
+		a.cfg.Statements {
 		t.Errorf("the defaults: %+v, %v", a, err)
+	}
+	if a, err := parseRestart([]string{"--cluster", "x", "--statements"}, &bytes.Buffer{}); err != nil || !a.cfg.Statements {
+		t.Errorf("--statements: %+v, %v", a, err)
 	}
 }
 
@@ -44,8 +48,12 @@ func TestRestartRefusesWhatItCannotRunBeforeTouchingAPair(t *testing.T) {
 func TestARestartClientMovesEachKeyItInserts(t *testing.T) {
 	want := "INSERT INTO r_kv VALUES (30000001, 3, 1);\nCOMMIT;\nUPDATE r_kv SET id = 35000001 WHERE id = 30000001;\nCOMMIT;\n" +
 		"INSERT INTO r_kv VALUES (30000002, 3, 2);\nCOMMIT;\nUPDATE r_kv SET id = 35000002 WHERE id = 30000002;\nCOMMIT;\n"
-	if got := restartSQL(3, 2); got != want {
+	if got := restartSQL(3, 2, false); got != want {
 		t.Errorf("restartSQL(3, 2) =\n%s\nwant\n%s", got, want)
+	}
+	sbr := "INSERT /*+ USE_SBR */ INTO r_kv VALUES (30000001, 3, 1);\nCOMMIT;\nUPDATE /*+ USE_SBR */ r_kv SET id = 35000001 WHERE id = 30000001;\nCOMMIT;\n"
+	if got := restartSQL(3, 1, true); got != sbr {
+		t.Errorf("restartSQL(3, 1) with statements =\n%s\nwant\n%s", got, sbr)
 	}
 	for c := 1; c < maxRestartClients; c++ {
 		if c*restartStride+maxRestartIters+restartMove >= (c+1)*restartStride {
@@ -148,7 +156,7 @@ func TestARestartRunKillsTheApplierWhileTheClientsRun(t *testing.T) {
 	}
 	for i := 1; i <= c.Clients; i++ {
 		got, err := os.ReadFile(filepath.Join(c.Save, fmt.Sprintf("c%d.sql", i)))
-		if err != nil || string(got) != restartSQL(i, c.Iters) {
+		if err != nil || string(got) != restartSQL(i, c.Iters, false) {
 			t.Errorf("client %d's script was not kept as written: %v", i, err)
 		}
 	}
@@ -666,5 +674,42 @@ func TestASecondInterruptEndsTestkit(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the second interrupt did not end testkit")
+	}
+}
+
+// A restart run waits the longest of what applies to it for its final marker.
+func TestARestartRunWaitsLongestForAStatementOrACrash(t *testing.T) {
+	cases := []struct {
+		c    RestartConfig
+		want time.Duration
+	}{
+		{RestartConfig{Kill: KillApplier}, barrierFor},
+		{RestartConfig{Kill: KillNode}, crashBarrierFor},
+		{RestartConfig{Kill: KillApplier, Statements: true}, statementsBarrierFor},
+		{RestartConfig{Kill: KillNode, Statements: true}, statementsBarrierFor},
+	}
+	for _, tc := range cases {
+		if got := restartBarrierFor(tc.c); got != tc.want {
+			t.Errorf("%+v: %s, want %s", tc.c, got, tc.want)
+		}
+	}
+}
+
+// Under --statements the clients' scripts carry the hint as written.
+func TestAStatementsRunGivesTheClientsTheHint(t *testing.T) {
+	if raceEnabled {
+		t.Skip("a restart run through the fake takes seconds under -race; TestARestartRunKillsTheApplierWhileTheClientsRun runs the kill loop there")
+	}
+	r, state, c := restartPair(t)
+	c.Statements = true
+	setState(t, state, "markers", "3")
+	if _, err := r.Restart(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= c.Clients; i++ {
+		got, err := os.ReadFile(filepath.Join(c.Save, fmt.Sprintf("c%d.sql", i)))
+		if err != nil || string(got) != restartSQL(i, c.Iters, true) || !strings.Contains(string(got), "/*+ USE_SBR */") {
+			t.Errorf("client %d's script does not carry the hint: %v", i, err)
+		}
 	}
 }

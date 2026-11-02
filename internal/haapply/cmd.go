@@ -63,6 +63,8 @@ restart options:
                    node: crash the whole slave node while its applier runs, and start it
                    again (default applier)
   --kill-every D   time from the end of one kill to the next, 1s at least (default 5s)
+  --statements     the INSERT and the move carry /*+ USE_SBR */: the master replicates them
+                   as statements, which the slave runs again as SQL
   --timeout D      how long the clients may take before they are stopped, 1s at least (default 30m)
 `
 
@@ -78,6 +80,27 @@ const barrierFor = 5 * time.Minute
 // clients x 6,000 keys left the slave 6.5 to 7 minutes behind when the
 // clients ended (evidence/ha/ha-apply-restart-and-a-crashed-slave.md).
 const crashBarrierFor = 20 * time.Minute
+
+// statementsBarrierFor is barrierFor after a restart run whose DML replicates
+// as statements: the writeset falls back to a serial apply for each, and on
+// #8052 19e83a5d9 the slave caught up about 20 minutes after 8 clients x
+// 3,000 keys ended (evidence/ha/ha-apply-restart-and-statements.md). It does
+// not grow with the clients or the keys: a larger run may end stalled.
+const statementsBarrierFor = 30 * time.Minute
+
+// restartBarrierFor is how long a restart run waits for its final marker: the
+// longest of what applies to it, so --statements with --kill node waits 30
+// minutes. The two were not run together, and their delays may add up.
+func restartBarrierFor(c RestartConfig) time.Duration {
+	d := barrierFor
+	if c.Kill == KillNode {
+		d = max(d, crashBarrierFor)
+	}
+	if c.Statements {
+		d = max(d, statementsBarrierFor)
+	}
+	return d
+}
 
 // Main is the subcommand: exit 0 when the run finished, whatever its
 // verdicts; 1 when it could not run; 2 for a command it cannot read.
@@ -613,6 +636,7 @@ func parseRestart(args []string, stderr io.Writer) (*restartArgs, error) {
 	fs.IntVar(&c.Clients, "clients", 8, "")
 	fs.IntVar(&c.Iters, "iters", 3000, "")
 	fs.StringVar(&c.Kill, "kill", KillApplier, "")
+	fs.BoolVar(&c.Statements, "statements", false, "")
 	fs.DurationVar(&c.KillEvery, "kill-every", 5*time.Second, "")
 	fs.DurationVar(&c.Timeout, "timeout", 30*time.Minute, "")
 	fs.Usage = func() { fmt.Fprint(stderr, usage) }
@@ -676,7 +700,8 @@ func restart(args []string, stdout, stderr io.Writer) int {
 
 	c := a.cfg
 	meta := append(s.meta(ctx), fmt.Sprintf("clients=%d", c.Clients), fmt.Sprintf("iters=%d", c.Iters),
-		"kill="+c.Kill, "kill_every="+c.KillEvery.String(), "timeout="+c.Timeout.String())
+		"kill="+c.Kill, "kill_every="+c.KillEvery.String(), "timeout="+c.Timeout.String(),
+		"statements="+yesNo(c.Statements))
 	if err := start(); err != nil {
 		fmt.Fprintf(stderr, "ha-apply: ledger %s: %v\n", a.ledger, err)
 		return 1
@@ -689,10 +714,7 @@ func restart(args []string, stdout, stderr io.Writer) int {
 	c.Host = filepath.Join(sandbox.WorkDir(s.cli.Cluster), dir)
 	c.Node = "/work/" + filepath.ToSlash(dir)
 	c.Save = save
-	r := &Runner{Pair: s.pair, Client: s.client, Log: stderr, BarrierFor: barrierFor}
-	if c.Kill == KillNode {
-		r.BarrierFor = crashBarrierFor
-	}
+	r := &Runner{Pair: s.pair, Client: s.client, Log: stderr, BarrierFor: restartBarrierFor(c)}
 	// The first interrupt stops the run, which still waits for a crash and
 	// its start under way (Runner.Restart). A second one ends testkit there,
 	// saying what that may leave; this stops before the teardown, so a

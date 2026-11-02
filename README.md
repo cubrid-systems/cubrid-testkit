@@ -217,7 +217,7 @@ testkit ha-apply -h
 |---|---|---|
 | `pairs` | For each pattern of keys a writeset could hash apart, is a transaction ever applied before the one it depends on? | a row a pattern: missed, held or inconclusive |
 | `stress` | Do the nodes end the same after N clients on one small key space? | damaged, stalled, diverged, hung or same |
-| `restart` | With the slave's applier killed (`--kill applier`, the default) or its node crashed (`--kill node`) again and again under load, is a commit applied twice? | missed, held or inconclusive |
+| `restart` | With the slave's applier killed (`--kill applier`, the default) or its node crashed (`--kill node`) again and again under load, is a commit applied twice? `--statements` replicates the workload's DML as statements. | missed, held or inconclusive |
 | `list` | The patterns, and what each pattern's two transactions share. | — |
 
 `--build DIR` stands a pair up from an install, with `--workers` (default 4) and any other parameter

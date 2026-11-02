@@ -255,10 +255,14 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 		p.Missing["l0"] = "post: " + err.Error()
 	}
 	// A pair that failed over during the pass had the case time other nodes
-	// than it names; after the snapshots, so the check is outside them.
-	if s.HA && reason == "" {
+	// than it names; after the snapshots, so the check is outside them. A
+	// failover that also failed the client is said beside the client's reason.
+	if s.HA {
 		if err := r.haCheck(ctx, s); err != nil {
-			reason = "ha: " + err.Error()
+			if reason != "" {
+				reason += "; "
+			}
+			reason += "ha: " + err.Error()
 		}
 	}
 	if reason != "" {

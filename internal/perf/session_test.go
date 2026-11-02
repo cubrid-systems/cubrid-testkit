@@ -1,13 +1,17 @@
 package perf
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
 
 // A fake install tree: enough for isInstallTree and readFingerprint.
@@ -185,6 +189,54 @@ func TestHACasesGroupByFixtureAndCountBothServers(t *testing.T) {
 	}
 	if why := s.groupMemory(confGroup{Cases: cases[1:2]}, false); !strings.Contains(why, "4 × data_buffer_size=3G") {
 		t.Errorf("an HA group of 4 × 3G under 8G: %q", why)
+	}
+	s.Conf.MemoryCap = "16G"
+	if why := s.groupMemory(confGroup{Cases: cases[1:2]}, true); !strings.Contains(why, "6 × data_buffer_size=3G") {
+		t.Errorf("an HA group with an overlap, 6 × 3G under 16G: %q", why)
+	}
+}
+
+// An HA side's server is the heartbeat's: the runner refuses to start or
+// stop it, before any exec, and leaves it up when the side goes idle.
+func TestAnHASideKeepsItsServer(t *testing.T) {
+	r := &Runner{Log: io.Discard}
+	s := &Side{Role: "target", Name: "pf-20261102-0000-t", HA: true, running: map[string]bool{"perf_ha_rep": true},
+		N1: sandbox.NewNode(nil, "n1"), N2: sandbox.NewNode(nil, "n2")}
+	ctx := context.Background()
+	for name, step := range map[string]func() error{
+		"start": func() error { return r.serverStart(ctx, s, "perf_ha_rep") },
+		"stop":  func() error { return r.serverStop(ctx, s, "perf_ha_rep") },
+	} {
+		if err := step(); err == nil || !strings.Contains(err.Error(), "heartbeat") {
+			t.Errorf("server %s on an HA side: %v", name, err)
+		}
+	}
+	if err := r.stopOthers(ctx, s, nil); err != nil || !s.running["perf_ha_rep"] {
+		t.Errorf("stopOthers on an HA side: err=%v running=%v", err, s.running)
+	}
+	if n := utilityNode(s, &Case{Utility: &UtilityClient{Argv: []string{"x"}, Ops: 1}}); n.Name != "n1" {
+		t.Errorf("a utility without client.node runs on %s, want n1", n.Name)
+	}
+}
+
+// The role check reads csb ha status: n1 the one active node, and nothing
+// else.
+func TestActiveIsN1(t *testing.T) {
+	node := func(name, role string) sandbox.NodeHealth { return sandbox.NodeHealth{Name: name, Role: role} }
+	const cl = "pf-20261102-0000-t"
+	for _, c := range []struct {
+		name  string
+		nodes []sandbox.NodeHealth
+		ok    bool
+	}{
+		{"n1 active", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "standby"), node(cl+"-c1", "unknown")}, true},
+		{"failed over", []sandbox.NodeHealth{node(cl+"-n1", "standby"), node(cl+"-n2", "active")}, false},
+		{"no active", []sandbox.NodeHealth{node(cl+"-n1", "to_be_active"), node(cl+"-n2", "standby")}, false},
+		{"two actives", []sandbox.NodeHealth{node(cl+"-n1", "active"), node(cl+"-n2", "active")}, false},
+	} {
+		if err := activeIsN1(c.nodes, cl); (err == nil) != c.ok {
+			t.Errorf("%s: %v", c.name, err)
+		}
 	}
 }
 

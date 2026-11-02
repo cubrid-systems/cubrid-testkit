@@ -571,24 +571,24 @@ const contaminationCores = 0
 const clockTicks = 100.0
 
 // hostGuard reads the counters for a given set of server cores and the
-// cgroups of the clusters currently up, by cluster name: a cluster that is
-// destroyed leaves the list, or its vanished cpu.stat would make every later
-// reading unreadable.
+// cgroups of the database containers currently up, by container name (an HA
+// side has two): a container whose cluster is destroyed leaves the list, or
+// its vanished cpu.stat would make every later reading unreadable.
 type hostGuard struct {
 	cores     []int
 	cgroups   map[string]string
 	threshold float64 // contaminationCores; 0 records without nulling
 }
 
-func (g *hostGuard) add(cluster, cgroup string) {
+func (g *hostGuard) add(container, cgroup string) {
 	if g.cgroups == nil {
 		g.cgroups = map[string]string{}
 	}
-	g.cgroups[cluster] = cgroup
+	g.cgroups[container] = cgroup
 }
 
-func (g *hostGuard) remove(cluster string) {
-	delete(g.cgroups, cluster)
+func (g *hostGuard) remove(container string) {
+	delete(g.cgroups, container)
 }
 
 func parseCPUList(s string) ([]int, error) {

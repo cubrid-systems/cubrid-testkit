@@ -162,6 +162,7 @@ var (
 // Java class a jdbc client starts.
 var (
 	plainNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	confNameRe  = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 	javaMainRe  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
@@ -391,7 +392,18 @@ func checkFixtureUse(p *Problems, c *Case, f *Fixture) {
 	if f.Reset == ResetRestoreSnapshot && c.Topology == TopologyHA {
 		p.add("fixture %s restores a snapshot, which stops the server; topology %s needs a fixture whose reset leaves the server up", f.Name, TopologyHA)
 	}
+	// size says loading will not grow the first volume; csb makes an HA
+	// pair's database, with a first volume of its own size.
+	if c.Topology == TopologyHA {
+		if n, err := parseSize(f.Size); err == nil && n > haVolumeBytes {
+			p.add("fixture %s asks for a %s first volume; topology %s runs on the database csb makes, whose first volume is 512M", f.Name, f.Size, TopologyHA)
+		}
+	}
 }
+
+// haVolumeBytes is the first volume csb's createdb gives an HA pair's
+// database (--db-volume-size=512M).
+const haVolumeBytes = 512 << 20
 
 // confText turns the conf object into the text cubrid.conf will carry. A
 // string, a number or true/false each have one spelling; an object, an array
@@ -404,6 +416,12 @@ func confText(p *Problems, raw map[string]json.RawMessage) map[string]string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
+		// A parameter name, and so never a piece of a conf key's other
+		// syntax (confKey's ha(<fixture>)).
+		if !confNameRe.MatchString(k) {
+			p.add("conf key %q is not a parameter name: lowercase letters, digits and underscores", k)
+			continue
+		}
 		v := bytes.TrimSpace(raw[k])
 		var s string
 		switch {

@@ -107,6 +107,8 @@ func TestSuiteReadsEveryCaseAndFixture(t *testing.T) {
 func TestAnHAUtilityMayRunOnTheSlave(t *testing.T) {
 	root := copySuite(t)
 	dir := caseDir(root, "lib.backupdb")
+	// csb's first volume for the pair's database is 512M.
+	rewrite(t, filepath.Join(root, "fixtures", "narrow_1m", "fixture.json"), func(m map[string]any) { m["size"] = "512M" })
 	rewrite(t, filepath.Join(dir, "case.json"), func(m map[string]any) {
 		m["topology"] = "ha"
 		m["client"] = map[string]any{"argv": []string{"bash", "apply.sh", "run"}, "ops": 1, "prepare": []string{"bash", "apply.sh", "prepare"}, "node": "slave"}
@@ -183,6 +185,10 @@ func TestCaseRefusalsNameTheProblem(t *testing.T) {
 			m["cold"] = true
 		}, "cold must be false for topology ha"},
 		{"an HA case on a restored snapshot", "storage.bulk_update", func(m map[string]any) { m["topology"] = "ha" }, "topology ha needs a fixture whose reset leaves the server up"},
+		{"an HA case on a fixture bigger than csb's volume", "txn.commit_single", func(m map[string]any) { m["topology"] = "ha" }, "fixture narrow_1m asks for a 2G first volume"},
+		{"a conf key that is not a parameter name", "txn.commit_single", func(m map[string]any) {
+			m["conf"] = map[string]any{"ha(narrow_1m);data_buffer_size": "1G"}
+		}, `conf key "ha(narrow_1m);data_buffer_size" is not a parameter name`},
 		{"an op off the list", "txn.commit_single", func(m map[string]any) { m["op"] = "txn" }, `op "txn" is not one of`},
 		{"a metric off the list", "txn.commit_single", func(m map[string]any) { m["metric"] = "p99" }, `metric "p99" is not one of`},
 		{"a background off the list", "txn.commit_single", func(m map[string]any) { m["background"] = "off" }, `background "off" is not one of`},

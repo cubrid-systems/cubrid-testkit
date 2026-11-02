@@ -129,6 +129,12 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 	s.C1 = sandbox.NewNode(s.CLI, "c1")
 	s.Work = sandbox.WorkDir(s.Name)
 
+	// A side of this name kept by --keep in an earlier pair left its guard
+	// keys; the containers they name are about to go.
+	if r.Guard != nil {
+		r.Guard.remove(s.Name + "-n1")
+		r.Guard.remove(s.Name + "-n2")
+	}
 	// A cluster of this name left by an earlier session would be resumed by
 	// create, not replaced; it goes first (Design §7).
 	// A purge that fails is a refusal: create would resume whatever is there,
@@ -221,31 +227,62 @@ func (r *Runner) createSide(ctx context.Context, role, suffix, build string, cas
 // node. Every step reads the master as n1 and the slave as n2, so a pair
 // that failed over, or has not settled, would have a pass time the wrong
 // node.
+// A call csb could not answer is asked again, twice; an answer naming
+// another active node is not.
 func (r *Runner) haCheck(ctx context.Context, s *Side) error {
-	nodes, err := s.CLI.HAStatus(ctx)
+	var nodes []sandbox.NodeHealth
+	var err error
+	for try := 1; try <= 3; try++ {
+		if nodes, err = s.CLI.HAStatus(ctx); err == nil || ctx.Err() != nil {
+			break
+		}
+		r.logf("%s: ha status, try %d: %v", s.Role, try, err)
+		if try < 3 && sleepCtx(ctx, 2*time.Second) != nil {
+			break
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("%s: ha status: %w", s.Role, err)
 	}
-	if act := sandbox.Actives(nodes); len(act) != 1 || act[0] != s.Name+"-n1" {
-		return fmt.Errorf("%s: the active node of %s is %v, not %s-n1: the pair failed over or has not settled", s.Role, s.Name, act, s.Name)
+	if err := activeIsN1(nodes, s.Name); err != nil {
+		return fmt.Errorf("%s: %w", s.Role, err)
+	}
+	return nil
+}
+
+// activeIsN1 is haCheck's reading of csb ha status: n1 the one active node.
+func activeIsN1(nodes []sandbox.NodeHealth, cluster string) error {
+	if act := sandbox.Actives(nodes); len(act) != 1 || act[0] != cluster+"-n1" {
+		return fmt.Errorf("the active node of %s is %v, not %s-n1: the pair failed over or has not settled", cluster, act, cluster)
 	}
 	return nil
 }
 
 // waitSlave waits until the slave of an HA side shows a write made on the
-// master now, so a pass starts on a pair that holds one database and no
-// apply of the reset runs beside it. The slave's applier is resumed first:
-// a case that stops it (ha.apply_insert) and is cut short leaves it stopped,
-// and every pass after would wait here to its bound.
+// master now, so a pass starts on a pair that holds one database and the
+// apply of the reset is over. The slave's applier is resumed first: a case
+// that stops it (ha.apply_insert) and is cut short leaves it stopped, and
+// every pass after would wait here to its bound. WaitForReplication drops
+// its marker table as it returns, and the slave applies that DROP after: a
+// statement of milliseconds, which can land in the window of a case that
+// stops the applier before it.
 func (r *Runner) waitSlave(ctx context.Context, s *Side, bound time.Duration) error {
 	if s.pair == nil {
 		return fmt.Errorf("%s: %s was not described as an HA pair", s.Role, s.Name)
 	}
-	if _, err := r.exec(ctx, s.N2, `pkill -CONT -f '^cub_admin applylogdb'; true`, time.Minute); err != nil {
+	res, err := r.exec(ctx, s.N2, `pkill -CONT -f '^cub_admin applylogdb' || echo no-applylogdb`, time.Minute)
+	if err != nil {
 		return fmt.Errorf("%s: resuming the slave's applier: %w", s.Role, err)
 	}
-	if _, err := s.pair.WaitForReplication(ctx, bound); err != nil {
+	if strings.Contains(res.Stdout, "no-applylogdb") {
+		r.logf("%s: no applylogdb on %s-n2 to resume; the wait for the slave can run to its bound", s.Role, s.Name)
+	}
+	lag, err := s.pair.WaitForReplication(ctx, bound)
+	if err != nil {
 		return fmt.Errorf("%s: waiting for the slave: %w", s.Role, err)
+	}
+	if lag > 5*time.Second {
+		r.logf("%s: the slave of %s took %s to show the marker", s.Role, s.Name, lag.Round(time.Millisecond))
 	}
 	return nil
 }

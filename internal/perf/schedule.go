@@ -121,6 +121,9 @@ func caseBound(c *Case) time.Duration {
 	if c.Background == "defer" {
 		per += deferCheckpointAllowance
 	}
+	if c.Topology == TopologyHA {
+		per += haPassAllowance
+	}
 	return time.Duration(passes)*per + fixtureSwitchBound
 }
 
@@ -129,10 +132,17 @@ func caseBound(c *Case) time.Duration {
 // a minute covers 60,000 dirty pages.
 const deferCheckpointAllowance = time.Minute
 
+// haPassAllowance is what an HA pass adds: the wait for the slave after the
+// reset, and the role checks; on the hub they took about a second together.
+const haPassAllowance = 30 * time.Second
+
 func remeasureBound(c *Case) time.Duration {
 	per := time.Duration(c.BudgetS+c.WarmS)*time.Second + 60*time.Second
 	if c.Background == "defer" {
 		per += deferCheckpointAllowance
+	}
+	if c.Topology == TopologyHA {
+		per += haPassAllowance
 	}
 	return time.Duration(remeasurePairs*2) * per
 }

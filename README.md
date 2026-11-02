@@ -128,14 +128,18 @@ Task names are matched case-insensitively. A name that is not a task prints help
 task only — the tasks after it still run. `CTP_HOME` comes from the environment if it is set,
 otherwise from the parent of the binary.
 
-Four names are not tasks. `testkit sizing [suite] [mode]` prints what this machine would run at
+Six names are not tasks. `testkit sizing [suite] [mode]` prints what this machine would run at
 once and the runs it read to decide, and runs nothing ([below](#using-it));
 `testkit check-cases <scenario> [<init_path>]` reads a corpus and reports the cases that **cannot
 fail** — a misspelt `write_nok`, a comparison of a file against itself, a case with no route to a
 failure at all — and exits 1 when it finds one, so it can gate a branch of the cases; and
 `isolation-ctl` and `isolation-ctl-install` are the isolation controller and its installer, which a
 run invokes for itself and which are documented in
-[ADR-019](docs/project/adr/ADR-019-isolation-controller.md).
+[ADR-019](docs/project/adr/ADR-019-isolation-controller.md). `testkit perf` and `testkit ha-apply`
+drive cluster-sandbox clusters and run no corpus, so they go before containment: `perf` is the
+weekly performance-regression runner ([E11](docs/category/extensions/E11-perf-runner/requirements.md),
+`testkit perf` for its usage), and `ha-apply` checks a parallel HA applier
+([below](#ha-apply--a-parallel-ha-applier-across-a-pair)).
 
 `check-cases` needs no engine, no database and no containment — it reads text. Against the shell
 corpus it finds **seven misspelt verdict calls and three self-comparisons** in 3,475 cases, and
@@ -162,7 +166,7 @@ how many there were.
 
 ### `run-shell` — one case, looped
 
-The other CLI tree — one case, looped until it fails, which is what you reach for after the suite
+Another CLI tree — one case, looped until it fails, which is what you reach for after the suite
 has told you a case is unreliable:
 
 ```bash
@@ -192,6 +196,38 @@ One file is this runner's own, and it is absent unless it has something to say: 
 cases that did not run as the corpus has them. The patches themselves are in
 [cubrid-testkit-patches](https://github.com/cubrid-systems/cubrid-testkit-patches), which is
 private, and its README says what each one is for.
+
+### `ha-apply` — a parallel HA applier, across a pair
+
+A slave with `ha_apply_worker_count` above one applies transactions on several workers and keeps
+only the order between those that conflict (CBRD-27459, CUBRID/cubrid #8052). `testkit ha-apply`
+asks whether it still does: it stands an HA pair up through cluster-sandbox or uses one, drives
+transactions at the master from the pair's client node, compares the nodes, and writes a ledger.
+
+```bash
+export CSB_HOME=<csb's state root>  TESTKIT_CSB=<path to csb>
+testkit ha-apply list
+testkit ha-apply pairs   --build <an engine install> [pattern...]
+testkit ha-apply stress  --cluster <a pair with a client node c1> --ops 0,1,2,3,4,9
+testkit ha-apply restart --cluster <a pair with a client node c1> --kill node
+testkit ha-apply -h
+```
+
+| verb | what it asks | verdict |
+|---|---|---|
+| `pairs` | For each pattern of keys a writeset could hash apart, is a transaction ever applied before the one it depends on? | a row a pattern: missed, held or inconclusive |
+| `stress` | Do the nodes end the same after N clients on one small key space? | damaged, stalled, diverged, hung or same |
+| `restart` | With the slave's applier killed (`--kill applier`, the default) or its node crashed (`--kill node`) again and again under load, is a commit applied twice? | missed, held or inconclusive |
+| `list` | The patterns, and what each pattern's two transactions share. | — |
+
+`--build DIR` stands a pair up from an install, with `--workers` (default 4), and removes it at the
+end unless `--keep` is given; `--cluster NAME` uses a csb pair that has a client node `c1`. The exit
+code says whether the run finished, not what it found: the verdicts are in the ledger (`--ledger`,
+default `ha-apply-<verb>-<time>.tsv`), and `stress` and `restart` keep the clients' scripts and
+logs beside it. What each verdict means is in
+[E12's requirements](docs/category/extensions/E12-ha-apply/requirements.md), why it is built this
+way in [ADR-EXT-012](docs/project/adr/ADR-EXT-012-ha-apply.md), and the runs that accepted each verb
+against #8052's heads in [`evidence/ha/`](docs/project/evidence/ha/README.md).
 
 ## The categories
 
@@ -345,7 +381,8 @@ internal/                cli · conf · registry · dispatch · runshell · exec
                          patch (per-case patches) · sizing (how many slots, from what this
                          machine measured) · coredump (a dead server's stack, and the crash
                          report it wrote itself) · ctl (the isolation controller) ·
-                         status (the progress page)
+                         status (the progress page) · perf (`testkit perf`) ·
+                         haapply (`testkit ha-apply`)
 overrides/               what this run does differently from the corpus as it stands
   patches/               fixes carried for the corpus until upstream takes them
   machine-exclusions/    cases this machine cannot run, each with the reason and what ends it
@@ -385,6 +422,7 @@ docs/
 | how to run sql and medium | [`category/sql/`](docs/category/sql/README.md) |
 | how to run isolation | [`category/isolation/`](docs/category/isolation/README.md) |
 | how to test HA replication across a pair | [`category/ha-repl/`](docs/category/ha-repl/README.md) |
+| how to check a parallel HA applier | [`ha-apply`](#ha-apply--a-parallel-ha-applier-across-a-pair) · [`category/extensions/E12-ha-apply/`](docs/category/extensions/E12-ha-apply/requirements.md) |
 | what this system is for | [`project/concept/north-star.md`](docs/project/concept/north-star.md) |
 | what may never change | [`project/concept/external-surface-freeze.md`](docs/project/concept/external-surface-freeze.md) |
 | what was left out, and why | [`project/concept/migration-exclusions.md`](docs/project/concept/migration-exclusions.md) |

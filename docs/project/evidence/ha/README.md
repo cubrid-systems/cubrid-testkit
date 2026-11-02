@@ -14,6 +14,14 @@ is next, and the traps that cost a day each.
 
 ## Findings from this directory
 
+- [ha-apply-and-lock-escalation](ha-apply-and-lock-escalation.md) — **2026-11-02.**
+  `testkit ha-apply stress --set lock_escalation=5`, for #8052 `502685e64`: on `cf8955a91` the slave
+  stopped (on a pair made by hand with the same setting, `lockdb` showed its coordinator holding the
+  marker table in X and a worker waiting for it); on `502685e64` itself and on `787defb50` the pair
+  ended the same.
+- [ha-apply-on-787defb50](ha-apply-on-787defb50.md) — **2026-11-02.** #8052's head moved to
+  `787defb50`: the whole catalog held, `restart` held with the applier killed and with the node
+  crashed, and `stress` was same, as on `b984637bb`.
 - [ha-apply-restart-and-a-crashed-slave](ha-apply-restart-and-a-crashed-slave.md) — **2026-11-02.**
   `testkit ha-apply restart --kill node`: the same workload while the whole slave node is crashed
   (`csb node kill`, no flush) and started again, so the restarted applier finds what the server's

@@ -30,7 +30,8 @@ writeset did not, which #8052 then fixed.
 - It is a runner: it stands HA pairs up through cluster-sandbox, drives transactions at them from a
   client node, waits, compares, and writes a ledger.
 - It consumes `internal/sandbox` the way `ha_repl` and `perf` do (ADR-022), with one more create
-  option (`--set-hidden`, for `ha_apply_worker_count`).
+  option (`--set-hidden`, for `ha_apply_worker_count`); a pair it stands up takes any other
+  parameter through csb's `--set` (`--set key=value`, `lock_escalation` for one).
 - It is a new entry point, `testkit ha-apply`, beside the frozen task names; nothing about `ha_repl`
   changes. It goes before containment, as `perf` does.
 
@@ -116,6 +117,9 @@ Its clients' scripts and logs are kept as `stress` keeps them.
 - **M3** (`restart`): a run is **missed** on #8052 `19e83a5d9`, the parent of `72650ce0d`, which
   added the applied-tx marker, and **held** on `b984637bb`; a run with `--kill node` gives the same two
   verdicts.
+- **Lock escalation** (for #8052 `502685e64`): `stress` on a pair stood up with
+  `--set lock_escalation=5` is **stalled** on `cf8955a91` and **same** on `502685e64` and on
+  `787defb50`.
 
 ## 6. Not in scope
 

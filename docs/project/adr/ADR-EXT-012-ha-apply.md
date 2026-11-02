@@ -12,6 +12,9 @@
   구현됐고 §4 의 완료 조건을 충족했다 (2026-11-01,
   `docs/project/evidence/ha/ha-apply-restart-and-the-applied-tx-marker.md`). 슬레이브 노드를 crash 시키는
   `--kill node` 도 충족했다 (2026-11-02, `docs/project/evidence/ha/ha-apply-restart-and-a-crashed-slave.md`).
+  `502685e64` 의 교착도 `--set lock_escalation=5` 로 충족했다 (2026-11-02,
+  `docs/project/evidence/ha/ha-apply-and-lock-escalation.md`). 새 head `787defb50` 에서도 모든 동사가
+  `b984637bb` 와 같았다 (2026-11-02, `docs/project/evidence/ha/ha-apply-on-787defb50.md`).
   셸 프로토타입은 `docs/project/evidence/ha/parallel-apply-*.sh` 에 남는다
 - **Date:** 2026-10-30
 - **Trigger:** CBRD-27459 (writeset 과 applylogdb 병렬화 설계), 구현 CBRD-27508 / CUBRID/cubrid #8052 —
@@ -191,7 +194,12 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
 ### 3-5. 클러스터
 
 - 기본은 명령이 쌍을 직접 세운다: `--preset ha --clients 1 --set-hidden ha_apply_worker_count=<N>`,
-  필요하면 `ha_writeset_history_size`. 끝나면 지운다(`--keep` 이면 남긴다).
+  필요하면 `ha_writeset_history_size`. 끝나면 지운다(`--keep` 이면 남긴다). 그 밖의 파라미터는
+  `--set key=value` 로 받아 csb 의 `--set` 에 그대로 넘긴다. csb 가 이름으로 파일을 고른다(`ha_*` 는
+  `cubrid_ha.conf`, 나머지는 `cubrid.conf`). 원장의 첫 줄에는 그 키를 슬레이브의 설정에서 다시 읽은
+  값으로 적는다. `502685e64` 가 고친 교착은 기본값(100000)의 `lock_escalation` 과
+  이 도구의 부하에서는 보이지 않으므로 필요해졌다. `restart` 에서 슬레이브가 한 번에 가진 marker 는
+  많아야 2,081 개였다. `--cluster` 와 함께는 받지 않는다. 있는 쌍의 설정은 이 명령이 바꾸지 않는다.
 - `--cluster <name>` 이면 있는 쌍을 쓴다. 그 쌍의 worker 수는 원장에 적는다.
 - 트랜잭션은 클라이언트 노드에서 마스터와 슬레이브로 보낸다. 노드 안에서 보내면 그 노드의 부하가
   측정에 섞인다. 한 라운드의 T1 커밋, T2 커밋, 슬레이브 조회는 클라이언트에서 한 스크립트로
@@ -209,8 +217,8 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   않은 횟수, 마스터가 거부한 횟수, 끝의 비교(`same`, `differ:<표>`, `stalled`), `fail_counter` 변화,
   writeset 카운터(write·ref 충돌, fallback, history clear), 판정.
 - 첫 줄에 클러스터, 빌드 식별자, 슬레이브의 `cubrid_ha.conf` 에서 다시 읽은
-  `ha_apply_worker_count` 와 `ha_writeset_history_size`, 두 노드에 물은 `ignore_trailing_space`, 라운드
-  수, ballast 행 수를 적는다.
+  `ha_apply_worker_count` 와 `ha_writeset_history_size`, `--set` 으로 준 키(슬레이브의 설정에서 다시
+  읽은 값), 두 노드에 물은 `ignore_trailing_space`, 라운드 수, ballast 행 수를 적는다.
 - 행은 패턴이 끝날 때마다 쓴다. 대조군이 먼저 돌므로 이미 쓴 판정은 바뀌지 않는다.
 - 표준 출력에는 패턴마다 한 줄과 요약 한 줄을 쓴다.
 - `stress` 의 원장은 실행 하나에 한 행이다: seed, 마스터 오류 수, writeset 카운터, `fail_counter`
@@ -253,6 +261,8 @@ VARCHAR 에 `'Key<r>'` 와 그 뒤에 NUL 을 붙인 값을 UNIQUE 와 FK 로 �
   `cf8955a91` 을 담은 `b984637bb` 가 held 이다. **M3** — `restart`. 완료 조건은 applied-tx marker 를
   들여온 `72650ce0d` 의 부모 `19e83a5d9` 에서 missed, `b984637bb` 에서 held 다. `--kill node` 도 두
   head 에서 같은 판정이다.
+- `502685e64` 의 교착(§3-5): `--set lock_escalation=5` 로 세운 쌍에서 `stress` 가 그 부모
+  `cf8955a91` 에서 stalled, `502685e64` 와 `787defb50` 에서 same 이다.
 
 ## 5. 기각한 대안
 

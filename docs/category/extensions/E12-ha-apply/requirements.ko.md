@@ -28,7 +28,8 @@ head 에서 인덱스는 같다고 보는데 writeset 은 다르게 본 키 여�
 - 러너가 하는 일이다. cluster-sandbox 로 HA 쌍을 세우고, 클라이언트 노드에서 트랜잭션을 보내고,
   기다리고, 비교하고, 원장을 쓴다.
 - `ha_repl` 과 `perf` 처럼 `internal/sandbox` 를 쓴다(ADR-022). 생성 옵션이 하나 늘 뿐이다
-  (`ha_apply_worker_count` 를 위한 `--set-hidden`).
+  (`ha_apply_worker_count` 를 위한 `--set-hidden`). 명령이 세우는 쌍은 그 밖의 파라미터를 csb 의
+  `--set` 으로 받는다(`--set key=value`, 예를 들어 `lock_escalation`).
 - 동결된 task 이름 옆의 새 진입점 `testkit ha-apply` 다. `ha_repl` 은 바뀌지 않는다. `perf` 처럼
   격리 앞에서 라우팅된다.
 
@@ -108,6 +109,8 @@ missed 다. 늘지 않았으면 그 실행은 -670 이 없었다고 말할 수 �
   둘이 `fb1636c34` 에서 **missed**, `b984637bb` 에서 **held** 다.
 - **M3** (`restart`): applied-tx marker 를 들여온 #8052 `72650ce0d` 의 부모 `19e83a5d9` 에서 실행이
   **missed**, `b984637bb` 에서 **held** 다. `--kill node` 도 그렇다.
+- **lock escalation** (#8052 `502685e64` 에 대해): `--set lock_escalation=5` 로 세운 쌍에서 `stress` 가
+  `cf8955a91` 에서 **stalled**, `502685e64` 와 `787defb50` 에서 **same** 이다.
 
 ## 6. 범위 밖
 

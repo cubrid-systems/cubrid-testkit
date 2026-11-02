@@ -215,8 +215,8 @@ testkit ha-apply -h
 | `restart` | 부하 중에 슬레이브의 applier 를 거듭 죽이거나(`--kill applier`, 기본값) 노드를 거듭 crash 시켜도(`--kill node`) 커밋이 두 번 적용되지 않는가 | missed, held, inconclusive |
 | `list` | 패턴 목록과 각 패턴이 공유하는 키 | — |
 
-`--build DIR` 은 설치 디렉터리로 페어를 세우고(`--workers`, 기본 4), `--keep` 이 없으면 끝에서
-지운다. `--cluster NAME` 은 클라이언트 노드 `c1` 이 있는 csb 페어를 쓴다. 종료 코드는 실행이
+`--build DIR` 은 설치 디렉터리로 페어를 세우고(`--workers`, 기본 4, 그리고 `--set key=value` 가
+말하는 다른 파라미터), `--keep` 이 없으면 끝에서 지운다. `--cluster NAME` 은 클라이언트 노드 `c1` 이 있는 csb 페어를 쓴다. 종료 코드는 실행이
 끝났는지만 말하고, 무엇을 찾았는지는 말하지 않는다. 판정은 원장에 있다(`--ledger`, 기본값
 `ha-apply-<verb>-<time>.tsv`). `stress` 와 `restart` 는 클라이언트의 스크립트와 로그를 원장 옆에
 남긴다. 판정마다의 뜻은 [E12 요구사항](docs/category/extensions/E12-ha-apply/requirements.ko.md) 에,

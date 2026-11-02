@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"github.com/cubrid-systems/cubrid-testkit/internal/sandbox"
 )
@@ -33,6 +34,9 @@ options of all three:
   --cluster NAME   use this csb pair instead; it needs a client node c1
   --workers N      ha_apply_worker_count of a pair it stands up (default 4)
   --history N      ha_writeset_history_size of a pair it stands up (default: the engine's)
+  --set K=V        another parameter of a pair it stands up, routed by name as csb's
+                   --set routes it: ha_* to cubrid_ha.conf, any other to cubrid.conf;
+                   the ledger's first line gives it as the slave's conf has it (repeatable)
   --ledger FILE    where the ledger goes (default ha-apply-<verb>-<time>.tsv); stress and
                    restart keep the clients' files (stress: and any differing reads) in FILE
                    minus .tsv, plus .d
@@ -115,6 +119,47 @@ type pairOpts struct {
 	build, cluster, ledger string
 	workers, history       int
 	keep                   bool
+	// sets are key=value parameters of a pair it stands up, passed to csb's
+	// --set, which routes each by its name.
+	sets setFlags
+}
+
+// setFlags collects --set, which may be given more than once.
+type setFlags []string
+
+func (s *setFlags) String() string { return strings.Join(*s, ",") }
+
+var paramName = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+// Set takes key=value. The key is lowercased, as the engine reads it; the
+// value is one word, since the ledger's first line splits on spaces and a line
+// break would put a key --set never named into the conf.
+func (s *setFlags) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+	k = strings.ToLower(k)
+	switch {
+	case !ok || !paramName.MatchString(k):
+		return fmt.Errorf("%q is not key=value with a parameter's name for the key", v)
+	case val == "" || strings.ContainsFunc(val, unicode.IsSpace):
+		return fmt.Errorf("%q: the value is empty or holds a space or a line break", v)
+	case k == "ha_apply_worker_count" || k == "ha_writeset_history_size":
+		return fmt.Errorf("%s is --workers or --history, which would write it over --set", k)
+	}
+	*s = append(*s, k+"="+val)
+	return nil
+}
+
+// keys are the parameters --set names, in order and once each.
+func (s setFlags) keys() []string {
+	var ks []string
+	seen := map[string]bool{}
+	for _, v := range s {
+		if k, _, _ := strings.Cut(v, "="); !seen[k] {
+			seen[k] = true
+			ks = append(ks, k)
+		}
+	}
+	return ks
 }
 
 func pairFlags(fs *flag.FlagSet, o *pairOpts) {
@@ -124,6 +169,7 @@ func pairFlags(fs *flag.FlagSet, o *pairOpts) {
 	fs.IntVar(&o.workers, "workers", 4, "")
 	fs.IntVar(&o.history, "history", 0, "")
 	fs.BoolVar(&o.keep, "keep", false, "")
+	fs.Var(&o.sets, "set", "")
 }
 
 func (o *pairOpts) check(fs *flag.FlagSet, verb string) error {
@@ -132,8 +178,8 @@ func (o *pairOpts) check(fs *flag.FlagSet, verb string) error {
 		return fmt.Errorf("give one of --build and --cluster")
 	case o.workers < 1 || o.history < 0:
 		return fmt.Errorf("--workers must be at least 1 and --history not negative")
-	case o.cluster != "" && (o.keep || isSet(fs, "history") || isSet(fs, "workers")):
-		return fmt.Errorf("--workers, --history and --keep are for a pair this run stands up, not --cluster")
+	case o.cluster != "" && (o.keep || isSet(fs, "history") || isSet(fs, "workers") || len(o.sets) > 0):
+		return fmt.Errorf("--workers, --history, --set and --keep are for a pair this run stands up, not --cluster")
 	}
 	if o.ledger == "" {
 		o.ledger = "ha-apply-" + verb + "-" + time.Now().Format("20060102-150405") + ".tsv"
@@ -220,6 +266,7 @@ type session struct {
 	cli    *sandbox.CLI
 	pair   *sandbox.Pair
 	client *sandbox.Node
+	sets   []string // the keys --set gave the pair
 }
 
 // openPair stands the pair up, or takes the one --cluster names, and checks
@@ -237,7 +284,7 @@ func openPair(ctx context.Context, stop func(), o pairOpts, verb string, stderr 
 		if o.history > 0 {
 			hidden = append(hidden, fmt.Sprintf("ha_writeset_history_size=%d", o.history))
 		}
-		fmt.Fprintf(stderr, "ha-apply: standing up %s from %s (%s)\n", cli.Cluster, o.build, strings.Join(hidden, " "))
+		fmt.Fprintf(stderr, "ha-apply: standing up %s from %s (%s)\n", cli.Cluster, o.build, strings.Join(append(hidden, o.sets...), " "))
 		if !o.keep {
 			teardown = func() {
 				// A second interrupt should reach a teardown that hangs, so the
@@ -250,7 +297,7 @@ func openPair(ctx context.Context, stop func(), o pairOpts, verb string, stderr 
 			}
 		}
 		if err := cli.CreateWith(ctx, sandbox.CreateOptions{
-			Preset: "ha", Build: o.build, Clients: 1, SetHidden: hidden,
+			Preset: "ha", Build: o.build, Clients: 1, SetHidden: hidden, Set: o.sets,
 			Labels: map[string]string{"testkit.ha-apply": verb}, Timeout: 15 * time.Minute,
 		}); err != nil {
 			return nil, teardown, fmt.Errorf("cluster create: %w", err)
@@ -267,17 +314,22 @@ func openPair(ctx context.Context, stop func(), o pairOpts, verb string, stderr 
 		return nil, teardown, fmt.Errorf("%s has no csql on a client node c1 (exit %d); csb cluster create --clients 1 makes one",
 			cli.Cluster, res.ExitCode)
 	}
-	return &session{cli: cli, pair: pair, client: client}, teardown, nil
+	return &session{cli: cli, pair: pair, client: client, sets: o.sets.keys()}, teardown, nil
 }
 
 // meta is the run's identity, which a ledger's first line carries: the pair,
-// its build, and the applier's settings as the slave's conf has them.
+// its build, and the applier's settings and every --set key as the slave's
+// conf has them.
 func (s *session) meta(ctx context.Context) []string {
-	return []string{
+	m := []string{
 		"cluster=" + s.cli.Cluster, "build=" + buildID(ctx, s.pair),
 		"ha_apply_worker_count=" + configured(ctx, s.pair, "ha_apply_worker_count"),
 		"ha_writeset_history_size=" + configured(ctx, s.pair, "ha_writeset_history_size"),
 	}
+	for _, k := range s.sets {
+		m = append(m, k+"="+configured(ctx, s.pair, k))
+	}
+	return m
 }
 
 func pairs(args []string, stdout, stderr io.Writer) int {
@@ -739,16 +791,21 @@ func stallFor(rows int) time.Duration {
 	return time.Duration((rows+19999)/20000) * 2 * time.Minute
 }
 
-// configured is a key of the slave's cubrid_ha.conf as written there,
-// "unset" when the file does not set it (the engine's default: one worker,
-// and its own history size), or "unknown" when the file cannot be read.
+// configured is a key as the slave's conf has it: an ha_* key in
+// cubrid_ha.conf, any other in cubrid.conf, where csb routes each. It is
+// "unset" when the file does not set it (the engine's default), or "unknown"
+// when the file cannot be read.
 func configured(ctx context.Context, p *sandbox.Pair, key string) string {
 	ch, err := p.SlaveChannel(0)
 	if err != nil {
 		return "unknown"
 	}
-	res, err := ch.Run(ctx, fmt.Sprintf(`f="$CUBRID/conf/cubrid_ha.conf"; [ -r "$f" ] || { echo unreadable; exit 0; }
-grep -E '^[[:space:]]*%s[[:space:]]*=' "$f" | tail -1`, key))
+	file := "cubrid.conf"
+	if strings.HasPrefix(key, "ha_") {
+		file = "cubrid_ha.conf"
+	}
+	res, err := ch.Run(ctx, fmt.Sprintf(`f="$CUBRID/conf/%s"; [ -r "$f" ] || { echo unreadable; exit 0; }
+grep -E '^[[:space:]]*%s[[:space:]]*=' "$f" | tail -1`, file, key))
 	if err != nil || strings.TrimSpace(res.Stdout) == "unreadable" {
 		return "unknown"
 	}

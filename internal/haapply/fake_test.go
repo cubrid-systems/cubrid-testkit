@@ -21,7 +21,8 @@ import (
 // directory the variable names first on PATH. Every node is this host. An exec
 // whose script holds $FAKE_EXEC_FAIL fails as csb does; `node kill` and `node
 // start` run $FAKE_NODE_KILL and $FAKE_NODE_START with sh, the node as $1, and
-// fail as csb does when that script does.
+// fail as csb does when that script does. Under $FAKE_ARGS every call's
+// arguments go to that file, a line each.
 const fakeCSBEnv = "HAAPPLY_FAKE_CSB"
 
 func TestMain(m *testing.M) {
@@ -32,6 +33,12 @@ func TestMain(m *testing.M) {
 }
 
 func fakeCSB(args []string, dir string) int {
+	if f := os.Getenv("FAKE_ARGS"); f != "" {
+		if l, err := os.OpenFile(f, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+			fmt.Fprintln(l, strings.Join(args, " "))
+			l.Close()
+		}
+	}
 	reply := func(ok bool, data any) {
 		b, _ := json.Marshal(map[string]any{"schema": sandbox.Schema, "ok": ok, "data": data})
 		fmt.Println(string(b))

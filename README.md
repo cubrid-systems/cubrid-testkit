@@ -220,8 +220,9 @@ testkit ha-apply -h
 | `restart` | With the slave's applier killed (`--kill applier`, the default) or its node crashed (`--kill node`) again and again under load, is a commit applied twice? | missed, held or inconclusive |
 | `list` | The patterns, and what each pattern's two transactions share. | — |
 
-`--build DIR` stands a pair up from an install, with `--workers` (default 4), and removes it at the
-end unless `--keep` is given; `--cluster NAME` uses a csb pair that has a client node `c1`. The exit
+`--build DIR` stands a pair up from an install, with `--workers` (default 4) and any other parameter
+`--set key=value` names, and removes it at the end unless `--keep` is given; `--cluster NAME` uses a
+csb pair that has a client node `c1`. The exit
 code says whether the run finished, not what it found: the verdicts are in the ledger (`--ledger`,
 default `ha-apply-<verb>-<time>.tsv`), and `stress` and `restart` keep the clients' scripts and
 logs beside it. What each verdict means is in

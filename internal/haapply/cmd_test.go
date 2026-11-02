@@ -2,6 +2,7 @@ package haapply
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -35,6 +36,15 @@ func TestPairsRefusesWhatItCannotRunBeforeTouchingAPair(t *testing.T) {
 		"zero rounds":        {"pairs", "--cluster", "x", "--rounds", "0"},
 		"too many rounds":    {"pairs", "--cluster", "x", "--rounds", "1000"},
 		"negative history":   {"pairs", "--build", "/b", "--history", "-5"},
+		"set on cluster":     {"pairs", "--cluster", "x", "--set", "lock_escalation=5"},
+		"set without value":  {"pairs", "--build", "/b", "--set", "lock_escalation"},
+		"set without key":    {"pairs", "--build", "/b", "--set", "=5"},
+		"set with a quote":   {"pairs", "--build", "/b", "--set", "a'b=5"},
+		"set with no value":  {"pairs", "--build", "/b", "--set", "lock_escalation="},
+		"set with a space":   {"pairs", "--build", "/b", "--set", "lock_escalation=5 6"},
+		"set with a newline": {"pairs", "--build", "/b", "--set", "lock_escalation=5\nha_mode=off"},
+		"set over workers":   {"pairs", "--build", "/b", "--set", "ha_apply_worker_count=8"},
+		"set over history":   {"pairs", "--build", "/b", "--set", "HA_WRITESET_HISTORY_SIZE=8"},
 	}
 	for name, args := range cases {
 		var errOut bytes.Buffer
@@ -213,5 +223,40 @@ func TestATrailingSpacePatternIsRefusedOnAPairThatKeepsTheSpaces(t *testing.T) {
 func TestPairsHelpIsNotAnError(t *testing.T) {
 	if code := Main([]string{"pairs", "-h"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Errorf("pairs -h exited %d, want 0", code)
+	}
+}
+
+// A pair stood up with --set gets each parameter through csb's --set, and the
+// ledger's first line gives it as the slave's conf has it.
+func TestASetParameterReachesThePairAndItsLedger(t *testing.T) {
+	fakeEnv(t, "0")
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("FAKE_ARGS", calls)
+	home := t.TempDir()
+	t.Setenv("CUBRID", home)
+	if err := os.MkdirAll(filepath.Join(home, "conf"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	setState(t, home, "conf/cubrid.conf", "[common]\nlock_escalation=5\n")
+	setState(t, home, "conf/cubrid_ha.conf", "[common]\nha_apply_max_mem_size=600\n")
+	var sets setFlags
+	for _, v := range []string{"lock_escalation=5", "LOCK_ESCALATION=5", "ha_apply_max_mem_size=600", "lock_timeout=3"} {
+		if err := sets.Set(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, teardown, err := openPair(context.Background(), func() {}, pairOpts{build: "/b", workers: 4, keep: true, sets: sets}, "stress", &bytes.Buffer{})
+	defer teardown()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(calls)
+	if !strings.Contains(string(b), "cluster create") || !strings.Contains(string(b), "--set lock_escalation=5") {
+		t.Errorf("csb was not asked for the parameter:\n%s", b)
+	}
+	meta := strings.Join(s.meta(context.Background()), " ")
+	if strings.Count(meta, "lock_escalation=") != 1 || !strings.Contains(meta, "lock_escalation=5") ||
+		!strings.Contains(meta, "ha_apply_max_mem_size=600") || !strings.Contains(meta, "lock_timeout=unset") {
+		t.Errorf("the ledger's first line should give each key once, from the file csb writes it to: %s", meta)
 	}
 }

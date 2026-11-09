@@ -170,6 +170,7 @@ func TestConfRefusalsNameTheKey(t *testing.T) {
 		{"cases that are empty", []string{"cases.develop ="}, "cases.develop is empty"},
 		{"cases with a broken glob", []string{"cases.develop = txn.[, lib.*"}, `cases.develop has "txn.[", which is not a case-id glob`},
 		{"cases with an empty glob", []string{"cases.develop = txn.*,"}, `cases.develop has "", which is not a case-id glob`},
+		{"series in other words", []string{"series = yes"}, `series must be on or off, got "yes"`},
 	}
 	suite := copySuite(t)
 	for _, c := range cases {
@@ -182,5 +183,22 @@ func TestConfRefusalsNameTheKey(t *testing.T) {
 				t.Errorf("%s: %q does not say %q", c.name, err, c.want)
 			}
 		})
+	}
+}
+
+// series = on samples every pass of both sides; off, or no key, samples none.
+func TestConfSeries(t *testing.T) {
+	suite := copySuite(t)
+	for _, c := range []struct {
+		edit string
+		want bool
+	}{{"series = on", true}, {"series = off", false}, {"series", false}} {
+		conf, err := ReadConf(writeConf(t, suite, c.edit))
+		if err != nil {
+			t.Fatalf("%s: %v", c.edit, err)
+		}
+		if conf.Series != c.want {
+			t.Errorf("%s: Series = %v", c.edit, conf.Series)
+		}
 	}
 }

@@ -237,6 +237,9 @@ func (s *Session) run(confPath string, deadline time.Time) int {
 		active, s.left = Active(all, c.BranchesMax, s.Started)
 	}
 	s.CPUSet, s.ClientCPUSet, s.ClientImage, s.CSBBin = c.CPUSetServer, c.CPUSetClient, c.ClientImage, c.CSB
+	if c.Series {
+		s.Series = "both"
+	}
 	// csb, sandbox.Home() and the work directories all go by $CSB_HOME; the
 	// conf's value is the one that counts.
 	if c.CSBHome != "" {

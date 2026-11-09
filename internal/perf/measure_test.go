@@ -265,3 +265,21 @@ func abs(x float64) float64 {
 	}
 	return x
 }
+
+// The series keeps its default statdump and then the case's own statdump
+// counters, once each; /proc counters are not statdump's.
+func TestSeriesNames(t *testing.T) {
+	c := &Case{Counters: []string{"server.cpu_user", "Num_log_append_records", "Num_btree_inserts", "Num_btree_inserts"}}
+	got := seriesNames(c)
+	want := strings.Join(append(append([]string{}, seriesDefault...), "Num_btree_inserts"), ",")
+	if got != want {
+		t.Errorf("seriesNames = %q, want %q", got, want)
+	}
+	r := &Runner{Series: "target"}
+	if !r.seriesOn(&Side{Role: "target"}) || r.seriesOn(&Side{Role: "reference"}) {
+		t.Error("--series target samples the target alone")
+	}
+	if (&Runner{}).seriesOn(&Side{Role: "target"}) {
+		t.Error("no --series samples nothing")
+	}
+}

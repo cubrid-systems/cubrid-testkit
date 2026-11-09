@@ -32,6 +32,9 @@ type Runner struct {
 	CSBBin               string
 	Repeats              int // 0 means the case's
 	Keep                 bool
+	// Series samples each measured pass once a second (measure.go): "" off,
+	// "both", or "target" alone.
+	Series string
 
 	// PauseIdle pauses the other side's containers during a pass (session).
 	PauseIdle bool
@@ -64,15 +67,18 @@ func (r *Runner) pinning() string {
 
 const runUsage = `usage: testkit perf run <case-id> --suite <dir> --build <target tree> --build <reference tree>
                         [--repeats N] [--out <dir>] [--cpuset <list>] [--client-cpuset <list>]
-                        [--client-image <image>] [--keep]
+                        [--client-image <image>] [--keep] [--series both|target]
 
 Runs one case on two builds, the way a session would, and prints the ratio
 on the last line of standard output. The first --build is the target, the
 second the reference. --out defaults to ./perf-run-<time>/. --cpuset pins the
 database nodes and --client-cpuset the clients (both empty: no pinning).
 --client-image is the image for the client node (default localhost/perf-client:dev);
---keep leaves the two clusters standing for a look. Needs csb on PATH or in
-$TESTKIT_CSB, and a container runtime it can use.`
+--keep leaves the two clusters standing for a look. --series samples every
+measured pass once a second (the suite's scripts/collect_series.sh) on both
+sides, or on the target alone, which measures the sampler's own cost against
+an unsampled reference. Needs csb on PATH or in $TESTKIT_CSB, and a container
+runtime it can use.`
 
 // run is the verb (Spec §7.1, FR-28).
 func runCmd(args []string, stdout, stderr io.Writer) int {
@@ -119,6 +125,13 @@ func runCmd(args []string, stdout, stderr io.Writer) int {
 			r.ClientImage = v
 		case "--keep":
 			r.Keep, ok = true, true
+		case "--series":
+			v, ok = next()
+			if ok && v != "both" && v != "target" {
+				fmt.Fprintf(stderr, "testkit perf run: --series wants both or target, got %q\n", v)
+				return ExitRefused
+			}
+			r.Series = v
 		case "-h", "--help":
 			fmt.Fprintln(stdout, runUsage)
 			return ExitOK

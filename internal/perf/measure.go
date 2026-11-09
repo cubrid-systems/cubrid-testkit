@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -254,6 +255,16 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 			return p.null("prepare: " + err.Error())
 		}
 	}
+	// The one-second series (--series): started after the opening snapshots,
+	// so its start is not in them; stopped as soon as the client ends.
+	tag := ""
+	if phase == "measure" && r.seriesOn(s) && !c.Failover {
+		tag = seriesTag(s, c, k)
+		if err := r.seriesExec(ctx, s, "start", fmt.Sprintf("start %s %s", shellJoin([]string{db}), tag)); err != nil {
+			p.Notes = append(p.Notes, "series: "+err.Error())
+			tag = ""
+		}
+	}
 	var hostPre hostSnapshot
 	if phase == "measure" && r.Guard != nil {
 		hostPre = r.Guard.snapshot()
@@ -261,6 +272,11 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	rec, rc, reason, err := r.runClient(ctx, s, c, f, phase, k)
 	if phase == "measure" && r.Guard != nil {
 		p.Host = r.Guard.delta(hostPre, r.Guard.snapshot())
+	}
+	if tag != "" {
+		if e := r.seriesExec(ctx, s, "stop", "stop "+tag); e != nil {
+			p.Notes = append(p.Notes, "series: "+e.Error())
+		}
 	}
 	if err != nil {
 		return p.null("client: " + err.Error())
@@ -284,6 +300,12 @@ func (r *Runner) pass(ctx context.Context, s *Side, c *Case, f *Fixture, phase s
 	if !c.Failover {
 		if l0post, err = r.l0Collect(ctx, s, db, out.InNode, out.Host, "l0-post.json"); err != nil {
 			p.Missing["l0"] = "post: " + err.Error()
+		}
+	}
+	// The series' files are written after the closing snapshots: outside the window.
+	if tag != "" {
+		if e := r.seriesExec(ctx, s, "save", fmt.Sprintf("save %s %s %s", tag, out.InNode, seriesNames(c))); e != nil {
+			p.Notes = append(p.Notes, "series: "+e.Error())
 		}
 	}
 	// A pair that failed over during the pass had the case time other nodes
@@ -406,6 +428,49 @@ func (r *Runner) coldStart(ctx context.Context, s *Side, db string) error {
 }
 
 // hasStatdump says whether any of the case's counters is a statdump name.
+// The series (--series, perf.conf series): scripts/collect_series.sh in the
+// database node samples the processes, the disk and statdump once a second
+// through a measured pass, into memory, and saves series.jsonl.gz and
+// statdump.jsonl.gz beside the pass's snapshots. It is not a measurement the
+// judgement reads: a failure is a note on the pass, never a null.
+
+// Runner.Series: "" off, "both" every side, "target" the target alone (the
+// sampler's own cost, measured as a target against an unsampled reference).
+func (r *Runner) seriesOn(s *Side) bool {
+	return r.Series == "both" || (r.Series == "target" && s.Role == "target")
+}
+
+// seriesTag names a pass's samples in the node: side, case and pass.
+func seriesTag(s *Side, c *Case, k int) string {
+	return fmt.Sprintf("%s-%s-%d", s.Role, c.ID, k)
+}
+
+// seriesDefault is the statdump the series keeps for every case, beside the
+// case's own counters.
+var seriesDefault = []string{"Num_data_page_fetches", "Num_data_page_ioreads", "Num_data_page_iowrites",
+	"Num_log_page_iowrites", "Num_log_append_records", "Num_tran_commits"}
+
+// seriesNames is save's names argument: the defaults, then the case's
+// statdump counters not among them, comma-separated.
+func seriesNames(c *Case) string {
+	names := append([]string{}, seriesDefault...)
+	seen := map[string]bool{}
+	for _, n := range names {
+		seen[n] = true
+	}
+	for _, n := range c.Counters {
+		if statdumpNames[n] && !seen[n] {
+			names = append(names, n)
+			seen[n] = true
+		}
+	}
+	return strings.Join(names, ",")
+}
+
+func (r *Runner) seriesExec(ctx context.Context, s *Side, what, args string) error {
+	return r.mustExec(ctx, s, "series "+what, fmt.Sprintf("bash %s/scripts/collect_series.sh %s", workPerf, args), time.Minute)
+}
+
 func hasStatdump(c *Case) bool {
 	for _, n := range c.Counters {
 		if statdumpNames[n] {

@@ -58,6 +58,8 @@ type Conf struct {
 	ReportWebhook       string
 	ReportWebhookFormat string
 	ConbenchURL         string
+	// Series: every measured pass sampled once a second (Runner.Series both).
+	Series bool
 }
 
 var (
@@ -70,7 +72,7 @@ var (
 	confRequired = []string{"suite", "builds", "builds.manifest", "canaries", "canary_tolerance", "interleave",
 		"session_budget_s", "csb", "csb_home", "client_image", "report.mode"}
 	confOptional = []string{"branches", "branches.max", "memory_cap", "disk_min_gb", "cpuset.server", "cpuset.client",
-		"report.mail", "report.webhook", "report.webhook_format", "conbench.url"}
+		"report.mail", "report.webhook", "report.webhook_format", "conbench.url", "series"}
 
 	cpusetRe    = regexp.MustCompile(`^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$`)
 	memoryCapRe = regexp.MustCompile(`^[0-9]+[kKmMgG]?$`)
@@ -188,6 +190,13 @@ func ReadConf(file string) (*Conf, error) {
 	c.ReportWebhook = cfg.GetOr("report.webhook", "")
 	c.ReportWebhookFormat = cfg.GetOr("report.webhook_format", "")
 	c.ConbenchURL = cfg.GetOr("conbench.url", "")
+	switch v := strings.TrimSpace(cfg.GetOr("series", "off")); v {
+	case "on":
+		c.Series = true
+	case "off":
+	default:
+		p.add("series must be on or off, got %q", v)
+	}
 
 	c.BranchesMax = intAtLeast(p, cfg, "branches.max", 3, 0)
 	c.SessionBudgetS = intAtLeast(p, cfg, "session_budget_s", 0, 1)

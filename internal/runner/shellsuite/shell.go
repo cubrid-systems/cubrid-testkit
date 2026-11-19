@@ -64,8 +64,26 @@ func (s *Shell) Validate(req runner.Request) error {
 		return quit("The parameter 'scenario' must be set correctly in %s !", req.ConfigPath)
 	}
 
-	if _, err := topology.From(cfg); err != nil {
+	configured, err := topology.From(cfg)
+	if err != nil {
 		return quit("%v", err)
+	}
+	// A contained run tests this machine: its slots run the cases here, in the
+	// environment the run starts with and without the profile (openChannels).
+	// A configured instance would send the host-side scripts over ssh, behind
+	// that machine's profile, so they would check, configure and snapshot one
+	// install while the slots ran another -- even when the instance is this
+	// machine under another name. And the environment has to name one install.
+	if contain.Active() {
+		if machine, _ := oneMachine(cfg, configured); !machine.IsLocal() {
+			return quit("a contained run tests this machine, and %s is a configured instance its host-side scripts "+
+				"would reach over ssh behind that machine's profile. Remove the env.* keys, or run uncontained",
+				machine.EnvID())
+		}
+		if err := contain.CheckInstallEnv(); err != nil {
+			return quit("%v. A contained run takes this environment and does not read ~/.bash_profile "+
+				"(docs/category/shell/04-configuration.md)", err)
+		}
 	}
 
 	// Updating the case corpus is an operations decision and is not done here.
@@ -759,8 +777,14 @@ func checkScenarioDisk(on bool, ramMB int, scenario, workspace string) error {
 func openChannels(inst *topology.Instance) (worker, monitor exec.Channel, err error) {
 	if inst.IsLocal() {
 		// CTP reached even the local machine through SSHConnect, so a local run
-		// gets the profile just as a remote one does.
-		return &exec.Local{SourceProfile: true}, &exec.Local{SourceProfile: true}, nil
+		// gets the profile just as a remote one does -- unless it is contained.
+		// A contained run's slots overlay the caller's $CUBRID and their channels
+		// never source the profile, so this side takes the caller's environment
+		// too. Behind a profile that exports another CUBRID it reported that
+		// install's build and configured and snapshotted that install's conf,
+		// which no overlay covers, while the slots ran the cases on the caller's.
+		profile := !contain.Active()
+		return &exec.Local{SourceProfile: profile}, &exec.Local{SourceProfile: profile}, nil
 	}
 	ssh := inst.SSH()
 	if ssh.Host == "" {

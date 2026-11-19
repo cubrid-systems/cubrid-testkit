@@ -113,6 +113,26 @@ func TestOutputIsWhatCTPReadBack(t *testing.T) {
 	}
 }
 
+// A profile that exports another CUBRID does not reach the scripts: they see
+// the install the runner was given, the one each slot overlays. Measured on
+// 2026-11-19 with a profile exporting $HOME/CUBRID: every case ran against that
+// install, in every slot, and the run reported its build.
+func TestAScriptSeesTheCallersCUBRIDNotTheProfiles(t *testing.T) {
+	home := t.TempDir()
+	profile := "export CUBRID=/the/profile/install\nexport CUBRID_DATABASES=$CUBRID/databases\n"
+	if err := os.WriteFile(filepath.Join(home, ".bash_profile"), []byte(profile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ch := exec.NewLocal(home, "HOME="+home, "CUBRID=/the/given/install", "CUBRID_DATABASES=/the/given/install/databases")
+	res, err := run(t.Context(), ch, generalScript("echo $CUBRID $CUBRID_DATABASES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output(res), "/the/given/install /the/given/install/databases"; got != want {
+		t.Errorf("the script saw %q, want %q", got, want)
+	}
+}
+
 func load(t *testing.T, body string) *conf.Config {
 	t.Helper()
 	dir := t.TempDir()

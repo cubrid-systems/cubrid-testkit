@@ -67,22 +67,36 @@ slot's overlay.
 | `TESTKIT_SLOT_VOLATILE=1` | mounts slot overlays volatile: syncs on them return at once. The layers are thrown away at the end anyway |
 | `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` | as for CTP; keep `CUBRID_DATABASES` under `$CUBRID`, where a slot's install overlay covers it |
 
-### Two ways the environment is wrong without saying so
+### The environment is the one you start the run with
 
-Measured on 2026-09-28, both costing a run each.
+**The profile does not reach the scripts.** CTP sent every script behind `. ~/.bash_profile`; this runner does not
+([`run`](../../../internal/runner/isolationsuite/script.go)). The `$CUBRID` you export is the install each slot
+overlays, and the cases run against it when the rest of the environment names it too, so export what the table above
+lists yourself. Validate refuses a run whose environment does not name one install throughout: `CUBRID` and
+`CUBRID_DATABASES` set, the `cubrid` on `PATH` from `$CUBRID/bin`, and `$CUBRID/lib` on `LD_LIBRARY_PATH` with no other
+`libcubrid` ahead of it. A shell that once sourced a profile keeps that install on both paths, and the loader reads
+`LD_LIBRARY_PATH` before an executable's own search path.
 
-**Only `CTP_HOME` survives the profile.** Every script runs behind
-`. ~/.bash_profile` ([`exec.Profile`](../../../internal/exec/exec.go)), which saves `CTP_HOME` and puts the caller's
-back afterwards — and does that for `CTP_HOME` alone. So a profile that exports `CUBRID` wins over the one you
-exported, while testkit's own side overlays the `$CUBRID` **it** was given. When the two differ the slot holds one
-install and the cases run against another, and what the run says is
+Until 2026-11-20 the scripts sourced the profile as CTP's did, and only `CTP_HOME` was put back afterwards. A profile
+that exported another `CUBRID` therefore won in every script: the cases ran against that install in every slot,
+outside the overlays, and the run reported its build. Measured on 2026-11-19 with `$HOME/CUBRID` a different build:
+the verdicts did not change with the build under test, and with four slots sharing that one install 19 of 372 cases
+failed on
 
 ```
-ERROR! attempting to restart the database:
- <ctlpath>/qablocked ctldb did not connect
+Unable to restart/initialize the database server. Database "ctldb" is unknown, or the file ...
+++ cubrid server start: fail
+ERROR! attempting to restart the database: -677,
+ Failed to connect to database server, 'ctldb', on the following host(s): localhost
 ```
 
-which reads like a database fault and is not one. Export the `CUBRID` the profile exports, or change the profile.
+which reads like a database fault and is not one. The same cases passed on one slot. The run also left a `ctldb`
+in that install's `databases.txt`. Before then, on 2026-09-28, the same cause printed
+`<ctlpath>/qablocked ctldb did not connect`.
+
+### One way the environment is wrong without saying so
+
+Measured on 2026-09-28, at the cost of a run.
 
 **An install with `ha_mode=on` cannot run isolation.** `prepare.sh` prints `The server was configured for HA.` and
 `ctldb` never comes up — the same `did not connect` line, from a different cause. This is worth knowing because a

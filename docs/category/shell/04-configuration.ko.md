@@ -70,6 +70,15 @@
 CTP 자신의 환경도 여전히 적용된다 — `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` —
 그리고 `SKIP_CHECK_RECOVERY_ERROR`, `SKIP_CHECK_FATAL_ERROR`, `CTP_ERROR_BACKUP` 도 마찬가지다.
 
+**이 머신에서 격리해 돌리는 런은 `~/.bash_profile` 을 읽지 않는다.** 슬롯은 export 한 `$CUBRID` 를 오버레이하고 프로필을
+읽은 적이 없다. 2026-11-20 부터는 빌드를 확인하고 설치본을 설정하고 스냅숏하는 쪽도 당신의 환경을 쓴다. 그 전에는 그쪽이
+프로필을 읽었다. 그래서 프로필이 다른 `CUBRID` 를 export 하면, 런은 그 설치본의 빌드를 보고하고 그 설치본의 conf 를 고쳤다.
+케이스는 당신의 설치본으로 돌았다. 이제 Validate 는 환경이 처음부터 끝까지 한 설치본을 가리키지 않는 격리 런을 거부한다.
+조건은 `CUBRID` 와 `CUBRID_DATABASES` 가 있고, `PATH` 의 `cubrid` 가 `$CUBRID/bin` 의 것이고, `LD_LIBRARY_PATH` 에서
+`$CUBRID/lib` 이 있고 그 앞에 다른 `libcubrid` 가 없는 것이다. `env.*` 인스턴스를 지정한 격리 런도 거부한다. 이 머신을 다른
+이름으로 지정한 경우도 같다. 그 호스트 쪽 스크립트는 ssh 로 그 머신의 프로필을 읽고 돌기 때문이다. 격리하지 않은 런은 CTP 처럼
+프로필을 읽는다.
+
 **`$CUBRID_DATABASES` 는 `$CUBRID` 안에 있어야 한다.** CTP 의 케이스별 리셋은 정확히
 `$CUBRID/databases` 를 치운다; 변수를 다른 곳으로 가리키면 리셋은 아무도 쓰지 않는 디렉터리를
 문지르고, 진짜 레지스트리는 케이스에서 케이스로 항목을 들고 간다.

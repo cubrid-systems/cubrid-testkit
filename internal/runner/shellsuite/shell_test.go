@@ -66,6 +66,64 @@ func TestValidate(t *testing.T) {
 			t.Fatal("testcase_update_yn=yes was accepted and would have been ignored")
 		}
 	})
+
+	// A contained run on this machine does not read the profile, so the install
+	// has to be in the environment it starts with. An uncontained one still reads
+	// the profile, as CTP's did, and is not asked.
+	t.Run("a contained local run needs the install in its environment", func(t *testing.T) {
+		req, _ := request(t, "scenario=/somewhere\n")
+		t.Setenv("CUBRID", "")
+		t.Setenv("TESTKIT_CONTAINED", "1")
+		err := NewShell().Validate(req)
+		var exit *runner.ExitError
+		if !asExit(err, &exit) || exit.Code != 255 || !strings.Contains(err.Error(), "CUBRID is not set") {
+			t.Errorf("got %v, want exit 255 saying CUBRID is not set", err)
+		}
+		t.Setenv("TESTKIT_CONTAINED", "")
+		if err := NewShell().Validate(req); err != nil {
+			t.Errorf("an uncontained run was refused: %v", err)
+		}
+	})
+
+	// The slots of a contained run are on this machine, and a configured
+	// instance -- this machine under another name included -- would take the
+	// host-side scripts over ssh, behind that machine's profile.
+	t.Run("a contained run with a configured instance is refused", func(t *testing.T) {
+		req, _ := request(t, "scenario=/somewhere\nenv.instance1.ssh.host=localhost\n")
+		t.Setenv("TESTKIT_CONTAINED", "1")
+		err := NewShell().Validate(req)
+		var exit *runner.ExitError
+		if !asExit(err, &exit) || exit.Code != 255 || !strings.Contains(err.Error(), "configured instance") {
+			t.Errorf("got %v, want exit 255 about the configured instance", err)
+		}
+	})
+}
+
+// The local channels source the profile only outside a container: inside one
+// the slots overlay the caller's $CUBRID and never source it, and the side that
+// checks the build and configures the install has to see the same install.
+func TestALocalChannelSourcesTheProfileOnlyWhenUncontained(t *testing.T) {
+	req, _ := request(t, "scenario=/somewhere\n")
+	cfg, err := req.Home.Load(req.ConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		contained string
+		want      bool
+	}{{"", true}, {"1", false}} {
+		t.Setenv("TESTKIT_CONTAINED", c.contained)
+		worker, monitor, err := openChannels(topology.Local(cfg))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ch := range []exec.Channel{worker, monitor} {
+			local, ok := ch.(*exec.Local)
+			if !ok || local.SourceProfile != c.want {
+				t.Errorf("contained=%q: channel %#v, want a local channel with SourceProfile %v", c.contained, ch, c.want)
+			}
+		}
+	}
 }
 
 func asExit(err error, target **runner.ExitError) bool {

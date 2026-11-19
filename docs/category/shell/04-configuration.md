@@ -70,6 +70,15 @@ many failures writes tens of gigabytes into the home directory, inside the measu
 CTP's own environment still applies — `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` — and so
 do `SKIP_CHECK_RECOVERY_ERROR`, `SKIP_CHECK_FATAL_ERROR` and `CTP_ERROR_BACKUP`.
 
+**A contained run on this machine does not read `~/.bash_profile`.** Its slots overlay the `$CUBRID` you export and
+never sourced the profile; since 2026-11-20 the side that checks the build, configures the install and snapshots it
+takes your environment too. Before then it sourced the profile, so a profile exporting another `CUBRID` made the run
+report that install's build and write that install's conf while the cases ran on yours. Validate now refuses a
+contained run whose environment does not name one install throughout: `CUBRID` and `CUBRID_DATABASES` set, the
+`cubrid` on `PATH` from `$CUBRID/bin`, and `$CUBRID/lib` on `LD_LIBRARY_PATH` with no other `libcubrid` ahead of it.
+It also refuses a contained run that names `env.*` instances, this machine under another name included: their
+host-side scripts would go over ssh behind that machine's profile. An uncontained run reads the profile, as CTP's did.
+
 **`$CUBRID_DATABASES` must be inside `$CUBRID`.** CTP's per-case reset cleans exactly
 `$CUBRID/databases`; pointing the variable elsewhere leaves the reset scrubbing a directory nothing
 uses while the real registry carries entries from case to case.

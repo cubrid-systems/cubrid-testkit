@@ -296,7 +296,7 @@ this measurement:
 This is **not** presented as a correction to the table above. That table was measured on a different engine, and this
 run could not use the same one: `~/.bash_profile` fixes `$CUBRID` for every script CTP sends, so the build under test
 here is `11.5.0.2513-5f3a30d` and not the isolation tree's `11.5.0.2574-f1ae86f`
-([configuration](../../category/isolation/04-configuration.md#two-ways-the-environment-is-wrong-without-saying-so)).
+([configuration](../../category/isolation/04-configuration.md#the-environment-is-the-one-you-start-the-run-with)).
 Two cases moving between builds is exactly what ADR-018 rule 3 exists to catch, and settling which it is means running
 both builds, which has not been done.
 

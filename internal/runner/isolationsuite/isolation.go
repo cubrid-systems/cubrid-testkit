@@ -74,6 +74,15 @@ func (*Isolation) Validate(req runner.Request) error {
 			"qactl and qacsql the user owns (docs/project/adr/ADR-007-isolation-executor.md). Set %s=1, "+
 			"or run the task through CTP", contain.Env)
 	}
+	// The scripts run in this environment and not behind the profile (run), and
+	// a slot's overlays sit on this $CUBRID. An environment that names another
+	// install anywhere -- no CUBRID, or another one's cubrid or libcubrid found
+	// first -- would test that install and report this one, or fail on a
+	// message about something else.
+	if err := contain.CheckInstallEnv(); err != nil {
+		return quit("%v. The scripts run in this environment and do not read ~/.bash_profile "+
+			"(docs/category/isolation/04-configuration.md)", err)
+	}
 	return nil
 }
 

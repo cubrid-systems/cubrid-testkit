@@ -612,6 +612,24 @@ echo ALL_${NOTEXIST}COMPLETED
 **"동결된 입력이지만 실행하지 않는 것"** 으로 분류한다. 안 그러면 나중에 왜 안 도는지가 미궁이 된다.
 ⚠️ `$JAVA_HOME` 은 **케이스가 사용**하므로 새 시스템이 Go 여도 원격에 계속 셋업해야 한다.
 
+> **Recorded deviation (2026-11-20):** a contained run on the local machine sends its scripts
+> without the `. ~/.bash_profile` prologue CTP put in front of each: every native isolation run, and
+> a shell run's host-side scripts (build check, requirement check, workspace preparation, case list,
+> configure, snapshot) when it is contained. Its slots never had the prologue. These variables therefore come from the environment
+> the run is started with. A slot's overlays sit on the caller's `$CUBRID` and `$CUBRID_DATABASES`;
+> with the prologue, a profile exporting another `CUBRID` replaced both, so the cases ran against
+> that install outside every overlay, or the shell runner configured and snapshotted that install's
+> conf while its slots ran the caller's, and either run reported the profile's build (measured
+> 2026-11-19, `docs/category/isolation/04-configuration.md`). Validate refuses a contained local run
+> whose environment does not name one install throughout (`contain.CheckInstallEnv`): `CUBRID` and
+> `CUBRID_DATABASES` set, the `cubrid` on `PATH` from `$CUBRID/bin`, `$CUBRID/lib` on `LD_LIBRARY_PATH`
+> with no other `libcubrid` ahead of it. It also refuses a contained shell run that names `env.*`
+> instances, whose host-side scripts would go over ssh behind that machine's profile. A run started from a login shell on the QA account CTP assumes
+> sees the values it saw before. A run started where no profile was read, such as an ssh exec or a
+> cron job, used to get them from the prologue and now has to export them. Remote machines keep the
+> prologue. Tests assert that a script does not see a profile's `CUBRID`, that a contained shell
+> run's local channels do not source the profile, and each refusal.
+
 ### 7-5. 케이스 결과 회수 채널
 
 케이스가 `<name>.result` 에 기록 → 워커가 `collectGeneralResult` 로 회수. stdout/stderr 는 워커가 capture. 워커가 `.answer` 와 `.result` 를 diff 또는 stdout 패턴 검사.

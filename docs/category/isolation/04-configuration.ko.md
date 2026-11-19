@@ -67,22 +67,33 @@ conf 는 CTP 의 평평한 `isolation.conf` 다: `key=value`, `#` 주석, `${VAR
 | `TESTKIT_SLOT_VOLATILE=1` | 슬롯 오버레이를 volatile 로 마운트한다: 그것에 대한 sync 가 즉시 돌아온다. 어차피 그 층들은 끝에 버려진다 |
 | `CUBRID`, `CUBRID_DATABASES`, `CTP_HOME`, `JAVA_HOME` | CTP 에서와 같다. `CUBRID_DATABASES` 는 `$CUBRID` 아래에 두라. 거기를 슬롯의 설치본 오버레이가 덮는다 |
 
-### 환경이 말없이 잘못되는 두 경우
+### 환경은 런을 시작한 환경 그대로다
 
-2026-09-28 측정. 둘 다 런 하나씩을 먹었다.
+**스크립트는 프로필을 읽지 않는다.** CTP 는 모든 스크립트를 `. ~/.bash_profile` 뒤에서 보냈지만 이 러너는 그러지 않는다
+([`run`](../../../internal/runner/isolationsuite/script.go)). export 한 `$CUBRID` 가 슬롯마다 오버레이하는 설치본이다.
+나머지 환경도 그 설치본을 가리켜야 케이스가 그 설치본으로 돈다. 그러니 위 표의 변수는 직접 export 한다. Validate 는 환경이
+처음부터 끝까지 한 설치본을 가리키지 않는 런을 거부한다. 조건은 `CUBRID` 와 `CUBRID_DATABASES` 가 있고, `PATH` 의
+`cubrid` 가 `$CUBRID/bin` 의 것이고, `LD_LIBRARY_PATH` 에 `$CUBRID/lib` 이 있고 그 앞에 다른 `libcubrid` 가 없는 것이다. 프로필을
+한 번 읽은 셸은 두 경로 모두에 그 설치본을 남기고, 로더는 실행 파일 자신의 검색 경로보다 `LD_LIBRARY_PATH` 를 먼저 본다.
 
-**프로필을 건너 살아남는 것은 `CTP_HOME` 뿐이다.** 모든 스크립트는 `. ~/.bash_profile` 뒤에서 돈다
-([`exec.Profile`](../../../internal/exec/exec.go)). 그것은 `CTP_HOME` 을 저장했다가 호출자의 값으로 되돌리는데,
-**오직 `CTP_HOME` 만** 그렇게 한다. 그래서 프로필이 `CUBRID` 를 export 하면 당신이 export 한 값이 지고,
-testkit 자신은 **자기가 받은** `$CUBRID` 를 오버레이한다. 둘이 다르면 슬롯은 한쪽 설치본을 들고 케이스는 다른 쪽에
-대고 돌며, 런은 이렇게 말한다.
+2026-11-20 전에는 스크립트가 CTP 처럼 프로필을 읽었고, 그 뒤에 되돌린 것은 `CTP_HOME` 하나였다. 그래서 프로필이 다른
+`CUBRID` 를 export 하면 모든 스크립트에서 그 값이 이겼다. 케이스는 모든 슬롯에서 오버레이 밖의 그 설치본으로 돌았고,
+런은 그 설치본의 빌드를 보고했다. 2026-11-19 에 `$HOME/CUBRID` 가 다른 빌드인 머신에서 잰 결과, 판정이 시험할 빌드를
+바꿔도 달라지지 않았고, 한 설치본을 함께 쓴 4 슬롯에서는 372 개 가운데 19 개가 이렇게 실패했다.
 
 ```
-ERROR! attempting to restart the database:
- <ctlpath>/qablocked ctldb did not connect
+Unable to restart/initialize the database server. Database "ctldb" is unknown, or the file ...
+++ cubrid server start: fail
+ERROR! attempting to restart the database: -677,
+ Failed to connect to database server, 'ctldb', on the following host(s): localhost
 ```
 
-데이터베이스 문제처럼 읽히지만 아니다. 프로필이 export 하는 `CUBRID` 를 그대로 export 하거나, 프로필을 고쳐라.
+데이터베이스 문제처럼 읽히지만 아니다. 같은 케이스는 1 슬롯에서 통과했다. 런은 그 설치본의 `databases.txt` 에
+`ctldb` 도 남겼다. 그 전 2026-09-28 에는 같은 원인이 `<ctlpath>/qablocked ctldb did not connect` 로 나왔다.
+
+### 환경이 말없이 잘못되는 한 경우
+
+2026-09-28 측정. 런 하나를 먹었다.
 
 **`ha_mode=on` 인 설치본으로는 isolation 을 돌릴 수 없다.** `prepare.sh` 가 `The server was configured for HA.` 를
 찍고 `ctldb` 는 끝내 올라오지 않는다 — 원인은 다른데 같은 `did not connect` 줄이 나온다. HA 를 돌려본 머신에는

@@ -58,12 +58,21 @@ func isolationScript(commands ...string) string {
 func generalScript(commands ...string) string { return assemble(general, commands) }
 func shellScript(commands ...string) string   { return assemble(general+shellInit, commands) }
 
-// run sends a script the way SSHConnect did, even to the local machine: behind
-// the profile and between two markers (ScriptInput.getCommands). Read what it
-// printed with output, not Result.Output. The exit status is the closing echo's,
-// so a script whose failure matters has to say so in what it prints.
+// run sends a script between the two markers SSHConnect put around it
+// (ScriptInput.getCommands). Read what it printed with output, not Result.Output.
+// The exit status is the closing echo's, so a script whose failure matters has to
+// say so in what it prints.
+//
+// It does not put exec.Profile in front, which SSHConnect did. This runner only
+// runs contained, and a slot's overlays sit on the caller's $CUBRID and
+// $CUBRID_DATABASES. A ~/.bash_profile that exports another CUBRID replaced
+// both in every script, so the cases ran against an install no slot overlays:
+// one install for every slot, written to directly, and the build the run
+// reported was that one. The scripts run in the caller's environment instead,
+// as the shell runner's do in its slots, whose channel never sources the
+// profile.
 func run(ctx context.Context, ch exec.Channel, script string) (exec.Result, error) {
-	return ch.Run(ctx, exec.Profile+"\necho "+startMock+"\n"+script+"echo "+compMock+"\n")
+	return ch.Run(ctx, "echo "+startMock+"\n"+script+"echo "+compMock+"\n")
 }
 
 // The markers are written so that the script's own text does not contain the
